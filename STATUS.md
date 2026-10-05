@@ -62,6 +62,13 @@ Danach (in dieser Reihenfolge):
 
 ## Gefixt (Session 2026-10-05, Gras-Puffer + HUD)
 
+- [x] **HUD-Text war SCHWARZ** (hud.frag seit Ausgangsstand: `c.rgb*
+  uTint.rgb` mit RGB=0-Font-Textur). Jetzt `vec4(uTint.rgb, c.a*uTint.a)`.
+  Darueber: Bounds-Check in build_text_verts verglich Vertex-Anzahl mit
+  Zeichen-Limit -> Zeile 1 brach nach 26 Zeichen ab (AA fehlte!).
+  Hintergrund-Quad jetzt vor dem Text (deckte ihn frueher ueber).
+- [x] **Slider hellgrau** (Track 0.75 grau/85% statt schwarz/50%) +
+  **Faden** verbindet die drei Regler-Positionen (2px weiss).
 - [x] **Puffer-Verwaltung: Diamond-Order** (grass_build_step): Zellen
   vom Zentrum (Kamera) nach aussen (L1-Ringe, 4*dr Zellen/Ring).
   Bei GRASS_CAP-Ueberlauf fehlen jetzt die WEAESTEN Zellen (frueher:
