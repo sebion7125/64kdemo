@@ -158,9 +158,17 @@ static void build_cell(int ix, int iz){
   if (dx * dx + dz * dz > half * half) return;
   float h4 = c_hash12(ix * 0.271f, iz * 0.711f);
   // --- Kopier-Entscheidung (vor der teuren Terrain-Berechnung) ---
+  // Halm-Daten sind eine reine Funktion von (ix,iz,b) (Hashes + Terrain,
+  // NICHT von der Kameradistanz) -> ueberlappende Halme kopieren statt
+  // regenerieren. Nur die ZUSATZ-Halme (b >= onb, nb > onb) sind neu und
+  // blenden ein (Birth-Time in grass_build_finish). So ist der Fade auch
+  // im sichtbaren Bereich da, nicht nur im Crescent am weiten Gras-Rand.
   // Nur bei Positions-Rebuilds; bei Slider-Change (gForceFull) wird alles
   // neu generiert (Dichte/Sichtweite betrifft jede Zelle).
   int oldIdx = -1;
+  int bStart = 0;   // erster zu generierender b-Index (0 = volle Generierung)
+  int copied = 0;   // kopierte Halme dieser Zelle (fuer buildOff/buildCnt)
+  int partial = 0;  // Teil-Kopie: Zelle bestockt, nur Teil neu generiert
   if (hasOldBuild && !gForceFull) {
     int ox = ix - oldOffX0, oz = iz - oldOffZ0;
     if (ox >= 0 && ox < CT && oz >= 0 && oz < CT) {
@@ -176,8 +184,7 @@ static void build_cell(int ix, int iz){
       if (nbf > 32.0f) nbf = 32.0f;
       int nb = (int)nbf;
       if (c_hash12(ix * 0.917f, iz * 0.311f) < nbf - (float)nb) nb++;   // stochastisch
-      // altes nb mit den aktuellen Parametern (altes Zentrum): gleich =
-      // Halm-Menge unveraendert -> kopieren
+      // altes nb mit den aktuellen Parametern (altes Zentrum)
       float odx = x - old_bcx, odz = z - old_bcz;
       float odist = sqrtf(odx * odx + odz * odz);
       float odens = dens_at(odist);
@@ -185,16 +192,32 @@ static void build_cell(int ix, int iz){
       if (onbf > 32.0f) onbf = 32.0f;
       int onb = (int)onbf;
       if (c_hash12(ix * 0.917f, iz * 0.311f) < onbf - (float)onb) onb++;   // stochastisch
-      if (onb == nb) {
+      int nCopy = nb < onb ? nb : onb;   // ueberlappende Halme (b-Index)
+      if (nCopy > 0) {
         int cnt = cellCnt[oldIdx];
+        if (cnt > nCopy) cnt = nCopy;
         if (nGrassNew + cnt > GRASS_CAP) cnt = GRASS_CAP - nGrassNew;
-        const float *src = &grassInst[cellOff[oldIdx] * GRASS_FLOATS];
-        float *dst = &buildBuf[nGrassNew * GRASS_FLOATS];
-        for (int i = 0; i < cnt * GRASS_FLOATS; i++) dst[i] = src[i];
-        nGrassNew += cnt;
-        buildOff[izl * CT + ixl] = nGrassNew - cnt;
-        buildCnt[izl * CT + ixl] = (uint8_t)cnt;
-        return;
+        if (cnt > 0) {
+          const float *src = &grassInst[cellOff[oldIdx] * GRASS_FLOATS];
+          float *dst = &buildBuf[nGrassNew * GRASS_FLOATS];
+          for (int i = 0; i < cnt * GRASS_FLOATS; i++) dst[i] = src[i];
+          nGrassNew += cnt;
+        }
+        copied = cnt;
+        if (nb > onb && nGrassNew + (nb - onb) <= GRASS_CAP) {
+          bStart = onb;   // nb > onb: nur die letzten Halme sind neu
+          partial = 1;
+        } else {
+          // nb == onb (nur kopieren) oder nb < onb (Ueberschuss verschwindet)
+          // oder CAP: kein Platz fuer die neuen Halme mehr
+          if (copied > 0) {
+            buildOff[izl * CT + ixl] = nGrassNew - copied;
+            buildCnt[izl * CT + ixl] = (uint8_t)copied;
+          }
+          return;
+        }
+      } else {
+        return;   // nb == 0: Zelle hat keine Halme mehr
       }
     }
   }
@@ -213,7 +236,7 @@ static void build_cell(int ix, int iz){
   //   - Pow 1.6: nimmt in der Ferne starker ab (nah bleibt dicht)
   //   - Kein Hard-Cutoff bei 0.05, sondern weicher Abbruch bei 0.01
   float dens = dens_at(dist);
-  if(dens < 0.09f) return;
+  if(dens < 0.09f && !partial) return;   // Teil-Kopie: Zelle ist bestockt
   float h = c_terrainH(px, pz);
   if(h < WATER_Y + 0.10f || h > 7.5f) return;  // kein Wasser, keine Gipfel
   if(fabsf(c_terrainH(px + 0.4f, pz) - h) > 0.25f ||
@@ -251,7 +274,7 @@ static void build_cell(int ix, int iz){
       }
   }
   int start = nGrassNew;
-  for(int b = 0; b < nb; b++){
+  for(int b = bStart; b < nb; b++){
     if(nGrassNew >= GRASS_CAP) return;
     float b1 = c_hash12(ix * 1.13f + b, iz * 1.71f + b);
     float b2 = c_hash12(ix * 1.71f + b, iz * 1.13f + b);
@@ -289,9 +312,9 @@ static void build_cell(int ix, int iz){
     d[9] = 0.0f;
     nGrassNew++;
   }
-  int cnt = nGrassNew - start;
+  int cnt = nGrassNew - start + copied;
   if (cnt > 0) {
-    buildOff[izl * CT + ixl] = start;
+    buildOff[izl * CT + ixl] = nGrassNew - cnt;
     buildCnt[izl * CT + ixl] = (uint8_t)cnt;
   }
 }
@@ -325,26 +348,17 @@ int grass_build_step(int maxCells){
 void grass_build_finish(void){
   // Birth-Time setzen (erst beim Swap, nicht waehrend des Builds):
   //  - kopierte Halme (d[9] != 0): alte Birth-Time behalten (Fade laeuft weiter)
-  //  - generierte Halme (d[9] == 0): im alten Dichte-Bereich "alt" (sofort
-  //    sichtbar, birth = -10s), außerhalb "neu" (blenden ein, birth = jetzt).
-  // "Im alten Dichte-Bereich" = odist <= Dichte-Cutoff (quadratischer
-  // Vergleich, kein sqrt/pow). Der alte Build-Radius taugt nicht: dort gibt
-  // es gar keine Halme (dens < 0.01) -> der Radius-Check hatte bei normalen
-  // Kamerabewegungen keinen einzigen Halm als "neu" erkannt (Fade tot).
-  float dCut = g_half();
-  float dCut2 = dCut * dCut;
+  //  - generierte Halme (d[9] == 0): NEU -> blenden ueber 2s ein.
+  //    Das sind: der Crescent am Gras-Rand (neue Zellen) + die Zusatz-
+  //    halme in Zellen, deren nb durch die Kamerabewegung gestiegen ist
+  //    (Teil-Kopie in build_cell). Alle neu generierten Halme blenden ein
+  //    (auch beim ersten Build: das Grasfeld blendet beim Start ein).
   int nNew = 0;
   for (int i = 0; i < nGrassNew; i++) {
     float *d = &buildBuf[i * GRASS_FLOATS];
     if (d[9] != 0.0f) continue;   // kopierter Halm: Birth-Time erhalten
-    float bx = d[0], bz = d[2];
-    if (hasOldBuild) {
-      float odx = bx - old_bcx, odz = bz - old_bcz;
-      d[9] = (odx * odx + odz * odz <= dCut2) ? (gWorldTime - 10.0f) : gWorldTime;
-      if (d[9] >= gWorldTime) nNew++;
-    } else {
-      d[9] = gWorldTime - 10.0f;   // erster Build: sofort sichtbar
-    }
+    d[9] = gWorldTime;
+    nNew++;
   }
   if (nNew > 0)
     printf("Gras-Swap: %d Halme, %d neu (blenden 2s ein)\n", nGrassNew, nNew);

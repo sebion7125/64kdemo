@@ -1,54 +1,15 @@
 # 64kDemo — Status
 
-Stand: 2026-10-05, nach Feedback-Runde. **Nutzer: die letzten zwei Fixes
-(skalierende Slider, Gras-Fade-in) sind NICHT behoben.**
+Stand: 2026-10-05, Runde 3. **Beide Bugs (skalierende Slider, Gras-Fade-in)
+sind jetzt WIRKLICH behoben** — Wurzelursachen gefunden (siehe Runde 3).
+Nutzer-Feedback ausstehend (Host-Test).
 
-## ⚡ SOFORT NÄCHSTER SCHRITT (frischer Kontext)
+## ⚡ SOFORT NÄCHSTER SCHRITT
 
-**Zwei offene Bugs — Nutzer hat beides als nicht behoben gemeldet:**
-
-### Bug 1: Maximiertes Fenster → Schriften überlappen
-- Nutzer-Beschreibung: "wenn ich das fenster maximiere, überlappen die
-  schriften, weil sie mit der fenstergröße größer werden, während die
-  slider pixelgenau gleich hoch bleiben."
-- **Versuchter Fix (nicht ausreichend):** Slider-Geometrie (Breite/Höhe,
-  y-Abstände, Regler, Hit-Test, Label-Positionen) mit `hud_scale` skaliert
-  (draw_sliders + HUD-Block + ButtonPress/MotionNotify in main.c).
-  VM-Pixel-Scan bei 781 px Höhe sah korrekt aus — aber der Nutzer sieht
-  beim Maximieren weiterhin Überlappung.
-- **Offene Fragen für die Untersuchung:**
-  - Welches Fenster hat der Nutzer genau? (Host, vermutlich 1440p/2160p →
-    hsc = 2..3. In der VM wurde nur bis hsc ~1.1 getestet!)
-  - Welche Schriften überlappen? (Statuszeilen untereinander? Labels mit
-    Tracks? Statuszeile mit Hintergrund-Quad?) — beim Nutzer nachfragen
-    oder Screenshot vom Host holen.
-  - Verdacht: VM-WM resize-t Fenster (1920x1080 → 1705x781), VM-Tests
-    sind unzuverlässig für dieses Problem.
-
-### Bug 2: Gras-Halme werden nicht eingeblendet (Fade-in)
-- Nutzer-Beschreibung: "Die Grashalme werden wieder nicht mehr
-  eingeblendet."
-- **Versuchter Fix (nicht ausreichend):** Build-Kante (g_half) von
-  dens>=0.01 auf dens>=0.09 + stochastisches Runden von nb. Unit-Test
-  zeigt jetzt ~1300-1500 neue Halme pro 1m-Shift (Birth-Time korrekt
-  gesetzt, "Gras-Swap: ... neu (blenden 2s ein)" im Log).
-- **Offene Fragen für die Untersuchung:**
-  - Die neuen Halme liegen NUR im 1m-Crescent am WEITEN Gras-Rand
-    (~77m, dort 1-2 px gross) — ist der Fade dort überhaupt sichtbar?
-    Nutzer erwartet den Fade vermutlich im sichtbaren Bereich.
-  - Shader-Pfad prüfen: grass.vert `age = uTime - iBirth; fade =
-    clamp(age/2,0,1)` → vFade → grass.frag Alpha. Ist attr4 (iBirth,
-    offset 36) korrekt gebunden? Wird d[9] beim VBO-Upload mitgeliefert?
-  - Wechselspiel mit dem weit->nah-Chunk-Rendering (32 Chunks,
-    glDrawArraysInstancedBaseInstance) + Depth-Mask? (Halme schreiben
-    Tiefe bei Alpha<1 — Reihenfolge/Blend kann den Fade maskieren.)
-  - G=Gras-Freeze testet: friert der Fade? (Grosser Hinweis auf den
-    uTime-Pfad.)
-
-**Wichtig:** Nutzer testet auf dem HOST (NVIDIA), nicht in der VM.
-VM-Pixel-Scans sind für visuelle Fragen nur grobe Anhaltspunkte
-(WM-Resize, llvmpipe-Bugs). Bei visuellen Bugs: lieber nachfragen/
-Screenshot vom Host holen als am VM-Scan festzuhalten.
+Nutzer-Feedback auf die beiden Fixes sammeln (Host-Test):
+1. Slider+Labels: Überlappen beim Maximieren weg? (1440p/2160p)
+2. Gras-Fade-in: sichtbar bei Kamerabewegung? (Feld "wächst" jetzt mit,
+   nicht nur das 1m-Crescent am weiten Rand; Fade-Zeit 2s)
 
 Danach (in dieser Reihenfolge):
 1. Nutzer-Feedback auf Dichte/Farben/Weite sammeln und abstimmen
@@ -57,6 +18,72 @@ Danach (in dieser Reihenfolge):
 3. Binary-Budget (< 65,536 B) — liegt bei 68,136, Plan steht (Linker-
    Script /tmp/64k.ld bringt 66,864; .plt.sec discarden + Rest kürzen)
 4. Optional: Schritt 7 (Baum-Schatten, docs/grasplan.md)
+
+## Session 2026-10-05, Runde 3 (Wurzelursachen: Slider-Skalierung + Gras-Fade)
+
+### Bug 1 FIXED: Slider skalieren jetzt mit hud_scale (WURZEL: Fix war nie drin)
+- **Wurzelursache:** Commit 4cbe65a "Slider+Labels skalieren mit
+  Fensterhoehe" behauptete in der Message die Skalierung — der Diff enthielt
+  ABER nur den Screenshot-Crash-Fix! `slW=300.0f, slH=18.0f`, `y0=h-44/72/100`,
+  Label-Positionen und Hit-Test waren nie skaliert (git-Archiv geprüft: in
+  KEINEM Commit). Deshalb "nicht behoben": Es war nie drin.
+- **Fix (jetzt drin):** draw_sliders (slW/slH/y0/Regler-Breite ×hsc),
+  Label-Positionen (150*hsc, slY×hsc, +1*hsc), ButtonPress-Hit-Test
+  (sx0, Breite, y-Offsets ×hsc), MotionNotify (/300*hsc).
+- **Verifiziert (VM, 1705x781, hsc=1.085):** Pixel-Messung: Tracks bei
+  y=733..752/702..722/672..692, x=689..1015 (exakt wie Formel), Labels
+  rechtsbuerig 12px links der Track-Kante, vertikal zentriert. Klick auf
+  Track1 (800,743) triggert Voll-Rebuild (Log: 1.5M neu = CAP bei ~2.9x
+  Dichte, passt zu pos=(800-689)/316). Layout ist bei JEDEM hsc eine
+  uniforme Skalierung des 720p-Layouts -> keine Ueberlappung.
+- Hinweis: VM-WM resize-t 1920x1080 -> 1705x781, daher max. hsc~1.085 in
+  der VM testbar; auf dem Host (hsc 2..3) gilt dieselbe relative Geometrie.
+
+### Bug 2 FIXED: Gras-Fade-in ist jetzt im sichtbaren Bereich da
+- **Analyse (Gras-nur-Modus, Magenta-Hintergrund, G-Kanal = Alpha):**
+  Mechanik war VOLLSTAENDIG korrekt (CPU-Birth-Times, VBO-Upload inkl.
+  d[9], attr4@36, uTime/iBirth gleiche Zeitbasis CLOCK_MONOTONIC, Blend,
+  weit->nah-Chunks). Kanten-Crescent fadete sauber: 0 -> 534 -> 631 px
+  ueber 2s. **Problem war der UMFANG:** Nur das 1m-Crescent am weiten
+  Gras-Rand (~67m bei MD=80, dCut per Bisektion auf dens=0.09) fadete ein.
+  Alle anderen neuen Halme — Zellen, deren nb sich bei Kamerabewegung um
+  ±1 aendert (23% der Zellen pro 1m, Simulation /tmp/nb_change.c) — wurden
+  vollst.aendig regeneriert mit birth=now-10 = SOFORT sichtbar. Deshalb
+  "erscheint ploetzlich".
+- **Fix:** build_cell: TEIL-KOPIE. Halm-Daten sind reine Funktion von
+  (ix,iz,b) (Hashes+Terrain, keine Kameradistanz) -> ueberlappende Halme
+  (min(onb,nb)) kopieren (Birth-Time bleibt, Fade laeuft weiter), nur die
+  Zusatz-Halme (b=onb..nb-1) neu generieren. grass_build_finish: alle
+  generierten Halme (d[9]==0) blenden ein (d[9]=gWorldTime) — Crescent,
+  nb-Steigerungen, Slider-Change (alles neu) und Start (Feld blendet beim
+  Start ein). Der dCut-Test in finish ist damit ueberfluessig.
+- **Verifiziert:** Unit-Test: 1m-Shift ~11-17k neue Halme (vorher ~1.9k),
+  12m-Shift 129k. VM-Fahrt (20m, 10 Swaps): je 12-16k neu, Alpha-Messung
+  (Gras-nur-Modus) steigt monoton ueber die 2s-Fade. PERFORMANCE: Teil-
+  kopieren ist billiger als Regenerieren — 1m-Shift 134-280ms (alt: 298-
+  479ms), 12m-Shift 320ms (alt: 1884ms).
+- Verbleibend: Halme, deren nb ABNAHMT, verschwinden sofort (kein Fade-
+  out; wuerde Death-Time d[10] brauchen) — hinten am Rand, meist aus dem
+  Blickfeld. Falls der Nutzer es merkt: nachtraegen.
+
+### Test-Infrastruktur (VM, /tmp)
+- xhold2.c: Taste via XSendEvent halten (X11/Xtst per dlopen). WICHTIG:
+  XSendEvent flaechst das Request-Buffer NICHT -> XFlush() nach dem
+  KeyPress, sonst kommt KeyPress+KeyRelease zusammen an (das war der
+  Grund, warum xdotool keydown in der VM nur ~1s „hielt").
+- xdotool keydown --window WIN k sendet in dieser Version EIGENSTAENDIG
+  KeyPress+KeyRelease (~1s auseinander) — fuer Halten xhold2 verwenden.
+- X-Autorepeat staerkt's noch: xset r off bei Key-Hold-Tests.
+- VM laeuft ~2-3 FPS (llvmpipe), dt-Clamp 0.1s -> Kamera max. 1.3m/Frame.
+- Test-Skripte: /tmp/fade_test.sh, /tmp/fade_iso*.sh, /tmp/fade_vis.sh,
+  /tmp/fade_alpha*.sh, /tmp/fade_start*.sh, /tmp/keytest.sh, /tmp/slider*.sh
+- Numerik: /tmp/fade_calc.c (dCut/Crescent/Pixelgroessen), /tmp/nb_change.c
+  (nb-Veränderungen pro 1m-Shift).
+
+**Wichtig:** Nutzer testet auf dem HOST (NVIDIA), nicht in der VM.
+VM-Pixel-Scans sind für visuelle Fragen nur grobe Anhaltspunkte
+(WM-Resize, llvmpipe-Bugs). Bei visuellen Bugs: lieber nachfragen/
+Screenshot vom Host holen als am VM-Scan festzuhalten.
 
 ### Auslieferung (wichtig, schonmal verwechselt!)
 
@@ -139,17 +166,19 @@ Danach (in dieser Reihenfolge):
 
 ## Session 2026-10-05, Runde 2 (Skalierung, Crash, Fade-in)
 
-- [ ] **Slider+Labels skalieren mit hud_scale** — Code ist drin
-  (draw_sliders, Labels, Hit-Test), VM-Scan ok, **aber Nutzer: nicht
-  behoben** (s. oben, Bug 1).
+- [x] **Slider+Labels skalieren mit hud_scale** — Runde 2: Commit-Message
+  behauptete den Fix, Diff enthielt ihn NICHT (nur Screenshot-Fix). Runde 3:
+  WIRKLICH drin (draw_sliders, Labels, Hit-Test, MotionNotify) + verifiziert
+  (Pixel-Messung + Klick-Test). S. Runde 3, Bug 1.
 - [x] **Screenshot-Crash (>1600px breit, VM)**: Mesa llvmpipe 26.0.8
   glReadPixels(GL_BACK, GL_RGB) schreibt (w mod 4)*(h-1) EXTRA Bytes
   ueber das Buffer-Ende (Heap-Overflow, 'malloc(): invalid size').
   Mindest-Test /tmp/readpix_test.c reproduziert es ohne die Demo.
   Fix: GL_RGBA + Alpha entfernen. (Nutzer-Feedback dazu: noch offen.)
-- [ ] **Gras-Fade-in** — Build-Kante dens>=0.09 + stochastisches Runden,
-  Unit-Test zeigt neue Halme, **aber Nutzer: nicht behoben** (s. oben,
-  Bug 2).
+- [x] **Gras-Fade-in** — Runde 2: nur das 1m-Crescent am weiten Rand
+  fadete (deshalb "ploetzlich"). Runde 3: Teil-Kopie in build_cell, alle
+  generierten Halme blenden ein (11-17k/1m statt ~1.9k), schneller Rebuild.
+  S. Runde 3, Bug 2.
 
 ## Gefixt (Session 2026-10-05, Gras-Puffer + HUD)
 

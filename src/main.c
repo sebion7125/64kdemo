@@ -646,10 +646,11 @@ static void set_slider(int which, float pos){
 // sein. Hintergrund- und Regler-Quads werden je in EINEM Draw gezeichnet
 // (gleiche Tints), der Fuellstand pro Farbe (3 Draws).
 static void draw_sliders(float posD, float posH, float posM, int w, int h, int locTint){
-  const float slW = 300.0f, slH = 18.0f;
+  const float hsc = hud_scale(h);
+  const float slW = 300.0f * hsc, slH = 18.0f * hsc;
   const float x0 = w/2.0f - slW/2.0f, x1 = w/2.0f + slW/2.0f;
   float buv[2] = { (ATLAS_W - 0.5f) / ATLAS_W, (ATLAS_H - 0.5f) / ATLAS_H };
-  float y0[3] = { h - 44.0f, h - 72.0f, h - 100.0f };
+  float y0[3] = { h - 44.0f * hsc, h - 72.0f * hsc, h - 100.0f * hsc };
   float pos[3] = { posD, posH, posM };
   float fill[3][3] = { {0.3f,0.8f,0.3f}, {0.5f,0.8f,0.3f}, {0.3f,0.6f,0.8f} };
   float bg[48], hd[48];
@@ -660,10 +661,10 @@ static void draw_sliders(float posD, float posH, float posM, int w, int h, int l
     bg[i*16+4]=x1/w*2-1;   bg[i*16+5]=1-y0[i]/h*2; bg[i*16+6]=buv[0]; bg[i*16+7]=buv[1];
     bg[i*16+8]=x0/w*2-1;   bg[i*16+9]=1-y1/h*2;   bg[i*16+10]=buv[0]; bg[i*16+11]=buv[1];
     bg[i*16+12]=x1/w*2-1;  bg[i*16+13]=1-y1/h*2;  bg[i*16+14]=buv[0]; bg[i*16+15]=buv[1];
-    hd[i*16+0]=(hx-2)/w*2-1; hd[i*16+1]=1-y0[i]/h*2; hd[i*16+2]=buv[0]; hd[i*16+3]=buv[1];
-    hd[i*16+4]=(hx+2)/w*2-1; hd[i*16+5]=1-y0[i]/h*2; hd[i*16+6]=buv[0]; hd[i*16+7]=buv[1];
-    hd[i*16+8]=(hx-2)/w*2-1; hd[i*16+9]=1-y1/h*2;   hd[i*16+10]=buv[0]; hd[i*16+11]=buv[1];
-    hd[i*16+12]=(hx+2)/w*2-1;hd[i*16+13]=1-y1/h*2;  hd[i*16+14]=buv[0]; hd[i*16+15]=buv[1];
+    hd[i*16+0]=(hx-2*hsc)/w*2-1; hd[i*16+1]=1-y0[i]/h*2; hd[i*16+2]=buv[0]; hd[i*16+3]=buv[1];
+    hd[i*16+4]=(hx+2*hsc)/w*2-1; hd[i*16+5]=1-y0[i]/h*2; hd[i*16+6]=buv[0]; hd[i*16+7]=buv[1];
+    hd[i*16+8]=(hx-2*hsc)/w*2-1; hd[i*16+9]=1-y1/h*2;   hd[i*16+10]=buv[0]; hd[i*16+11]=buv[1];
+    hd[i*16+12]=(hx+2*hsc)/w*2-1;hd[i*16+13]=1-y1/h*2;  hd[i*16+14]=buv[0]; hd[i*16+15]=buv[1];
   }
   // Tracks und Regler: JE Quad als eigener 4-Vertex-Strip. (Ein gemeinsamer
   // 12-Vertex-Strip wuerde die Quads mit Verbindungsdreiecken verbinden:
@@ -949,14 +950,16 @@ int main(int argc, char **argv) {
         case ButtonPress:
           if (e.xbutton.button == 1) {
             mouseHeld = 1;
-            // Slider-Treffer? (unten Mitte, 300px breit; y-Offsets tabellarisch)
-            int sx0 = winW/2 - 150;
-            static const int slY[3][2] = { {-52,-30}, {-80,-58}, {-108,-86} };
+            // Slider-Treffer? (unten Mitte, 300*hsc breit; y-Offsets tabellarisch)
+            float hsc = hud_scale(winH);
+            float sw = 300.0f * hsc;
+            int sx0 = winW/2 - (int)(sw / 2.0f);
+            static const float slY[3][2] = { {-52,-30}, {-80,-58}, {-108,-86} };
             for (int i = 0; i < 3; i++)
-              if (e.xbutton.x >= sx0 && e.xbutton.x <= sx0 + 300 &&
-                  e.xbutton.y >= winH + slY[i][0] && e.xbutton.y <= winH + slY[i][1]) {
+              if (e.xbutton.x >= sx0 && e.xbutton.x <= sx0 + sw &&
+                  e.xbutton.y >= winH + slY[i][0] * hsc && e.xbutton.y <= winH + slY[i][1] * hsc) {
                 sliderDragging = i + 1;
-                set_slider(i + 1, (e.xbutton.x - sx0) / 300.0f);
+                set_slider(i + 1, (e.xbutton.x - sx0) / sw);
                 break;
               }
           }
@@ -968,7 +971,9 @@ int main(int argc, char **argv) {
           break;
         case MotionNotify:
           if (sliderDragging)
-            set_slider(sliderDragging, (e.xmotion.x - (winW/2 - 150)) / 300.0f);
+            set_slider(sliderDragging,
+                       (e.xmotion.x - (winW/2 - (int)(150.0f * hud_scale(winH))))
+                       / (300.0f * hud_scale(winH)));
           if (!flyMode && mouseHeld && !sliderDragging) {
             camYaw += (e.xmotion.x - lastMX) * 0.005f;
             camPitch += (e.xmotion.y - lastMY) * 0.005f;
@@ -1290,10 +1295,10 @@ int main(int argc, char **argv) {
         }
       }
       const char *lbl[3] = { "Sichtweite", "Hohe", "Dichte" };
-      float slY[3] = { winH - 100.0f, winH - 72.0f, winH - 44.0f };
+      float slY[3] = { winH - 100.0f * hsc, winH - 72.0f * hsc, winH - 44.0f * hsc };
       for (int i = 0; i < 3; i++)
         n += build_text_verts(hudVerts + n * 4, lbl[i], winW, winH,
-                              winW / 2.0f - 150.0f - (float)strlen(lbl[i]) * cs - 8.0f * hsc, slY[i] + 1.0f);
+                              winW / 2.0f - 150.0f * hsc - (float)strlen(lbl[i]) * cs - 8.0f * hsc, slY[i] + 1.0f * hsc);
       p_glBufferData(GL_ARRAY_BUFFER, n * 4 * sizeof(float), hudVerts, GL_DYNAMIC_DRAW);
       p_glUniform4f(locTint, 1.0f, 1.0f, 1.0f, 1.0f);
       p_glDrawArrays(GL_TRIANGLES, 0, n);
