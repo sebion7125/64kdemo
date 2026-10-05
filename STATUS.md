@@ -3,14 +3,14 @@
 Stand: 2026-10-05, Runde 5 (Chat-Wechsel). **Gras-Fade-out: VAO-Fix +
 Kanten-Pop-Fix committet und vom Nutzer bestätigt** (Slider ✓, Pop ✓ weg).
 **NEU: 3 Gras-Issues vom Nutzer-Host-Test gemeldet.** Issue B (nach ~77m
-kein neues Gras mehr) ist **FIXED + VM-verifiziert**. Offen: Issue A
-(Längensprung in der Ferne) + Issue C (Gras-Inseln abweichend vom
+kein neues Gras mehr) ist **FIXED und vom Nutzer bestätigt**. Offen:
+Issue A (Längensprung in der Ferne) + Issue C (Gras-Inseln abweichend vom
 Terrain). Details + Hypothesen + Testpläne unten in „ISSUES“.
 
 ## ⚡ SOFORT NÄCHSTER SCHRITT (nächster Chat)
 
-**Issue B (kein neues Gras nach ~77m) ist FIXED + VM-verifiziert**
-(zentriertes Walk-Quadrat beim CT-Clamp). Nutzer-Host-Test noch offen.
+**Issue B (kein neues Gras nach ~77m) ist FIXED, VM-verifiziert und vom
+Nutzer auf dem Host bestätigt.**
 **Offen: Issue A (Längensprung in der Ferne) + Issue C (Gras-Inseln).**
 
 Reihenfolge:
@@ -44,7 +44,7 @@ Baum-Schatten.
   eine feste Bildschirmposition vor/nach dem Swap (neues Debug: Taste?
   oder in grass_debug_dump integrieren).
 
-### Issue B: Nach einer Strecke wird kein neues Gras mehr generiert, Halmzahl fällt nur — **FIXED**
+### Issue B: Nach einer Strecke wird kein neues Gras mehr generiert, Halmzahl fällt nur — **FIXED + vom Nutzer bestätigt**
 - **Beobachtung (Nutzer):** nach Zurücklegen einer Strecke ein Modus,
   in dem plötzlich gar kein neues Gras mehr generiert wird und die
   Halmzahl nur noch fällt.
@@ -66,6 +66,7 @@ Baum-Schatten.
 - **Verifiziert (VM, 75s beide Richtungen):** dcx0=dcz0=350 (zentriert),
   +x/+z: 700k Halme, ~25k neu/Build (vorher: 52, 0 neu); -x/-z: 960k,
   ~16k neu. Pop-Unit-Test: 0 Pops. Build-Intervall ohne Regression.
+- **Nutzer-Host-Test: BESTÄTIGT (2026-10-05)** — "B ist behoben".
 
 ### Issue C: Inseln, wo das Gras einer „abweichenden Insel“ folgt
 - **Beobachtung (Nutzer):** Inseln, wo die Gras-Geometrie nicht der
