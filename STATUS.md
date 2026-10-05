@@ -1,12 +1,42 @@
 # 64kDemo — Status
 
-Stand: 2026-10-05, Runde 5. **Gras-Fade-out WIRKLICH gefixt** (Wurzel:
-fehrendes glEnableVertexAttribArray(5) in der VAO).
+Stand: 2026-10-05, Runde 5 (Chat-Wechsel). **Gras-Fade-out: VAO-Fix +
+Kanten-Pop-Fix committet und vom Nutzer bestätigt.** Offener Punkt:
+Fade-out beim Rückwärtsfahren ist dem Nutzer visuell noch nicht sichtbar.
 
-## ⚡ SOFORT NÄCHSTER SCHRITT
+## ⚡ SOFORT NÄCHSTER SCHRITT (nächster Chat)
 
-Nutzer-Host-Test: Raeckwaertsfahrt — fadet die Gras-Kante jetzt sanft aus
-(kein Pop mehr)? Danach:
+**Offen: Fade-out beim Rückwärtsfahren „sieht man nicht“** (Nutzer-Test:
+Slider-Change ✓ wie geplant, plötzliches Verschwinden ✓ weg, aber der
+Fade selbst ist beim Rückwärtsfahren nicht sichtbar).
+
+Nutzer-Hypothese: die fadenden Halme seien an der Grenze per Shader (LOD)
+schon gekürzt/unsichtbar. Meiner Analyse nach (NOCH unbestätigt, prüfen!):
+- Bei MD=80 beginnt der LOD-Fade bei 68m, das Gras endet aber bei dCut
+  ≈ 66,7m → der LOD-Fade trifft bei MD=80 KEINEN Halm (Edge-Halme haben
+  volle Höhe). `lod` skaliert nur Höhe (p.y) + Wind, NICHT Alpha
+  (vCol.z = lod wird in grass.frag nicht benutzt).
+- Frage an Nutzer: mit welchem MD-Wert getestet? (Bei MD=40: dCut=34,1,
+  LOD-Zone [28,40] → Edge-Halme SIND gekürzt.)
+- Kandidaten für „nicht sichtbar“:
+  a) Fade (2s) vs. Fahrt (13 m/s → 26m in 2s): Halme werden schneller
+     hinter sich her gelassen, als sie ausblenden → nur dünner werdendes
+     Feld, kein wahrnehmbares Einzel-Ausblenden.
+  b) Nur ~1,3% der Halme sterben pro 1m-Schritt (~11k/850k) — verteilt
+     über das ganze Feld, kein lokaler Effekt.
+  c) Rest-Render-Bug im POS-Pfad (wenig likely: Shader-Pfad identisch
+     zum Slider-OUT, der sichtbar fadet).
+- **Erster Test für nächsten Chat (sauber, ohne Build-Konfundenzen):**
+  Rückwärtsfahren, dann Taste G (Gras-Frost: keine Builds mehr, Shader-
+  Fade läuft weiter), Screenshot-Serie 0–4s → sumG muss monoton über ~2s
+  sinken. Gemessen (noch mit Builds, /tmp/fade_vis2.sh): B..F =
+  5.833/5.856/5.867/5.817/5.844M — Rauschen dominiert, Signal ~2% nicht
+  sauber trennbar. Buffer-Seite ist korrekt (b-Dump: 13119→0 über 2,3s).
+- Falls gemessen OK aber Nutzer sieht nichts: Abstimmung — Death-Fade
+  länger (2s → 3–4s)? Edge-Fade langsamer? Oder Wahrnehmungsfrage
+  (langsame Fahrt zum Testen empfehlen, z.B. 3–5 m/s ohne Shift).
+
+Danach:
 1. Nutzer-Feedback auf Dichte/Farben/Weite sammeln und abstimmen
 2. Entfernungssortierung verifizieren (genügt die Chunk-Methode oder
    braucht es pro-Frame-Sortierung?)
@@ -14,7 +44,13 @@ Nutzer-Host-Test: Raeckwaertsfahrt — fadet die Gras-Kante jetzt sanft aus
    Script /tmp/64k.ld bringt 66,864; .plt.sec discarden + Rest kürzen)
 4. Optional: Schritt 7 (Baum-Schatten, docs/grasplan.md)
 
-## Session 2026-10-05, Runde 5 (Gras-Fade-out: Wurzel = VAO-Attribut 5)
+## Session 2026-10-05, Runde 5 (Gras-Fade-out: VAO-Fix + Kanten-Pop-Fix)
+
+### BESTÄTIGT (Nutzer-Host): Slider-Change wie geplant, Pop weg
+- Slider-Change: 1s Debounce → 2s Fade-out → 2s Fade-in ✓
+- Rückwärtsfahrt: plötzliches Verschwinden an der Gras-Kante weg ✓
+- NEU offen: der Fade-out selbst ist beim Rückwärtsfahren nicht sichtbar
+  (siehe „SOFORT NÄCHSTER SCHRITT“ oben).
 
 ### FIXED: Gras-Fade-out Teil 2 — Kanten-Pop bei Raeckwaertsfahrt
 - **Symptom:** Nach dem VAO-Fix (unten) fadete der Slider-Change wie geplant,
@@ -71,6 +107,10 @@ Nutzer-Host-Test: Raeckwaertsfahrt — fadet die Gras-Kante jetzt sanft aus
 ### Test-Infrastruktur (ergänzt, /tmp)
 - /tmp/test_edge_pop.c: Pop-Zaehler (alte vs. neue Buffer ueber Position,
   1m- und 2m-Schritte) — der Test, der den Kanten-Pog gefunden hat.
+- /tmp/test_edge_pop_turbo.c: dito mit 2m-Spruengen (Turbo-ähnlich).
+- /tmp/fade_vis2.sh: Raeckwaertsfahrt + Stopp + Screenshot-Serie
+  (Fade-OUT-Visibilitaet, Gras-nur-Modus, G-Kanal = Alpha-Proxy).
+- /tmp/fadeout_diag.sh: Raeckwaertsfahrt mit b-Dumps (Buffer-Fade messen).
 - /tmp/fade_verify.sh: Slider-Test mit Screenshot-Serie (neues Binary).
 - /tmp/fade_verify_old.sh + /tmp/64kdemo_old: identischer Test mit altem
   Binary (Vorher/Nachher-Vergleich).
