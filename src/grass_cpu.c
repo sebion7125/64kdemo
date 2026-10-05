@@ -269,7 +269,7 @@ static void build_cell(int ix, int iz){
       if (nGrassNew >= GRASS_CAP) break;
       float *dst = &buildBuf[nGrassNew * GRASS_FLOATS];
       for (int k = 0; k < GRASS_FLOATS; k++) dst[k] = src[k];
-      if (nowDying) dst[10] = gWorldTime;
+      if (nowDying) dst[10] = -1.0f;   // Platzhalter: Death-Time erst beim Finish (Swap-Punkt)
       nGrassNew++;
       copied++;
     }
@@ -431,7 +431,7 @@ static int out_build_step(int maxCells){
       if (nGrassNew >= GRASS_CAP) break;
       float *dst = &buildBuf[nGrassNew * GRASS_FLOATS];
       for (int k = 0; k < GRASS_FLOATS; k++) dst[k] = src[k];
-      dst[10] = gWorldTime;   // (neu) sterben: 2s Fade-out
+      dst[10] = -1.0f;   // (neu) sterben: Death-Time erst beim Finish (Swap-Punkt)
       nGrassNew++;
       copied++;
     }
@@ -454,7 +454,7 @@ void grass_build_finish(void){
   for (int i = 0; i < nGrassNew; i++) {
     float *d = &buildBuf[i * GRASS_FLOATS];
     if (d[9] == 0.0f) { d[9] = gWorldTime; nNew++; }
-    if (d[10] > 0.0f) nDying++;
+    if (d[10] == -1.0f) { d[10] = gWorldTime; nDying++; }   // neu sterben: erst ab Swap
   }
   if (nNew > 0 || nDying > 0)
     printf("Gras-Swap t=%.2f: %d Halme, %d neu, %d sterben (je 2s)\n", gWorldTime, nGrassNew, nNew, nDying);
@@ -525,6 +525,67 @@ void grass_debug_dump(void){
          gWorldTime, nGrass, nAlive, nFading, nFaded, sumFade, 100.0f * sumFade / (float)nGrass);
   printf("GRAS-DEBUG walk: gix0=%d giz0=%d gnx=%d gnz=%d dmaxR=%d dcx0=%d dcz0=%d bcx=%.2f bcz=%.2f\n",
          gix0, giz0, gnx, gnz, dmaxR, dcx0, dcz0, bcx, bcz);
+}
+
+// DEBUG (Taste n/m): Halme in 10m Umkreis um einen Punkt (Position, Hoehe,
+// Birth, Death) — fuer den Issue-A-Vergleich vor/nach Build. Der zweite
+// Dump vergleicht mit dem ersten (gleiche Positionen? geaenderte Werte?).
+static float gDbgX = 0, gDbgZ = 0;
+void grass_debug_set_point(float x, float z){ gDbgX = x; gDbgZ = z; }
+#define RDBG_N 20000
+#define RDBG_SLOTS 3
+static float rdbgH[RDBG_SLOTS][RDBG_N], rdbgB[RDBG_SLOTS][RDBG_N], rdbgD[RDBG_SLOTS][RDBG_N];
+static int   rdbgN[RDBG_SLOTS] = {0, 0, 0};
+static long  rdbgPx[RDBG_SLOTS][RDBG_N], rdbgPz[RDBG_SLOTS][RDBG_N];
+void grass_debug_region_dump(int compare, int slot){
+  if (slot < 0 || slot >= RDBG_SLOTS) slot = 0;
+  pthread_mutex_lock(&gMu);
+  int n = 0, nDying = 0, nNew = 0;
+  float hMin = 1e9f, hMax = -1e9f;
+  long px[RDBG_N], pz[RDBG_N];
+  float h[RDBG_N], b[RDBG_N], d[RDBG_N];
+  for (int i = 0; i < nGrass; i++) {
+    const float *dd = &grassInst[i * GRASS_FLOATS];
+    float dx = dd[0] - gDbgX, dz = dd[2] - gDbgZ;
+    if (dx * dx + dz * dz > 100.0f) continue;
+    if (n >= RDBG_N) continue;
+    px[n] = (long)(dd[0] * 1000.0f); pz[n] = (long)(dd[2] * 1000.0f);
+    h[n] = dd[3]; b[n] = dd[9]; d[n] = dd[10]; n++;
+    if (dd[10] > 0.0f) nDying++;
+    if (gWorldTime - dd[9] < 3.0f) nNew++;
+    if (dd[3] < hMin) hMin = dd[3];
+    if (dd[3] > hMax) hMax = dd[3];
+  }
+  printf("GRAS-REGION t=%.2f: %d Halme in 10m um (%.1f, %.1f): %d sterben, %d neu(<3s), h %.3f..%.3f\n",
+         gWorldTime, n, gDbgX, gDbgZ, nDying, nNew, hMin, hMax);
+  if (compare && rdbgN[slot] > 0) {
+    // Vergleich mit vorherigem Dump (Position auf 1mm)
+    int nMatch = 0, nGone = 0, nAppeared = 0, nHChg = 0, nBChg = 0, nDChg = 0;
+    for (int i = 0; i < n; i++) {
+      int found = -1;
+      for (int j = 0; j < rdbgN[slot]; j++)
+        if (rdbgPx[slot][j] == px[i] && rdbgPz[slot][j] == pz[i]) { found = j; break; }
+      if (found < 0) { nAppeared++; continue; }
+      nMatch++;
+      if (fabsf(h[i] - rdbgH[slot][found]) > 0.01f) nHChg++;
+      if (fabsf(b[i] - rdbgB[slot][found]) > 0.01f) nBChg++;
+      if (fabsf(d[i] - rdbgD[slot][found]) > 0.01f) nDChg++;
+    }
+    for (int j = 0; j < rdbgN[slot]; j++) {
+      int found = 0;
+      for (int i = 0; i < n; i++)
+        if (rdbgPx[slot][j] == px[i] && rdbgPz[slot][j] == pz[i]) { found = 1; break; }
+      if (!found) nGone++;
+    }
+    printf("GRAS-REGION DIFF (vs. vorher): %d match, %d WEG (ohne Tod), %d NEU, Hoehe-geaendert=%d, Birth-geaendert=%d, Death-geaendert=%d\n",
+           nMatch, nGone, nAppeared, nHChg, nBChg, nDChg);
+  }
+  for (int i = 0; i < n && i < 25; i++)
+    printf("GRAS-REGION %3d: pos=(%.2f,%.2f) h=%.3f birth=%.2f death=%.2f\n",
+           i + 1, px[i] / 1000.0f, pz[i] / 1000.0f, h[i], b[i], d[i]);
+  for (int i = 0; i < n; i++) { rdbgPx[slot][i] = px[i]; rdbgPz[slot][i] = pz[i]; rdbgH[slot][i] = h[i]; rdbgB[slot][i] = b[i]; rdbgD[slot][i] = d[i]; }
+  rdbgN[slot] = n;
+  pthread_mutex_unlock(&gMu);
 }
 
 // Build laeuft gerade? (Request wartet oder Worker generiert) — fuer den HUD.

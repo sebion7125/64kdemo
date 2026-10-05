@@ -2,21 +2,21 @@
 
 Stand: 2026-10-05, Runde 5 (Chat-Wechsel). **Gras-Fade-out: VAO-Fix +
 Kanten-Pop-Fix committet und vom Nutzer bestätigt** (Slider ✓, Pop ✓ weg).
-**NEU: 3 Gras-Issues vom Nutzer-Host-Test gemeldet.** Issue B (nach ~77m
-kein neues Gras mehr) ist **FIXED und vom Nutzer bestätigt**. Offen:
-Issue A (Längensprung in der Ferne) + Issue C (Gras-Inseln abweichend vom
+**Issue B (kein neues Gras nach ~77m) ist FIXED und vom Nutzer bestätigt.**
+**Issue A (Längensprung/Ploppen in der Ferne) ist FIXED (VM-verifiziert),
+wartet auf Nutzer-Host-Test.** Offen: Issue C (Gras-Inseln abweichend vom
 Terrain). Details + Hypothesen + Testpläne unten in „ISSUES“.
 
 ## ⚡ SOFORT NÄCHSTER SCHRITT (nächster Chat)
 
-**Issue B (kein neues Gras nach ~77m) ist FIXED, VM-verifiziert und vom
-Nutzer auf dem Host bestätigt.**
-**Offen: Issue A (Längensprung in der Ferne) + Issue C (Gras-Inseln).**
+**Issue A-Fix ist committet (Death-Time erst am Swap-Punkt, nicht während
+des Builds). Nutzer-Host-Test anstehen:** gleiche Freeze-Fahrt wie vorher
+(G an, rückwärtsfahren, G aus) → die sofortigen Sprünge am Build-Wechsel
+sollten weg sein, stattdessen sanfte 2s-Fades. Falls noch ein
+„Längensprung" sichtbar: Taste n + m (Halm-Dump mit DIFF) drücken.
 
 Reihenfolge:
-1. **Issue A reproduzieren/messen** (Längensprung in der Ferne): VM:
-   Blade-Daten (Höhe) vor/nach Build für eine Bildschirmposition dumpen
-   (in grass_debug_dump integrieren oder neue Taste).
+1. **Issue A:** Nutzer-Host-Test (siehe oben).
 2. **Issue C (Inseln) in der VM suchen**: Halme-Höhen vs. c_terrainH an
    denselben Positionen dumpen; Raymarcher-SDF (0.85-Dämpfung) prüfen.
 3. Danach Wahrnehmungsfrage (Fade sichtbar?) mit Nutzer abstimmen
@@ -26,23 +26,37 @@ Baum-Schatten.
 
 ## ISSUES (Nutzer-Beobachtungen 2026-10-05, nach Pop-Fix)
 
-### Issue A: „Neue Halme ploppen in der Entfernung auf“ — vermutlich Längensprung
+### Issue A: „Neue Halme ploppen in der Entfernung auf“ — **FIXED (VM-verifiziert), wartet auf Nutzer-Host-Test**
 - **Beobachtung (Nutzer):** Freeze (G) an + rückwärtsfahren: die
   Shader-Grenze (LOD 68–80m) ist sichtbar und weich. Freeze aus: ein Teil
   des Grases fadet sichtbar aus (Death-Fade ✓), aber DANN ploppen in der
-  Entfernung plötzlich Halme „auf“. Nutzer-Hypothese: keine neuen Halme,
+  Entfernung plötzlich Halme „auf“. Nutzer-Hypothothese: keine neuen Halme,
   sondern **nur ihre Länge springt**.
-- **Fakten:** Shader-Längen sind pro Frame kontinuierlich (sizeScale,
-  lod, fadeIn/fadeOut alles smoothstep-basiert) → ein Sprung kommt am
-  ehesten vom **VBO-Swap**: eine Zelle wird statt kopiert REGENERIERT
-  (nb != onb, Zelle nicht in alter Tabelle, oder CAP) → anderer Halm an
-  gleicher Stelle mit anderer Basis-Höhe (d[3] ist Hash von (ix,iz,b)).
-  Oder: Birth/Death-Time wird im Kopier-Pfad versehentlich zurückgesetzt.
-- **Offen:** welcher Mechanismus genau; welche Zellen (Kante? CAP?).
-- **Testplan:** VM, Freeze aus, Screenshot-Serie um den Build-Wechsel
-  (Gras-Swap-Log gibt den Zeitpunkt); zusätzlich Halm-Höhen-Dump für
-  eine feste Bildschirmposition vor/nach dem Swap (neues Debug: Taste?
-  oder in grass_debug_dump integrieren).
+- **Wurzel (gemessen, VM):** Die Death-Time wurde WÄHREND des Builds
+  gesetzt (gWorldTime im Kopier-Pfad), nicht beim Swap. Der Build dauert
+  0.3–1s → beim VBO-Swap waren die sterbenden Halme bereits 0.3–1s im
+  Fade (f ≈ 0.7–0.85 statt 1.0) → **sofortiger sichtbarer Sprung von
+  15–30% am Swap-Punkt** (Pixelmessung: -34% in einem Frame vor Fix).
+  Die „ploppenden“ Halme sind die NEUEN Halme (Fade-in über 2s vom Swap
+  ab — korrekt), die aber erst ab ~30% Alpha (~0.5s) deutlich sichtbar
+  werden → Wahrnehmung „ploppen plötzlich auf". Halme-Daten-Dump
+  (Taste n/m) vor/nach Build: 0 Halme verschwinden ohne Death-Time,
+  0 Höhen-Sprünge, Birth/Death korrekt → Regenerierung- und
+  Reset-Hypothesen ausgeschlossen.
+- **Fix (grass_cpu.c):** Death-Time erst beim Finish (Swap-Punkt) setzen:
+  Kopier-Pfad + out_build_step schreiben Platzhalter -1.0f, grass_build_finish
+  setzt d[10] = gWorldTime. (Birth-Time war schon korrekt am Finish.)
+- **Verifiziert (VM, Pixel-Serien + b-Dumps mit exakten Zeitstempeln):**
+  S-Szenario (Kamera vom Feld weg): ferne Zeile vor Fix -34% sofort am
+  Swap; nach Fix sanft: -4% (0.4s) → -15% (1s) → -23% (1.4s) → stabil
+  -11% (Death-Fade über 2s, dann neue Halme faden ein). W-Szenario
+  (Kamera zum Feld hin): ferne Zeile steigt sanft um +13% über 2s
+  (Fade-in), kein Sprung. Buffer-Seite (Summe-ShaderFade) passt exakt
+  zur smoothstep-Kurve ab Swap-Zeit. Edge-Pop-Unit-Test: 0 Pops.
+- **Offen:** Nutzer-Host-Test (gleiche Freeze-Fahrt wie vorher). Falls
+  dort noch ein „Längensprung" sichtbar ist: Taste n (Punkt 45m vor +
+  20m links der Kamera setzen, Halm-Dump) + m (gleiche Punkte erneut,
+  DIFF) während der Szene drücken — zeigt Höhen/Birth/Death pro Halm.
 
 ### Issue B: Nach einer Strecke wird kein neues Gras mehr generiert, Halmzahl fällt nur — **FIXED + vom Nutzer bestätigt**
 - **Beobachtung (Nutzer):** nach Zurücklegen einer Strecke ein Modus,

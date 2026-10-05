@@ -919,6 +919,26 @@ int main(int argc, char **argv) {
           }
           if (ks == XK_v) { grassOnly = !grassOnly; printf("TEST: nur Gras zeichnen: %s\n", grassOnly ? "AN" : "aus"); }
           if (ks == XK_b) grass_debug_dump();
+          if (ks == XK_n) {   // DEBUG: 3 Punkte: 45m vor, je 20m links/rechts/gerade
+            float cnp = cosf(flyPitch);
+            float fxn = cnp * sinf(flyYaw), fz2 = cnp * cosf(flyYaw);
+            float lx = fz2, lz = -fxn;   // linke Achse
+            for (int s = -1; s <= 1; s++) {
+              grass_debug_set_point(flyPos[0] + fxn * 45.0f + lx * 20.0f * s,
+                                    flyPos[2] + fz2 * 45.0f + lz * 20.0f * s);
+              grass_debug_region_dump(0, s + 1);
+            }
+          }
+          if (ks == XK_m) {   // DEBUG: gleiche 3 Punkte erneut (Kamera muss stillstehen)
+            float cnp = cosf(flyPitch);
+            float fxn = cnp * sinf(flyYaw), fz2 = cnp * cosf(flyYaw);
+            float lx = fz2, lz = -fxn;
+            for (int s = -1; s <= 1; s++) {
+              grass_debug_set_point(flyPos[0] + fxn * 45.0f + lx * 20.0f * s,
+                                    flyPos[2] + fz2 * 45.0f + lz * 20.0f * s);
+              grass_debug_region_dump(1, s + 1);
+            }
+          }
           if (ks == XK_o) {
             // Fly <-> Orbit umschalten, ohne Sprung synchronisieren
             if (flyMode) {

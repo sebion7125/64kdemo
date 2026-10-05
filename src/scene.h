@@ -77,6 +77,8 @@ void grass_build_request(float cx, float cz, int full);
 void grass_build_finished_snapshot(float **buf, int *n);
 int  grass_build_busy(void);   // 1 = Request wartet oder Worker generiert
 void grass_debug_dump(void);   // DEBUG F12: Buffer-Zustand + erwartete Shader-Fade
+void grass_debug_set_point(float x, float z);   // DEBUG n: Region-Dump-Punkt
+void grass_debug_region_dump(int compare, int slot);   // DEBUG n/m: Halme um den Punkt
 int  grass_thread_start(void);
 
 #endif
