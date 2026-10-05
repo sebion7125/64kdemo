@@ -1,16 +1,14 @@
 # 64kDemo — Status
 
-Stand: 2026-10-05, nach Gras-Puffer-Session (Distanz-Order, Dichte, HUD).
+Stand: 2026-10-05, nach Skalierungs-/Crash-/Fade-in-Fixes.
 
 ## ⚡ SOFORT NÄCHSTER SCHRITT
 
 **Visuelle Verifizierung durch den Nutzer**:
-- Gras-Puffer: Dichte in Nähe UND Ferne (802k Halme bei Standard),
-  bei CAP-Uberlauf (Dichte-Slider hoch) fehlen jetzt die WEAESTEN
-  Zellen (Diamond-Order), nicht zufällige.
-- HUD-Vollstats (H-Taste): 3 Zeilen — FPS/RES/CAM/AA/TREES/QUADS/GRASS,
-  D/H/MD/FRZ/NUR-GRAS, POS/CAP/BUILD. Slider beschriftet.
-- Rendering von weit nach nah (Fade-in/Transparenz + MSAA korrekt).
+- Maximiertes Fenster: Slider+Labels skalieren mit (keine Ueberlappung)
+- Gras-Fade-in beim Positions-Shift (Crescent am Gras-Rand blendet 2s ein)
+- Dichte in Nähe UND Ferne, CAP/BUILD-Indikator (H-Taste Vollstats)
+- Screenshot (P) crasht nicht mehr bei breiten Fenstern (VM)
 
 Danach (in dieser Reihenfolge):
 1. Nutzer-Feedback auf Dichte/Farben/Weite sammeln und abstimmen
@@ -59,6 +57,19 @@ Danach (in dieser Reihenfolge):
 - `main.c` — GL-Setup, Mesh-Pass, Raymarch-Pass, Compositing, Kamera, HUD
 
 **Kamera:** Free-Fly (Pointer-Lock, Halten-links = Look, WASD, Space/X hoch/runter, Shift Turbo, O Orbit, R Reset). Pitch ±83° Clamp, invertiert, Sensitivität 0.0008.
+
+## Gefixt (Session 2026-10-05, Runde 2: Skalierung, Crash, Fade-in)
+
+- [x] **Slider+Labels skalieren mit hud_scale** (maximiertes Fenster:
+  Schrift waechst, Slider blieben pixelgenau -> Ueberlappung).
+- [x] **Screenshot-Crash (>1600px breit, VM)**: Mesa llvmpipe 26.0.8
+  glReadPixels(GL_BACK, GL_RGB) schreibt (w mod 4)*(h-1) EXTRA Bytes
+  ueber das Buffer-Ende (Heap-Overflow). Mindest-Test ohne Demo
+  reproduziert es. Fix: GL_RGBA + Alpha entfernen.
+- [x] **Gras-Fade-in repariert**: Die 32*dens-Formel (weiche Kante)
+  machte die 1m-Crescent-Zone leer (nb<1 -> 0 Halme). Fix: Build-Kante
+  bei dens>=0.09 (mittlere Halmzahl ~2) + stochastisches Runden.
+  1m-Shift -> ~1300-1500 neue Halme (2s Fade), 12m -> ~31500.
 
 ## Gefixt (Session 2026-10-05, Gras-Puffer + HUD)
 
