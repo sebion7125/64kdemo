@@ -4,6 +4,7 @@ layout(location=1) in vec3 iPos;    // Halm-Basis (Welt)
 layout(location=2) in vec4 iData;   // hoehe, breite, phase, schattierung
 layout(location=3) in vec2 iData2;  // yaw, lean
 layout(location=4) in float iBirth; // Birth-Time (fuer Fade-in)
+layout(location=5) in float iDeath; // Death-Time (0 = lebt, sonst 2s Fade-out)
 uniform mat4 uMVP;
 uniform vec3 uCamPos;
 uniform float uTime;
@@ -82,9 +83,16 @@ void main(){
   vPos = p;
   vCol = vec3(sh, t, lod);
   vT = t;
-  // Per-Halm-Fade-in: neue Halme (Birth-Time nahe uTime) blenden ueber 2s ein
+  // Per-Halm-Fade: ein (Birth-Time) und aus (Death-Time), je 2s, smoothstep.
+  // Vollstendig verblassene Halme cullen (Clip-Ebene x=2, wie der LOD-Cull).
   float age = uTime - iBirth;
-  float fade = clamp(age / 2.0, 0.0, 1.0);
-  vFade = fade * fade * (3.0 - 2.0 * fade);   // smoothstep [0,1]
+  float f = clamp(age / 2.0, 0.0, 1.0);
+  f = f * f * (3.0 - 2.0 * f);
+  if (iDeath > 0.0) {
+    float da = clamp((uTime - iDeath) / 2.0, 0.0, 1.0);
+    f *= 1.0 - (da * da * (3.0 - 2.0 * da));
+  }
+  if (f < 0.004) { gl_Position = vec4(2.0, 0.0, 0.0, 1.0); return; }
+  vFade = f;
   gl_Position = uMVP * vec4(p, 1.0);
 }

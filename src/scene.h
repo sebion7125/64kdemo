@@ -47,10 +47,11 @@ extern int   nTreeVerts, nCrownVerts, nWireVerts, nTrees;
 void trees_build(float tx, float tz);
 
 // ================= Gras (instanzierte Halme) =================
-//   grassInst: pos(3) hoehe(1) breite(1) phase(1) schattierung(1) yaw(1) lean(1) birth(1) = 10 floats
+//   grassInst: pos(3) hoehe(1) breite(1) phase(1) schattierung(1) yaw(1) lean(1) birth(1) death(1) = 11 floats
 //   hoehe/breite = BASIS-Werte; die Distanz-Skalierung passiert im Shader (grass.vert)
-#define GRASS_FLOATS 10
-#define GRASS_CAP    1500000  // erhöht (war 280000): 4x mehr Gras + Dichte-Slider bis 8.0
+//   birth = Birth-Time (2s Fade-in), death = Death-Time (2s Fade-out, 0 = lebt)
+#define GRASS_FLOATS 11
+#define GRASS_CAP    5000000  // 5M (war 1.5M): Dichte-Slider max 5.6x staubt bei MD=120 am CAP
 
 extern float *grassInst;   // aktuell sichtbar (Zweipuffer, zeigt auf den fertigen Build)
 extern int   nGrass;

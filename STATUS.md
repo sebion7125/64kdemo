@@ -1,23 +1,93 @@
 # 64kDemo — Status
 
-Stand: 2026-10-05, Runde 3. **Beide Bugs (skalierende Slider, Gras-Fade-in)
-sind jetzt WIRKLICH behoben** — Wurzelursachen gefunden (siehe Runde 3).
-Nutzer-Feedback ausstehend (Host-Test).
+Stand: 2026-10-05, Runde 4. **Fünf Features fertig und verifiziert**
+(Fade-out, CAP 5M, Dichte-Kalibrierung, Slider-Transition, Slider-UI-Fade).
+VM-Tests + Nutzer-Host-Test (4k) bestaetigt.
 
 ## ⚡ SOFORT NÄCHSTER SCHRITT
 
-Nutzer-Feedback auf die beiden Fixes sammeln (Host-Test):
-1. Slider+Labels: Überlappen beim Maximieren weg? (1440p/2160p)
-2. Gras-Fade-in: sichtbar bei Kamerabewegung? (Feld "wächst" jetzt mit,
-   nicht nur das 1m-Crescent am weiten Rand; Fade-Zeit 2s)
+Nutzer-Feedback auf die Runde-4-Features sammeln (Host):
+1. Faehrt zurueck: fadet das Gras jetzt sanft aus (nicht ploetzlich weg)?
+2. Slider ziehen: eine sanfte Transition (aus + ein) statt Mehrfach-Blitzen?
+3. Slider: Ein/Ausblenden bei Maus-Naeherung/Entfernung ok (0.5s/1.5s, 3s Delay)?
+4. Max-Dichte (5.6x) + MD=120: CAP-Indikator im HUD, Performance ok?
 
 Danach (in dieser Reihenfolge):
 1. Nutzer-Feedback auf Dichte/Farben/Weite sammeln und abstimmen
 2. Entfernungssortierung verifizieren (genügt die Chunk-Methode oder
    braucht es pro-Frame-Sortierung?)
-3. Binary-Budget (< 65,536 B) — liegt bei 68,136, Plan steht (Linker-
+3. Binary-Budget (< 65,536 B) — liegt bei 68,152, Plan steht (Linker-
    Script /tmp/64k.ld bringt 66,864; .plt.sec discarden + Rest kürzen)
 4. Optional: Schritt 7 (Baum-Schatten, docs/grasplan.md)
+
+## Session 2026-10-05, Runde 4 (Fade-out, 5M, Slider-Transition, Slider-UI-Fade)
+
+### 1) FIXED: Gras-Fade-out (Death-Time d[10])
+- Rueckwaertsfahrt verschwand vorher ploetzlich (nb gesunken -> Halm weg).
+- Jetzt: GRASS_FLOATS 11 (d[10] = Death-Time, 0 = lebt). build_cell waelt
+  pro Halm: lebt+nb reicht -> kopieren; lebt+ueberzaehlig -> kopieren +
+  sterben (d[10]=now); stirbt noch -> kopieren bis 2.5s; fertig -> weg.
+- grass.vert: vFade = fadeIn * fadeOut (je 2s, smoothstep), cull bei <0.004
+  (Clip-Ebene x=2, wie LOD-Cull). VAO: attr5 (iDeath) @ offset 40.
+- Verifiziert: Unit-Test /tmp/test_death.c (6 Szenarien OK); VM-Rueckfahrt:
+  "836909 Halme, 14234 neu, 22803 sterben". Log: "Gras-Swap: N, X neu,
+  Y sterben (je 2s)".
+
+### 2) CAP 5M + 3) Dichte-Slider-Kalibrierung
+- GRASS_CAP 1500000 -> 5000000 (scene.h). BSS 440MB (2x 5M x 11 floats),
+  VBO 220MB — auf dem Host unkritisch.
+- Dichte-Slider max: 8.0x -> 5.6x (set_slider: 0.2 + pos*5.4). Kalibriert
+  mit echtem Build (/tmp/cap_test.c): 5.6x + MD=120 -> exakt 5,000,000
+  Halme (5.4x -> 4.97M, 6.0x -> Sattigung). "Gerade so am CAP".
+- Voll-Build 5M: ~4.3s in der VM (llvmpipe); Host schneller.
+
+### 4) FIXED: Slider-Change = eine Transition (Debounce + OUT/IN)
+- War: jeder Drag-Schritt trieb einen eigenen Voll-Rebuild -> Gras
+  verschwand/blendete mehrfach ein.
+- Jetzt: Wert muss 1s stabil sein (Debounce), dann 2-Phasen-Transition:
+  OUT-Build (Modus 1: alle alten Halme sterben, 2s Fade-out) -> 2s warten
+  -> IN-Build (Modus 2: alles neu, 2s Fade-in). Position-Builds werden
+  waehrend der Transition unterdrueckt. Ein Slider-Zug = eine Transition.
+- Build-Modi in grass_cpu.c: 0=POS (Kopieren), 1=OUT (alte Zell-Tabelle
+  durchgehen, alles sterbend kopieren), 2=IN (volle Generierung).
+  OUT-Build: kein Radius-Walk, directer Tabellen-Durchlauf (~ms).
+- Verifiziert (VM): ein Klick -> "827192 sterben" -> "2043554 neu".
+- Performance: 1m-POS-Shift 122-136ms, 12m 299ms (VM) — Teil-Kopieren
+  geblieben, kein Regression.
+
+### 5) FIXED: Slider-UI-Fade (Maus-Naeherung/Entfernung)
+- Slider+Labels blenden ein, wenn die Maus sich ueber sie bewegt (ohne
+  Taste), aus, wenn die Maus 3s nicht im Bereich war. Ein 0.5s, Aus 1.5s
+  (Echtzeit via rawDt, NICHT dt-Clamp — sonst 25% Tempo bei 2.5 FPS).
+- Bereich = Tracks + Labels (x: winW/2-150hsc-10cs-8hsc .. winW/2+150hsc,
+  y: winH-100hsc .. winH-26hsc). Ziehen (sliderDragging) = sichtbar halten.
+- Labels+Tracks in eigenen Draws (Tint-Alpha = sliderFade), Status-Text
+  bleibt opak. fade<=0.004: gar nicht zeichnen.
+- **WURZEL des Bugs (warum es bei 4k-maximiert klappte, sonst nicht):**
+  XQueryPointer! Der Prototyp in third_party/include/X11/Xlib.h:2993 ist
+  eine 9-Parameter-Version (NICHT der Standard-X11-XQueryPointer):
+  `(dpy, w, Window* root_return, Window* child_return, int* root_x, int*
+  root_y, int* win_x, int* win_y, unsigned int* mask)` — die Root-/Child-
+  FENSTER kommen VOR den Koordinaten. Der alte Code deklarierte 9 Parameter
+  mit int* auf den Plätzen 3/4 (Window* wird dort geschrieben: 8 Byte in
+  4-Byte-Var = latenter Stack-Overflow, harmlos geblieben) und las die
+  Koordinaten von 5/6 = ROOT-Koordinaten. Maus-Look brauchte nur Deltas
+  (in Root und Fenster identisch) -> Bug unsichtbar. Slider-Fade braucht
+  absolute Fenster-Koordinaten -> verschoben um die Fenster-Position.
+  4k-maximiert: Fenster bei (0,0) -> Root==Fenster -> Zufallstreffer.
+  Fix: Deklaration + Aufruf laut Header; ptrX/ptrY = win_x/win_y (7/8).
+  (Mein erster Fix-Versuch mit 8 Parametern segfaultete: child_return
+  ueberlief mask, mask_return landete in nicht-übergibtem Stack.)
+- Verifiziert: VM (Fenster bei 212,58): Maus weg 5s -> 38 Pixel (Terrain
+  nur), Maus ueber Slider -> 12737 Slider-Pixel. Host (Nutzer): klappt.
+
+### Test-Infrastruktur (ergänzt, /tmp)
+- /tmp/test_death.c: Death-Time-Unit-Test (POS/Rueck-Shift/OUT/IN).
+- /tmp/cap_test.c: Halmzaehlung fuer echte Builds (Kalibrierung).
+- /tmp/qptr_test*.c, /tmp/qptr_min.c: XQueryPointer-Signatur-Tests.
+- Signatur-Frage immer zuerst: third_party/include/X11/Xlib.h lesen
+  (dort 9-Parameter-XQueryPointer! Standard-X11-Prototyp tauscht gegenueber
+  dem Gedaechnis — Fundstelle: Xlib.h:2993).
 
 ## Session 2026-10-05, Runde 3 (Wurzelursachen: Slider-Skalierung + Gras-Fade)
 
@@ -64,7 +134,8 @@ Danach (in dieser Reihenfolge):
   479ms), 12m-Shift 320ms (alt: 1884ms).
 - Verbleibend: Halme, deren nb ABNAHMT, verschwinden sofort (kein Fade-
   out; wuerde Death-Time d[10] brauchen) — hinten am Rand, meist aus dem
-  Blickfeld. Falls der Nutzer es merkt: nachtraegen.
+  Blickfeld. Falls der Nutzer es merkt: nachtraegen. [NACHGETRAGEN in
+  Runde 4: Death-Time d[10] + Fade-out, s. Runde 4, Punkt 1.]
 
 ### Test-Infrastruktur (VM, /tmp)
 - xhold2.c: Taste via XSendEvent halten (X11/Xtst per dlopen). WICHTIG:

@@ -18,9 +18,10 @@
 //   nb beim Rebuild unveraendert bleibt, werden daher kopiert statt neu
 //   generiert -> 1m-Verschiebung in ~100ms statt ~700ms.
 //
-// Halm-Daten (GRASS_FLOATS=10): pos(3) hoehe breite phase schattierung yaw lean birth
+// Halm-Daten (GRASS_FLOATS=11): pos(3) hoehe breite phase schattierung yaw lean birth death
 //   yaw  = Rotation der Halm-Ebene um Y (sichtbar aus allen Richtungen)
 //   lean = Neigung der Spitze in yaw-Richtung (sichtbar von oben)
+//   birth = Birth-Time (2s Fade-in), death = Death-Time (2s Fade-out, 0 = lebt)
 #include "scene.h"
 #include <math.h>
 #include <stdio.h>
@@ -38,10 +39,18 @@ static int gnz = 0;
 static int dr = 0, drp = 0, dcx0 = 0, dcz0 = 0, dmaxR = 0;   // Diamond-Order-State
 static int gix0 = 0, giz0 = 0, gnx = 0;
 static float bcx = 0, bcz = 0;
+static int outStepState = 0;   // OUT-Build: naechster Tabellen-Index
 // Alter Build-Zentrum (fuer Fade-in: nur Halme außerhalb des alten Bereichs sind "neu")
 static float old_bcx = 0, old_bcz = 0;
 static int hasOldBuild = 0;
-static int gForceFull = 0;   // 1 = aktueller Build generiert alles neu (Slider-Change)
+// Build-Modi:
+//  0 = POS: Positions-Rebuild (Zell-Kopieren; neue Halme faden ein,
+//           ueberzaehlige - nb gesunken - faden aus)
+//  1 = OUT: Slider-Phase 1 — alle alten Halme sterben (d[10]=jetzt),
+//           keine Generierung (altes Gras blendet 2s aus)
+//  2 = IN:  Slider-Phase 2 / erster Build — alles neu generieren
+//           (d[9]=jetzt, neues Gras blendet 2s ein)
+static int gBuildMode = 0;
 
 // Build-Thread-Synchronisation (siehe grass_worker am Dateiende):
 //   gReqPending = Request wartet, gBuildDone = Build fertig (Abholung)
@@ -50,7 +59,7 @@ static pthread_cond_t  gCv = PTHREAD_COND_INITIALIZER;
 static int   gReqPending = 0, gBuildDone = 0;
 static int   gBuilding = 0;   // Worker baut gerade (fuer HUD-Indikator)
 static float gReqCX = 0, gReqCZ = 0;
-static int   gReqFull = 0;   // 1 = Voll-Generation (Slider-Change), kein Zell-Kopieren
+static int   gReqMode = 0;   // Build-Modus (0=POS 1=OUT 2=IN)
 
 // Zell-Index-Tabellen (eine pro Halm-Buffer): Start-Index und Halm-Anzahl
 // pro Weltzelle (ix,iz absolut -> 1:1-Mapping ueber Builds hinweg).
@@ -108,15 +117,26 @@ static float dens_at(float dist){
   return densLut[i];
 }
 
-void grass_build_begin(float cx, float cz, int full){
-  // Altes Zentrum merken (fuer Fade-in: Halme im alten Bereich sind "alt").
+void grass_build_begin(float cx, float cz, int mode){
+  // Altes Zentrum merken (fuer POS-Builds: altes nb mit altem Zentrum).
   // hasOldBuild wird erst in grass_build_finish gesetzt (erster Build =
   // alle Halme sofort sichtbar, kein Vergleich gegen das (0,0)-Zentrum).
   if (hasOldBuild) { old_bcx = bcx; old_bcz = bcz; }
   bcx = cx; bcz = cz;
-  gForceFull = full;   // Slider-Change: alles neu generieren (kein Kopieren)
+  gBuildMode = mode;
   nGrassNew = 0;
   buildBuf = (grassInst == gA) ? gB : gA;
+  // Build-Tabelle leeren: auBerhalb des Build-Quadrats darf nichts altes
+  // stehen (das Zell-Lookup liest cellOff[oi] >= 0 als "Zelle existiert").
+  for (int i = 0; i < CT * CT; i++) { buildOff[i] = -1; buildCnt[i] = 0; }
+  if (mode == 1) {
+    // OUT-Build: geht die ALTE Zell-Tabelle direkt durch (kein Radius-Walk).
+    // Tabelle/Origin wie beim alten Build (damit naechste Builds die
+    // sterbenden Halme in ihren Zellen finden).
+    offX0 = oldOffX0; offZ0 = oldOffZ0;
+    outStepState = 0;
+    return;
+  }
   float half = g_half();
   gix0 = (int)floorf((cx - half) / GSTEP);
   giz0 = (int)floorf((cz - half) / GSTEP);
@@ -159,17 +179,19 @@ static void build_cell(int ix, int iz){
   float h4 = c_hash12(ix * 0.271f, iz * 0.711f);
   // --- Kopier-Entscheidung (vor der teuren Terrain-Berechnung) ---
   // Halm-Daten sind eine reine Funktion von (ix,iz,b) (Hashes + Terrain,
-  // NICHT von der Kameradistanz) -> ueberlappende Halme kopieren statt
-  // regenerieren. Nur die ZUSATZ-Halme (b >= onb, nb > onb) sind neu und
-  // blenden ein (Birth-Time in grass_build_finish). So ist der Fade auch
-  // im sichtbaren Bereich da, nicht nur im Crescent am weiten Gras-Rand.
-  // Nur bei Positions-Rebuilds; bei Slider-Change (gForceFull) wird alles
-  // neu generiert (Dichte/Sichtweite betrifft jede Zelle).
+  // NICHT von der Kameradistanz) -> Halme koennen kopiert statt regeneriert
+  // werden. Pro Halm (d[10] = Death-Time, 0 = lebt):
+  //   - lebt und nb reicht noch  -> kopieren (Birth-Time bleibt, Fade weiter)
+  //   - lebt, aber nb gesunken   -> kopieren + sterben (d[10]=jetzt, 2s aus)
+  //   - stirbt schon             -> kopieren, bis der 2s-Fade zu Ende ist
+  //   - stirbt, Fade zu Ende     -> weg
+  // Neue Halme (nb > altes nb) generieren ab b=onb und blenden 2s ein.
+  // Nur bei POS-Builds (Modus 0); IN (Modus 2) generiert alles neu.
   int oldIdx = -1;
   int bStart = 0;   // erster zu generierender b-Index (0 = volle Generierung)
   int copied = 0;   // kopierte Halme dieser Zelle (fuer buildOff/buildCnt)
   int partial = 0;  // Teil-Kopie: Zelle bestockt, nur Teil neu generiert
-  if (hasOldBuild && !gForceFull) {
+  if (gBuildMode == 0 && hasOldBuild) {
     int ox = ix - oldOffX0, oz = iz - oldOffZ0;
     if (ox >= 0 && ox < CT && oz >= 0 && oz < CT) {
       int oi = oz * CT + ox;
@@ -179,46 +201,56 @@ static void build_cell(int ix, int iz){
   if (oldIdx >= 0) {
     float dist = sqrtf(dx * dx + dz * dz);
     float dens = dens_at(dist);
+    int nb = 0;
     if (dens >= 0.01f) {
       float nbf = 32.0f * dens * (0.4f + 0.6f * h4) * grassDensityScale;
       if (nbf > 32.0f) nbf = 32.0f;
-      int nb = (int)nbf;
+      nb = (int)nbf;
       if (c_hash12(ix * 0.917f, iz * 0.311f) < nbf - (float)nb) nb++;   // stochastisch
-      // altes nb mit den aktuellen Parametern (altes Zentrum)
-      float odx = x - old_bcx, odz = z - old_bcz;
-      float odist = sqrtf(odx * odx + odz * odz);
-      float odens = dens_at(odist);
-      float onbf = 32.0f * odens * (0.4f + 0.6f * h4) * grassDensityScale;
-      if (onbf > 32.0f) onbf = 32.0f;
-      int onb = (int)onbf;
-      if (c_hash12(ix * 0.917f, iz * 0.311f) < onbf - (float)onb) onb++;   // stochastisch
-      int nCopy = nb < onb ? nb : onb;   // ueberlappende Halme (b-Index)
-      if (nCopy > 0) {
-        int cnt = cellCnt[oldIdx];
-        if (cnt > nCopy) cnt = nCopy;
-        if (nGrassNew + cnt > GRASS_CAP) cnt = GRASS_CAP - nGrassNew;
-        if (cnt > 0) {
-          const float *src = &grassInst[cellOff[oldIdx] * GRASS_FLOATS];
-          float *dst = &buildBuf[nGrassNew * GRASS_FLOATS];
-          for (int i = 0; i < cnt * GRASS_FLOATS; i++) dst[i] = src[i];
-          nGrassNew += cnt;
-        }
-        copied = cnt;
-        if (nb > onb && nGrassNew + (nb - onb) <= GRASS_CAP) {
-          bStart = onb;   // nb > onb: nur die letzten Halme sind neu
-          partial = 1;
-        } else {
-          // nb == onb (nur kopieren) oder nb < onb (Ueberschuss verschwindet)
-          // oder CAP: kein Platz fuer die neuen Halme mehr
-          if (copied > 0) {
-            buildOff[izl * CT + ixl] = nGrassNew - copied;
-            buildCnt[izl * CT + ixl] = (uint8_t)copied;
-          }
-          return;
-        }
+    }
+    // altes nb mit den aktuellen Parametern (altes Zentrum): ab welchem
+    // b-Index es keine alten Halme mehr gibt (neue Halme kommen ab da)
+    float odx = x - old_bcx, odz = z - old_bcz;
+    float odist = sqrtf(odx * odx + odz * odz);
+    float odens = dens_at(odist);
+    float onbf = 32.0f * odens * (0.4f + 0.6f * h4) * grassDensityScale;
+    if (onbf > 32.0f) onbf = 32.0f;
+    int onb = (int)onbf;
+    if (c_hash12(ix * 0.917f, iz * 0.311f) < onbf - (float)onb) onb++;   // stochastisch
+    // Alte Halme durchgehen: leben lassen, sterben lassen oder weg
+    int ocnt = cellCnt[oldIdx];
+    int ostart = cellOff[oldIdx];
+    int alive = 0;
+    for (int p = 0; p < ocnt; p++) {
+      const float *src = &grassInst[(ostart + p) * GRASS_FLOATS];
+      float death = src[10];
+      int copyIt, nowDying;
+      if (death > 0.0f) {
+        copyIt = (gWorldTime - death < 2.5f);   // Fade-out noch nicht zu Ende
+        nowDying = 0;                            // Death-Time behalten
+      } else if (alive < nb) {
+        copyIt = 1; nowDying = 0; alive++;
       } else {
-        return;   // nb == 0: Zelle hat keine Halme mehr
+        copyIt = 1; nowDying = 1;                // ueberzaehlig: sterben
       }
+      if (!copyIt) continue;
+      if (nGrassNew >= GRASS_CAP) break;
+      float *dst = &buildBuf[nGrassNew * GRASS_FLOATS];
+      for (int k = 0; k < GRASS_FLOATS; k++) dst[k] = src[k];
+      if (nowDying) dst[10] = gWorldTime;
+      nGrassNew++;
+      copied++;
+    }
+    if (nb > onb && nGrassNew + (nb - onb) <= GRASS_CAP) {
+      bStart = onb;   // nb > onb: nur die letzten Halme sind neu
+      partial = 1;
+    } else {
+      // nb <= onb (nur kopieren/sterben) oder CAP: kein Platz fuer neue
+      if (copied > 0) {
+        buildOff[izl * CT + ixl] = nGrassNew - copied;
+        buildCnt[izl * CT + ixl] = (uint8_t)copied;
+      }
+      return;
     }
   }
   // --- Vollstaendige Generierung ---
@@ -310,6 +342,7 @@ static void build_cell(int ix, int iz){
     // Birth-Time: Placeholder (0.0), wird in grass_build_finish gesetzt
     //  (erst beim Swap, nicht waehrend des Builds, sonst sind Halme schon "alt")
     d[9] = 0.0f;
+    d[10] = 0.0f;   // lebt (Death-Time nur fuer ueberzaehlige/Slider-Halme)
     nGrassNew++;
   }
   int cnt = nGrassNew - start + copied;
@@ -320,7 +353,11 @@ static void build_cell(int ix, int iz){
 }
 
 
+static int out_build_step(int maxCells);   // OUT-Build (Modus 1), s. unten
+
 int grass_build_step(int maxCells){
+  // OUT-Build (Modus 1): alte Zell-Tabelle direkt durchgehen
+  if (gBuildMode == 1) return out_build_step(maxCells);
   // Diamond-Order (L1-Distanz): Ring dr um das Zentrum, 4*dr Zellen pro Ring
   // (4 Kanten zu je dr Schritten, im Uhrzeigersinn vom oberen Punkt).
   // Bei GRASS_CAP-Ueberlauf fehlen die weitesten Zellen.
@@ -345,23 +382,50 @@ int grass_build_step(int maxCells){
   return dr > dmaxR;
 }
 
+// OUT-Build-Step (Modus 1): alte Zell-Tabelle durchgehen, alle Halme als
+// sterbend kopieren (d[10]=jetzt -> 2s Fade-out), fertig-verblaeste
+// (death > 2.5s zurueck) weglassen. Keine Generierung.
+static int out_build_step(int maxCells){
+  for (int i = 0; i < maxCells; i++) {
+    if (outStepState >= CT * CT) return 1;
+    int oi = outStepState++;
+    if (cellOff[oi] < 0) continue;
+    int cnt = cellCnt[oi];
+    int off = cellOff[oi];
+    int copied = 0;
+    for (int p = 0; p < cnt; p++) {
+      const float *src = &grassInst[(off + p) * GRASS_FLOATS];
+      if (src[10] > 0.0f && gWorldTime - src[10] >= 2.5f) continue;  // schon weg
+      if (nGrassNew >= GRASS_CAP) break;
+      float *dst = &buildBuf[nGrassNew * GRASS_FLOATS];
+      for (int k = 0; k < GRASS_FLOATS; k++) dst[k] = src[k];
+      dst[10] = gWorldTime;   // (neu) sterben: 2s Fade-out
+      nGrassNew++;
+      copied++;
+    }
+    if (copied > 0) {
+      buildOff[oi] = nGrassNew - copied;
+      buildCnt[oi] = (uint8_t)copied;
+    }
+  }
+  return outStepState >= CT * CT;
+}
+
 void grass_build_finish(void){
   // Birth-Time setzen (erst beim Swap, nicht waehrend des Builds):
   //  - kopierte Halme (d[9] != 0): alte Birth-Time behalten (Fade laeuft weiter)
   //  - generierte Halme (d[9] == 0): NEU -> blenden ueber 2s ein.
   //    Das sind: der Crescent am Gras-Rand (neue Zellen) + die Zusatz-
   //    halme in Zellen, deren nb durch die Kamerabewegung gestiegen ist
-  //    (Teil-Kopie in build_cell). Alle neu generierten Halme blenden ein
-  //    (auch beim ersten Build: das Grasfeld blendet beim Start ein).
-  int nNew = 0;
+  //    (Teil-Kopie in build_cell) + alle Halme im IN-Build (Slider/Start).
+  int nNew = 0, nDying = 0;
   for (int i = 0; i < nGrassNew; i++) {
     float *d = &buildBuf[i * GRASS_FLOATS];
-    if (d[9] != 0.0f) continue;   // kopierter Halm: Birth-Time erhalten
-    d[9] = gWorldTime;
-    nNew++;
+    if (d[9] == 0.0f) { d[9] = gWorldTime; nNew++; }
+    if (d[10] > 0.0f) nDying++;
   }
-  if (nNew > 0)
-    printf("Gras-Swap: %d Halme, %d neu (blenden 2s ein)\n", nGrassNew, nNew);
+  if (nNew > 0 || nDying > 0)
+    printf("Gras-Swap: %d Halme, %d neu, %d sterben (je 2s)\n", nGrassNew, nNew, nDying);
   if (nGrassNew < 1) nGrassNew = 1;   // defensive: kein 0-Byte-Upload
   pthread_mutex_lock(&gMu);
   hasOldBuild = 1;
@@ -370,7 +434,7 @@ void grass_build_finish(void){
   uint8_t *tc = cellCnt; cellCnt = buildCnt; buildCnt = tc;
   oldOffX0 = offX0; oldOffZ0 = offZ0;
   nGrass = nGrassNew;
-  gForceFull = 0;
+  gBuildMode = 0;
   gBuilding = 0;
   gBuildDone = 1;   // Main-Thread holt den Build per grass_build_finished_snapshot()
   pthread_mutex_unlock(&gMu);
@@ -388,9 +452,9 @@ void grass_build_finish(void){
 // geht direkt zum jeweils neuesten Zentrum. Mit Zell-Kopieren dauert ein
 // Build bei kleinen Verschiebungen nur ~100ms -> das Gras hinkt der
 // Kamera hochstens ~1-2m hinterher.
-void grass_build_request(float cx, float cz, int full){
+void grass_build_request(float cx, float cz, int mode){
   pthread_mutex_lock(&gMu);
-  gReqCX = cx; gReqCZ = cz; gReqFull = full;
+  gReqCX = cx; gReqCZ = cz; gReqMode = mode;
   gReqPending = 1;
   pthread_cond_signal(&gCv);
   pthread_mutex_unlock(&gMu);
@@ -420,10 +484,10 @@ static void* grass_worker(void* arg){
     while(!gReqPending) pthread_cond_wait(&gCv, &gMu);
     gReqPending = 0;
     float cx = gReqCX, cz = gReqCZ;
-    int full = gReqFull;
+    int mode = gReqMode;
     gBuilding = 1;
     pthread_mutex_unlock(&gMu);
-    grass_build_begin(cx, cz, full);
+    grass_build_begin(cx, cz, mode);
     while(!grass_build_step(1 << 30)) {}
     grass_build_finish();
     // Request, der während des Builds kam: gReqPending ist gesetzt ->

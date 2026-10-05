@@ -37,7 +37,7 @@ static void     (*p_XSetWMProtocols)(Display *, Window, Atom *, int);
 static KeySym   (*p_XLookupKeysym)(XKeyEvent *, int);
 static int      (*p_XLockPointer)(Window);
 static int      (*p_XUnlockPointer)(Window);
-static int      (*p_XQueryPointer)(Display *, Window, int *, int *, int *, int *, unsigned int *, unsigned int *, unsigned int *);
+static int      (*p_XQueryPointer)(Display *, Window, Window *, Window *, int *, int *, int *, int *, unsigned int *);
 static int      (*p_XWarpPointer)(Display *, Window, Window, int, int, unsigned int, unsigned int, int, int);
 
 // ================= GLX-Funktionszeiger (via glXGetProcAddressARB) =================
@@ -380,6 +380,17 @@ float grassHeightScale = 1.0f;   // 0.3 - 3.0 (Halmhoehe-Slider)
 float grassMaxDist = 80.0f;      // 40 - 120m (max. Gras-Sichtweite, Slider)
 float gWorldTime = 0.0f;         // aktuelle Weltzeit (fuer Birth-Time der Halme)
 static int sliderDragging = 0;          // 1 = Slider wird per Maus gezogen
+// Slider-Fade: Slider+Labels blenden ein, wenn die Maus sich ueber sie
+// bewegt (ohne Taste), und aus, wenn die Maus 3s nicht im Bereich war.
+// Einblenden 0.5s, Ausblenden 1.5s (wie beim Gras, nur anders getaktet).
+static float sliderFade = 1.0f;         // 0..1 (1 = sichtbar)
+static float lastMouseInAreaT = -1e9f;  // letzte Zeit, Maus im Slider-Bereich
+// Slider-Rebuild-Zustand (Debounce + 2-Phasen-Transition, s. Rebuild-Trigger)
+static float lastDensity = 1.0f, lastMaxDist = 80.0f;
+static float lastSliderT = -1e9f;       // letzter Slider-Wertwechsel
+static int   sliderDirty = 0;           // Slider-Wert geaendert, noch nicht gebaut
+static int   sliderPhase = 0;           // 0=idle 1=OUT laeuft 2=wartet 2s 3=IN laeuft
+static float sliderPhaseT = 0.0f;
 // MSAA_SAMPLES: dynamisch (msaaSamples, 4 oder 8, M-Taste)
 static void ensure_fbo(int w, int h) {
   int sw = w >> scaleIdx, sh = h >> scaleIdx;
@@ -501,6 +512,8 @@ static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: t
   p_glEnableVertexAttribArray(4);
   p_glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, GRASS_FLOATS * 4, (const void *)36);
   p_glVertexAttribDivisor(4, 1);
+  p_glVertexAttribPointer(5, 1, GL_FLOAT, GL_FALSE, GRASS_FLOATS * 4, (const void *)40);
+  p_glVertexAttribDivisor(5, 1);
 
   // Wireframe: aPos(3)
   p_glGenVertexArrays(1, &vaoWire);
@@ -637,7 +650,7 @@ static void save_screenshot_ppm(const char *path, int w, int h) {
 // Slider-Setzen (1=Dichte, 2=Hoehe, 3=Sichtweite), pos = 0..1
 static void set_slider(int which, float pos){
   if (pos < 0.0f) pos = 0.0f; if (pos > 1.0f) pos = 1.0f;
-  if (which == 1) grassDensityScale = 0.2f + pos * 7.8f;
+  if (which == 1) grassDensityScale = 0.2f + pos * 5.4f;   // max 5.6x (staubt bei MD=120 am 5M-CAP)
   else if (which == 2) grassHeightScale = 0.3f + pos * 2.7f;
   else grassMaxDist = 40.0f + pos * 80.0f;
 }
@@ -645,7 +658,8 @@ static void set_slider(int which, float pos){
 // Slider-Rendering (3 Slider: Dichte/Hoehe/Sichtweite). VBO muss gebunden
 // sein. Hintergrund- und Regler-Quads werden je in EINEM Draw gezeichnet
 // (gleiche Tints), der Fuellstand pro Farbe (3 Draws).
-static void draw_sliders(float posD, float posH, float posM, int w, int h, int locTint){
+static void draw_sliders(float posD, float posH, float posM, int w, int h, int locTint, float fade){
+  if (fade <= 0.004f) return;   // vollstendig ausgeblendet: gar nicht zeichnen
   const float hsc = hud_scale(h);
   const float slW = 300.0f * hsc, slH = 18.0f * hsc;
   const float x0 = w/2.0f - slW/2.0f, x1 = w/2.0f + slW/2.0f;
@@ -669,7 +683,7 @@ static void draw_sliders(float posD, float posH, float posM, int w, int h, int l
   // Tracks und Regler: JE Quad als eigener 4-Vertex-Strip. (Ein gemeinsamer
   // 12-Vertex-Strip wuerde die Quads mit Verbindungsdreiecken verbinden:
   // dunn graue/weiße Linien zwischen den Slidern.)
-  p_glUniform4f(locTint, 0.75f, 0.75f, 0.75f, 0.85f);   // hellgrauer Untergrund
+  p_glUniform4f(locTint, 0.75f, 0.75f, 0.75f, 0.85f * fade);   // hellgrauer Untergrund
   for (int i = 0; i < 3; i++) {
     p_glBufferData(GL_ARRAY_BUFFER, 16 * sizeof(float), &bg[i * 16], GL_DYNAMIC_DRAW);
     p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -683,10 +697,10 @@ static void draw_sliders(float posD, float posH, float posM, int w, int h, int l
       hx/w*2-1, 1-y1/h*2,   buv[0], buv[1],
     };
     p_glBufferData(GL_ARRAY_BUFFER, sizeof f, f, GL_DYNAMIC_DRAW);
-    p_glUniform4f(locTint, fill[i][0], fill[i][1], fill[i][2], 0.9f);
+    p_glUniform4f(locTint, fill[i][0], fill[i][1], fill[i][2], 0.9f * fade);
     p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
   }
-  p_glUniform4f(locTint, 1.0f, 1.0f, 1.0f, 1.0f);
+  p_glUniform4f(locTint, 1.0f, 1.0f, 1.0f, fade);
   for (int i = 0; i < 3; i++) {
     p_glBufferData(GL_ARRAY_BUFFER, 16 * sizeof(float), &hd[i * 16], GL_DYNAMIC_DRAW);
     p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -995,16 +1009,50 @@ int main(int argc, char **argv) {
       }
     }
 
+    // --- Zeiger-Position (XQueryPointer, jedes Frame) ---
+    // Fuer Maus-Look (Fly, relativ) und das Slider-Fade (absolut, Bereich).
+    int ptrInWin = 0, ptrX = 0, ptrY = 0, rx = 0, ry = 0;
+    if (p_XQueryPointer) {
+      // Prototyp aus third_party/include/X11/Xlib.h (9 Parameter — NICHT der
+      // Standard-X11-XQueryPointer!): root-/child-Fenster KOMMEN VOR den
+      // Koordinaten. ptrX/ptrY = win_x/win_y = FENSTER-Koordinaten.
+      Window rootRet, childRet; unsigned int mask;
+      ptrInWin = p_XQueryPointer(disp, win, &rootRet, &childRet, &rx, &ry, &ptrX, &ptrY, &mask);
+    }
+
+    // --- Slider-Fade: Maus im Bereich -> einblenden (0.5s); 3s ohne
+    //     Bereich -> ausblenden (1.5s). Beim Ziehen bleibt sichtbar.
+    //     (rawDt statt dt: UI-Fade laeuft in Echtzeit, nicht im dt-Clamp)
+    {
+      float fdt = (float)rawDt;
+      float hsc = hud_scale(winH);
+      float cs = 16.0f * hsc;
+      // Bereich = Tracks + Labels (laengstes Label "Sichtweite" = 10 Zeichen)
+      float ax0 = winW / 2.0f - 150.0f * hsc - 10.0f * cs - 8.0f * hsc;
+      float ax1 = winW / 2.0f + 150.0f * hsc;
+      float ay0 = winH - 100.0f * hsc;
+      float ay1 = winH - 26.0f * hsc;
+      int inArea = ptrInWin && ptrX >= ax0 && ptrX <= ax1 && ptrY >= ay0 && ay1 >= ptrY;
+      if (sliderDragging || inArea) {
+        if (inArea) lastMouseInAreaT = tNow;
+        if (sliderFade < 1.0f) {
+          sliderFade += fdt * 2.0f;   // 0.5s zum Einblenden
+          if (sliderFade > 1.0f) sliderFade = 1.0f;
+        }
+      } else if (tNow - lastMouseInAreaT >= 3.0f) {
+        sliderFade -= fdt * (1.0f / 1.5f);   // 1.5s zum Ausblenden
+        if (sliderFade < 0.0f) sliderFade = 0.0f;
+      }
+    }
+
     // --- Maus-Look (relativ, nur bei gedrückter linker Taste) ---
     // Delta zur letzten Position (kein Drift, wenn die Maus stillsteht).
     {
       static int lastPX = -1, lastPY = -1;
-      if (flyMode && p_XQueryPointer) {
-        int rx, ry, px, py; unsigned int rr, or_, mask;
-        p_XQueryPointer(disp, win, &rx, &ry, &px, &py, &rr, &or_, &mask);
-        if (lastPX < 0) { lastPX = px; lastPY = py; }
-        int dx = px - lastPX, dy = py - lastPY;
-        lastPX = px; lastPY = py;
+      if (flyMode && ptrInWin) {
+        if (lastPX < 0) { lastPX = ptrX; lastPY = ptrY; }
+        int dx = ptrX - lastPX, dy = ptrY - lastPY;
+        lastPX = ptrX; lastPY = ptrY;
         // Wrap-Artefakte am Fenster-Edge vermeiden
         if (dx >  winW / 2) dx -= winW;
         if (dx < -winW / 2) dx += winW;
@@ -1080,7 +1128,7 @@ int main(int argc, char **argv) {
         // Zentrum = camPos (nicht camTgt): Bei Kameradrehung bleibt das Gras
         //  "da" (kein Neubuild). Build-Radius = grassMaxDist + 20m Margin.
         gCX = camPos[0]; gCZ = camPos[2];
-        grass_build_begin(gCX, gCZ, 1);
+        grass_build_begin(gCX, gCZ, 2);   // Modus 2 (IN): alles neu, blendet beim Start ein
         while(!grass_build_step(16000)) {}
         grass_build_finish();
         p_glBindBuffer(GL_ARRAY_BUFFER, vboGrass);
@@ -1088,23 +1136,38 @@ int main(int argc, char **argv) {
         builtG = 1;
         grass_thread_start();
       } else if(!grassFrozen){
-        // Rebuild-Trigger: Positionswechsel >1m (nicht Drehung!) oder
-        // Dichte/Sichtweite-Slider. Der Worker-Thread baut "finish then
-        // latest": jeder Build wird zu Ende gebaut, der naechste geht direkt
-        // zum neuesten Zentrum (Zell-Kopieren macht Rebuilds schnell).
-        static float lastDensity = 1.0f, lastMaxDist = 80.0f;
-        int needBuild = 0, fullBuild = 0;
+        // Rebuild-Trigger:
+        //  a) Positionswechsel >1m -> POS-Build (Modus 0): Zell-Kopieren,
+        //     neue Halme faden 2s ein, ueberzaehlige (nb gesunken) faden 2s aus.
+        //  b) Dichte/Sichtweite-Slider: Debounce (Wert muss 1s stabil sein),
+        //     dann 2-Phasen-Transition: OUT (Modus 1: altes Gras fadet 2s
+        //     aus) -> IN (Modus 2: neues Gras fadet 2s ein). Ein kompletter
+        //     Slider-Zug = genau eine Transition (frueher: jeder Drag-Schritt
+        //     trieb einen eigenen Rebuild -> Gras verschwand/blendete mehrfach).
         if (grassDensityScale != lastDensity || grassMaxDist != lastMaxDist) {
           lastDensity = grassDensityScale;
           lastMaxDist = grassMaxDist;
-          needBuild = 1;
-          fullBuild = 1;   // Slider-Change: Voll-Generation (sprunghaft, egal)
+          lastSliderT = tNow;
+          sliderDirty = 1;
         }
-        if (fabsf(camPos[0] - gCX) > 1.0f || fabsf(camPos[2] - gCZ) > 1.0f)
-          needBuild = 1;
-        if (needBuild) {
+        int sliderPending = sliderDirty && (tNow - lastSliderT < 1.0f);
+        if (sliderPhase == 0 && sliderDirty && !sliderPending) {
+          // 1s Ruhe -> OUT-Build (altes Gras blendet aus; laeuft ueber die
+          //  alte Zell-Tabelle, Zentrum ist egal).
+          grass_build_request(gCX, gCZ, 1);
+          sliderPhase = 1;
+          sliderDirty = 0;
+        } else if (sliderPhase == 2 && tNow - sliderPhaseT >= 2.0f) {
+          // OUT-Fade zu Ende -> IN-Build (neues Gras blendet ein), Zentrum
+          //  = aktuelle Kamera.
           gCX = camPos[0]; gCZ = camPos[2];
-          grass_build_request(gCX, gCZ, fullBuild);
+          grass_build_request(gCX, gCZ, 2);
+          sliderPhase = 3;
+        }
+        if (sliderPhase == 0 && !sliderPending &&
+            (fabsf(camPos[0] - gCX) > 1.0f || fabsf(camPos[2] - gCZ) > 1.0f)) {
+          gCX = camPos[0]; gCZ = camPos[2];
+          grass_build_request(gCX, gCZ, 0);
         }
       }
       // Fertigen Build vom Worker-Thread abholen (VBO-Upload im Main-Thread,
@@ -1117,6 +1180,10 @@ int main(int argc, char **argv) {
           p_glBindBuffer(GL_ARRAY_BUFFER, vboGrass);
           p_glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)gn * GRASS_FLOATS * sizeof(float), gbuf, GL_DYNAMIC_DRAW);
           p_glFinish();
+          // Slider-Transition: OUT-Build fertig -> 2s warten (Fade-out),
+          // IN-Build fertig -> fertig.
+          if (sliderPhase == 1) { sliderPhase = 2; sliderPhaseT = tNow; }
+          else if (sliderPhase == 3) sliderPhase = 0;
         }
       }
     }
@@ -1283,9 +1350,8 @@ int main(int argc, char **argv) {
         p_glUniform4f(locTint, 0.0f, 0.0f, 0.0f, 0.35f);
         p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
       }
-      // Sämtlicher Text (Statuszeilen + Slider-Beschriftung) in EINEM
-      // Buffer/einem Draw (spart Code+Calls). Beschriftung links der Slider:
-      // Sichtweite (oben), Hoehe (Mitte), Dichte (unten).
+      // Status-Text (vollstaeckig opak) und Slider-Labels (mit sliderFade)
+      // in getrennten Draws (anderer Tint-Alpha).
       int n = 0;
       if (hudMode > 0) {
         n += build_text_verts(hudVerts + n * 4, hud1, winW, winH, 24.0f * hsc, 20.0f * hsc);
@@ -1294,17 +1360,25 @@ int main(int argc, char **argv) {
           n += build_text_verts(hudVerts + n * 4, hud3, winW, winH, 24.0f * hsc, 20.0f * hsc + 2 * cs);
         }
       }
+      if (n > 0) {
+        p_glBufferData(GL_ARRAY_BUFFER, n * 4 * sizeof(float), hudVerts, GL_DYNAMIC_DRAW);
+        p_glUniform4f(locTint, 1.0f, 1.0f, 1.0f, 1.0f);
+        p_glDrawArrays(GL_TRIANGLES, 0, n);
+      }
       const char *lbl[3] = { "Sichtweite", "Hohe", "Dichte" };
       float slY[3] = { winH - 100.0f * hsc, winH - 72.0f * hsc, winH - 44.0f * hsc };
+      int nl = 0;
       for (int i = 0; i < 3; i++)
-        n += build_text_verts(hudVerts + n * 4, lbl[i], winW, winH,
+        nl += build_text_verts(hudVerts + nl * 4, lbl[i], winW, winH,
                               winW / 2.0f - 150.0f * hsc - (float)strlen(lbl[i]) * cs - 8.0f * hsc, slY[i] + 1.0f * hsc);
-      p_glBufferData(GL_ARRAY_BUFFER, n * 4 * sizeof(float), hudVerts, GL_DYNAMIC_DRAW);
-      p_glUniform4f(locTint, 1.0f, 1.0f, 1.0f, 1.0f);
-      p_glDrawArrays(GL_TRIANGLES, 0, n);
-      draw_sliders((grassDensityScale - 0.2f) / 7.8f,
+      if (nl > 0 && sliderFade > 0.004f) {
+        p_glBufferData(GL_ARRAY_BUFFER, nl * 4 * sizeof(float), hudVerts, GL_DYNAMIC_DRAW);
+        p_glUniform4f(locTint, 1.0f, 1.0f, 1.0f, sliderFade);
+        p_glDrawArrays(GL_TRIANGLES, 0, nl);
+      }
+      draw_sliders((grassDensityScale - 0.2f) / 5.4f,
                    (grassHeightScale - 0.3f) / 2.7f,
-                   (grassMaxDist - 40.0f) / 80.0f, winW, winH, locTint);
+                   (grassMaxDist - 40.0f) / 80.0f, winW, winH, locTint, sliderFade);
     }
     p_glDisable(GL_BLEND);
 
