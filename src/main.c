@@ -512,6 +512,7 @@ static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: t
   p_glEnableVertexAttribArray(4);
   p_glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, GRASS_FLOATS * 4, (const void *)36);
   p_glVertexAttribDivisor(4, 1);
+  p_glEnableVertexAttribArray(5);
   p_glVertexAttribPointer(5, 1, GL_FLOAT, GL_FALSE, GRASS_FLOATS * 4, (const void *)40);
   p_glVertexAttribDivisor(5, 1);
 
@@ -917,6 +918,7 @@ int main(int argc, char **argv) {
             printf("HUD: %s\n", hudMode == 2 ? "Vollstats (2 Zeilen)" : (hudMode == 1 ? "reduziert (1 Zeile)" : "aus"));
           }
           if (ks == XK_v) { grassOnly = !grassOnly; printf("TEST: nur Gras zeichnen: %s\n", grassOnly ? "AN" : "aus"); }
+          if (ks == XK_b) grass_debug_dump();
           if (ks == XK_o) {
             // Fly <-> Orbit umschalten, ohne Sprung synchronisieren
             if (flyMode) {

@@ -425,7 +425,7 @@ void grass_build_finish(void){
     if (d[10] > 0.0f) nDying++;
   }
   if (nNew > 0 || nDying > 0)
-    printf("Gras-Swap: %d Halme, %d neu, %d sterben (je 2s)\n", nGrassNew, nNew, nDying);
+    printf("Gras-Swap t=%.2f: %d Halme, %d neu, %d sterben (je 2s)\n", gWorldTime, nGrassNew, nNew, nDying);
   if (nGrassNew < 1) nGrassNew = 1;   // defensive: kein 0-Byte-Upload
   pthread_mutex_lock(&gMu);
   hasOldBuild = 1;
@@ -467,6 +467,29 @@ void grass_build_finished_snapshot(float **buf, int *n){
   if (gBuildDone) { *buf = grassInst; *n = nGrass; gBuildDone = 0; }
   else *buf = NULL;
   pthread_mutex_unlock(&gMu);
+}
+
+// DEBUG (F12): aktueller Buffer-Zustand + erwartete Shader-Fade summieren.
+void grass_debug_dump(void){
+  int nAlive = 0, nFading = 0, nFaded = 0;
+  float sumFade = 0.0f;
+  for (int i = 0; i < nGrass; i++) {
+    const float *d = &grassInst[i * GRASS_FLOATS];
+    float death = d[10];
+    float fi;
+    float age = gWorldTime - d[9];
+    float t = age / 2.0f; if (t < 0) t = 0; if (t > 1) t = 1;
+    fi = t * t * (3.0f - 2.0f * t);
+    if (death <= 0.0f) { nAlive++; sumFade += fi; }
+    else {
+      float da = (gWorldTime - death) / 2.0f; if (da < 0) da = 0; if (da > 1) da = 1;
+      float fo = 1.0f - (da * da * (3.0f - 2.0f * da));
+      sumFade += fi * fo;
+      if (gWorldTime - death < 2.0f) nFading++; else nFaded++;
+    }
+  }
+  printf("GRAS-DEBUG t=%.2f: %d Halme: %d lebendig, %d fadet, %d verblasst; Summe-ShaderFade=%.0f (%.1f%%)\n",
+         gWorldTime, nGrass, nAlive, nFading, nFaded, sumFade, 100.0f * sumFade / (float)nGrass);
 }
 
 // Build laeuft gerade? (Request wartet oder Worker generiert) — fuer den HUD.

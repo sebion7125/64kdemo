@@ -1,18 +1,12 @@
 # 64kDemo — Status
 
-Stand: 2026-10-05, Runde 4. **Fünf Features fertig und verifiziert**
-(Fade-out, CAP 5M, Dichte-Kalibrierung, Slider-Transition, Slider-UI-Fade).
-VM-Tests + Nutzer-Host-Test (4k) bestaetigt.
+Stand: 2026-10-05, Runde 5. **Gras-Fade-out WIRKLICH gefixt** (Wurzel:
+fehrendes glEnableVertexAttribArray(5) in der VAO).
 
 ## ⚡ SOFORT NÄCHSTER SCHRITT
 
-Nutzer-Feedback auf die Runde-4-Features sammeln (Host):
-1. Faehrt zurueck: fadet das Gras jetzt sanft aus (nicht ploetzlich weg)?
-2. Slider ziehen: eine sanfte Transition (aus + ein) statt Mehrfach-Blitzen?
-3. Slider: Ein/Ausblenden bei Maus-Naeherung/Entfernung ok (0.5s/1.5s, 3s Delay)?
-4. Max-Dichte (5.6x) + MD=120: CAP-Indikator im HUD, Performance ok?
-
-Danach (in dieser Reihenfolge):
+Nutzer-Host-Test: Raeckwaertsfahrt + Slider-Change — fadet das Gras jetzt
+sanft aus (2s) statt ploetzlich weg? Danach:
 1. Nutzer-Feedback auf Dichte/Farben/Weite sammeln und abstimmen
 2. Entfernungssortierung verifizieren (genügt die Chunk-Methode oder
    braucht es pro-Frame-Sortierung?)
@@ -20,9 +14,56 @@ Danach (in dieser Reihenfolge):
    Script /tmp/64k.ld bringt 66,864; .plt.sec discarden + Rest kürzen)
 4. Optional: Schritt 7 (Baum-Schatten, docs/grasplan.md)
 
+## Session 2026-10-05, Runde 5 (Gras-Fade-out: Wurzel = VAO-Attribut 5)
+
+### FIXED: Gras-Fade-out war tot (WURZEL: glEnableVertexAttribArray(5) fehlte)
+- **Symptom:** Raeckwaertsfahrt UND Slider-Change: altes Gras verschwand
+  instantan, nur das neue fadete ein. Runde 4 hatte Death-Time d[10] +
+  Shader-Fade eingebaut — aber visuell wirkte nichts.
+- **Wurzelursache:** main.c, VAO-Setup (Zeile ~515): Attribut 5 (iDeath)
+  hatte `glVertexAttribPointer` + `glVertexAttribDivisor`, aber KEIN
+  `glEnableVertexAttribArray(5)`. Spec: deaktiviertes Attribut = Konstante
+  (0,0,0,1) -> iDeath = 0 fuer ALLE Halme -> `if (iDeath > 0.0)` im Shader
+  nie wahr -> Fade-out-Faktor nie angewendet -> Halme blieben auf voller
+  Alpha, bis der naechste Build sie aus dem Buffer loeschte -> "instantan".
+  Fade-in (Attribut 4, aktiviert) lief -> genau das Symptommuster.
+- **Fix:** 1 Zeile: `p_glEnableVertexAttribArray(5);` vor dem Pointer-Call.
+- **Wie die Fehlführung zustande kam (Lehre):** CPU, Shader-Code, VBO-
+  Upload, Zeitbasis, Blending waren ALLE korrekt. Die Diagnose lief ueber:
+  1) Unit-Test (Buffer-Inhalt korrekt: sterbende Halme bleiben 2.5s, Death-
+     Times stimmen), 2) Instrumentierung (Taste b = grass_debug_dump():
+     Zaeht lebendig/fadet/verblasst + Summe der erwarteten Shader-Fade;
+     Gras-Swap-Log mit t=). Buffer zeigte 100% -> 46.9% -> 0% ueber 2s —
+     aber das Auge sah nichts. Also lag es zwischen Buffer und Pixel:
+     VAO-Setup zeilenweise gegen Spec geprueft -> fehlendes Enable.
+- **Verifiziert (VM, Screenshot-Serie, Gras-nur-Modus, G-Kanal = Alpha-Proxy,
+  identischer Test mit altem/neuem Binary):**
+  - ALT: 6.28M -> 6.28M -> 6.30M -> 6.35M -> 6.30M -> 6.27M (kein Rueckgang,
+    Gras voll bis zum IN-Swap)
+  - NEU: 6.26M -> 6.28M -> 6.28M -> 4.80M (77%) -> 1.16M (18%) -> 1.18M
+    (18%) -> 5.66M (90%) — sanfter OUT-Fade (2s), dann IN-Fade.
+- **Beigehalten (Debug-Werkzeug):** Taste b = grass_debug_dump() (scene.h-
+  Deklaration, grass_cpu.c Implementierung), Gras-Swap-Log mit t=.
+- Hinweis: der LOD-Fade (Halme werden an der Gras-Kante mit Distanz
+  kleiner, lod = 1-smoothstep(MD-12, MD, d)) ist ein ZWEITER, unabhaengiger
+  Mechanismus — er maskiert den Death-Fade an der Kante teilweise, ist aber
+  nicht die Ursache des Bugs (Slider-OUT faedete das GANZE Feld instantan
+  aus, wo kein LOD reinwirkt).
+
+### Test-Infrastruktur (ergänzt, /tmp)
+- /tmp/fade_verify.sh: Slider-Test mit Screenshot-Serie (neues Binary).
+- /tmp/fade_verify_old.sh + /tmp/64kdemo_old: identischer Test mit altem
+  Binary (Vorher/Nachher-Vergleich).
+- /tmp/grassfade_test.c: isolierter GL-Test (echter grass.vert + Debug-Frag
+  mit vFade als Helligkeit) — fertig gebaut, GLX-Setup in der VM noch
+  unfertig (BadMatch); der Bug war bis dahin per Code-Inspektion gefunden.
+- /tmp/test_fadeout.c: CPU-Unit-Test Raeckwaertsfahrt (Buffer-Seite ok).
+
 ## Session 2026-10-05, Runde 4 (Fade-out, 5M, Slider-Transition, Slider-UI-Fade)
 
-### 1) FIXED: Gras-Fade-out (Death-Time d[10])
+### 1) FIXED: Gras-Fade-out (Death-Time d[10]) — Mechanik drin, aber erst
+Runde 5 wirklich sichtbar (Wurzel: fehlendes glEnableVertexAttribArray(5),
+s. Runde 5).
 - Rueckwaertsfahrt verschwand vorher ploetzlich (nb gesunken -> Halm weg).
 - Jetzt: GRASS_FLOATS 11 (d[10] = Death-Time, 0 = lebt). build_cell waelt
   pro Halm: lebt+nb reicht -> kopieren; lebt+ueberzaehlig -> kopieren +

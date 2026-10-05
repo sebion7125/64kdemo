@@ -76,6 +76,7 @@ void grass_build_finish(void);
 void grass_build_request(float cx, float cz, int full);
 void grass_build_finished_snapshot(float **buf, int *n);
 int  grass_build_busy(void);   // 1 = Request wartet oder Worker generiert
+void grass_debug_dump(void);   // DEBUG F12: Buffer-Zustand + erwartete Shader-Fade
 int  grass_thread_start(void);
 
 #endif
