@@ -79,7 +79,10 @@ static float g_half(void){
     for (int i = 0; i < 30; i++) {
       float mid = (lo + hi) * 0.5f;
       float dens = powf(1.0f - c_smoothstep(8.0f, md, mid), 1.0f);
-      if (dens >= 0.01f) lo = mid; else hi = mid;
+      // Schwelle 0.09: Kante wo die mittlere Halmzahl ~2 ist (32*dens*0.7).
+      // (Frueher 0.01: die 1m-Crescent-Zone beim Positions-Shift hatte
+      // dens < 0.01 -> 0 Halme/Zelle -> nichts zum Einblenden (Fade tot).)
+      if (dens >= 0.09f) lo = mid; else hi = mid;
     }
     gDCut = (lo + hi) * 0.5f;
     gDCutMD = md;
@@ -169,15 +172,19 @@ static void build_cell(int ix, int iz){
     float dist = sqrtf(dx * dx + dz * dz);
     float dens = dens_at(dist);
     if (dens >= 0.01f) {
-      int nb = (int)(32.0f * dens * (0.4f + 0.6f * h4) * grassDensityScale);
-      if (nb > 32) nb = 32;
+      float nbf = 32.0f * dens * (0.4f + 0.6f * h4) * grassDensityScale;
+      if (nbf > 32.0f) nbf = 32.0f;
+      int nb = (int)nbf;
+      if (c_hash12(ix * 0.917f, iz * 0.311f) < nbf - (float)nb) nb++;   // stochastisch
       // altes nb mit den aktuellen Parametern (altes Zentrum): gleich =
       // Halm-Menge unveraendert -> kopieren
       float odx = x - old_bcx, odz = z - old_bcz;
       float odist = sqrtf(odx * odx + odz * odz);
       float odens = dens_at(odist);
-      int onb = (int)(32.0f * odens * (0.4f + 0.6f * h4) * grassDensityScale);
-      if (onb > 32) onb = 32;
+      float onbf = 32.0f * odens * (0.4f + 0.6f * h4) * grassDensityScale;
+      if (onbf > 32.0f) onbf = 32.0f;
+      int onb = (int)onbf;
+      if (c_hash12(ix * 0.917f, iz * 0.311f) < onbf - (float)onb) onb++;   // stochastisch
       if (onb == nb) {
         int cnt = cellCnt[oldIdx];
         if (nGrassNew + cnt > GRASS_CAP) cnt = GRASS_CAP - nGrassNew;
@@ -206,21 +213,22 @@ static void build_cell(int ix, int iz){
   //   - Pow 1.6: nimmt in der Ferne starker ab (nah bleibt dicht)
   //   - Kein Hard-Cutoff bei 0.05, sondern weicher Abbruch bei 0.01
   float dens = dens_at(dist);
-  if(dens < 0.01f) return;
+  if(dens < 0.09f) return;
   float h = c_terrainH(px, pz);
   if(h < WATER_Y + 0.10f || h > 7.5f) return;  // kein Wasser, keine Gipfel
   if(fabsf(c_terrainH(px + 0.4f, pz) - h) > 0.25f ||
      fabsf(c_terrainH(px, pz + 0.4f) - h) > 0.25f) return;  // Steilhang
   float cl = c_fbm(px * 0.12f, pz * 0.12f);       // Gras-Flecken
   if(h3 > cl + 0.50f) return;                     // Flecken
-  // Anzahl Halme: 4x mehr im Nahbereich (war 1+5*dens, jetzt 4+20*dens),
-  // skaliert mit Dichte und Dichte-Skala (Slider)
   // Anzahl Halme: 32*dens (ohne Basis-Offset) -> laeuft weich gegen 0 an der
   // Sichtweite-Kante (kein harter Gras-Rand mehr). Cap 32 laesst dem
-  // Dichte-Slider Spielraum im Nahbereich. (Frueher 24: zu dunn in der
-  // Nahe UND in der Ferne — flacher Blickwinkel braucht mehr Haelme.)
-  int nb = (int)(32.0f * dens * (0.4f + 0.6f * h4) * grassDensityScale);
-  if(nb > 32) nb = 32;
+  // Dichte-Slider Spielraum im Nahbereich. Stochastisches Runden: der
+  // Bruchteil kommt mit seiner Wahrscheinlichkeit dazu (Kante bleibt
+  // bestockt -> der 1m-Shift-Crescent hat Halme -> Fade-in funktioniert).
+  float nbf = 32.0f * dens * (0.4f + 0.6f * h4) * grassDensityScale;
+  if (nbf > 32.0f) nbf = 32.0f;
+  int nb = (int)nbf;
+  if (c_hash12(ix * 0.917f, iz * 0.311f) < nbf - (float)nb) nb++;
   // Halmgroesse: BASIS-Werte ohne Distanz-Skalierung. Die Distanz-Skalierung
   // (groesser in der Ferne, um Flaechen abzudecken) passiert im Shader
   // (grass.vert) kontinuierlich zur aktuellen Kameradistanz.
