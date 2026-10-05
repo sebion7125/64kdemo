@@ -1,22 +1,20 @@
 # 64kDemo — Status
 
-Stand: 2026-10-05, nach Thread/Fade/Breite/Terrainfarbe-Session. **Chat aktiv** (dieser Bericht ist der Übergabe-Stand).
+Stand: 2026-10-05, nach Gras-Optik-Session (Schritte 1,3-6) + 64k-Budget.
 
 ## ⚡ SOFORT NÄCHSTER SCHRITT
 
-**Gras-Grafik-Verbesserungen** (Arbeitsplan vom Nutzer, 7 Schritte):
-1. Transluzenz (Gegenlicht) in grass.frag
-2. Abgerundete Normalen (vSide/vR)
-3. Schwaches Glanzlicht (Blinn-Phong)
-4. Büschel/Clumping (Voronoi) in grass_cpu.c
-5. Grundfarbe aus dem Terrain (4-Oktaven-fbm in grass.frag)
-6. Wind als wandernde Böen in grass.vert
-7. (optional) Baum-Schatten auf Gras
+**Visuelle Verifizierung durch den Nutzer** (Gras-Optik-Änderungen dieser
+Session): Transluzenz (in Sonnenrichtung schauen), Specular, Clumping
+(Büschel + freie Flecken), Grundfarbe aus dem Terrain (Basis nimmt
+Gras-/Sandfarbe an), wandernde Böen (Wind driftet ~3.5 m/s).
 
-Regeln: ein Schritt pro Commit (bauen, Screenshot, vergleichen, committen),
-ur grass_cpu.c/grass.vert/grass.frag ändern, GLSL 330 core, keine neuen
-Uniforms wenn möglich, **Binärgröße < 65536 Byte mit -Os -s** (Makefile
-muss dafür angepasst werden), hash12/vnoise/fbm aus fragment.glsl übernehmen.
+Danach optional: **Schritt 7 (Baum-Schatten auf Gras)** aus dem
+7-Schritte-Plan (vorher: 1=Transluzenz, 2=Normalen [schon vor der Session
+davon], 3=Specular, 4=Clumping, 5=Grundfarbe, 6=Böen — alle erledigt).
+
+**64k-Budget: ERREICHT — 64,032 Byte** (Ziel < 65,536 mit -Os -s, jetzt
+zusätzlich -no-pie -fno-asynchronous-unwind-tables -Wl,-z,noseparate-code).
 
 ### Kontext: was diese Session alles verändert hat
 
@@ -57,6 +55,30 @@ muss dafür angepasst werden), hash12/vnoise/fbm aus fragment.glsl übernehmen.
 - `main.c` — GL-Setup, Mesh-Pass, Raymarch-Pass, Compositing, Kamera, HUD
 
 **Kamera:** Free-Fly (Pointer-Lock, Halten-links = Look, WASD, Space/X hoch/runter, Shift Turbo, O Orbit, R Reset). Pitch ±83° Clamp, invertiert, Sensitivität 0.0008.
+
+## Gefixt (Session 2026-10-05, Gras-Optik + 64k-Budget)
+
+- [x] **Gras-Optik Schritt 1 (Transluzenz)**: `pow(max(dot(-rd,SUN),0),3)`
+  * (0.3+0.7*vT) * 0.55 mit Halm-Albedo — Gegenlicht, Spitze heller.
+- [x] **Schritt 3 (Specular)**: Blinn-Phong, Exponent 24, Faktor 0.12,
+  Spitzen staerker (dezent: Pixel = mehrere Halme).
+- [x] **Schritt 4 (Clumping)**: 8m-Grid, pro Zelle Hash-Cluster-Mittelpunkt
+  + Dichte-Varianz, nb * (0.21..1.0) nach Distanz zum Mittelpunkt.
+  Haengt nur von (x,z) ab -> Zell-Kopieren bleibt gueltig. Halmzahl
+  ~40% (freie Flecken), Build schneller (246k statt 610k Halme).
+- [x] **Schritt 5 (Grundfarbe)**: Halm-Basis = Terrain-Grasfarbe
+  (4-Oktaven-fbm, gleiche Werte/Scale wie terrainColor) + Sand am Ufer.
+  Basis und Terrain nutzen dieselbe Formel -> LOD-UEbergang nahtlos.
+  fbm in grass.frag auf 4 Oktaven (Consistency; wirkt auch auf Wolken).
+- [x] **Schritt 6 (Boen)**: vnoise im mitbewegten Koordinatensystem
+  (~3.5 m/s) * Front (smoothstep 0.55..0.85); Basis-Brise bleibt;
+  Normale neigt sich mit der Boe. hash12/vnoise wie in fragment.glsl.
+- [x] **64k-Budget: 64,032 Byte** (war 76,056 bei -Os -s). Hebel:
+  -no-pie + -fno-asynchronous-unwind-tables + -Wl,-z,noseparate-code
+  (Linker-Layout/Padding) + Slider-Helfer + 1 MSAA-Blit + 4 ungenutzte
+  GL-Funktionen weg + kuenzere Strings + Shader-Minify (Minifier:
+  Kommentare/Leerzeilen/Literale, ein String-Literal pro Shader).
+- [x] Makefile: Groessen-Check nach dem Build (Warnt bei > 65,536).
 
 ## Gefixt (Session 2026-10-05, 1m-Trigger)
 
@@ -207,10 +229,10 @@ Funktioniert auch auf NVIDIA (dort wird `gl_FragDepth` immer geschrieben).
 
 ## Aktuell offen / To-Do
 
-### 1. Gras-Grafik (AKTUELL, siehe SOFORT NÄCHSTER SCHRITT)
-- [ ] Makefile auf -Os -s (64k-Budget) + Baseline-Größe messen
-- [ ] Schritte 1-6 umsetzen (einer pro Commit)
-- [ ] Visuell verifizieren (Nutzer): Fade-in, Breite, Terrainfarbe, Übergang
+### 1. Gras (Gras-Optik-Schritte 1,3-6 + Budget sind fertig)
+- [ ] Visuell verifizieren (Nutzer): Transluzenz, Specular, Clumping,
+  Grundfarbe, Böen, Fade-in, Terrainfarbe-Übergang
+- [ ] Optional: Schritt 7 (Baum-Schatten auf Gras)
 - [ ] V-Modus-Crash auf Host neu testen (maximiert + AA off)
 - [ ] Gras-Flackern sehr nah an der Kamera prüfen (Compositing/Depth)
 
@@ -227,8 +249,8 @@ Funktioniert auch auf NVIDIA (dort wird `gl_FragDepth` immer geschrieben).
 - [ ] llvmpipe (VM): Root-Cause für schwarzes Bild mit MSAA finden (vermutlich Depth-Blit → DEPTH_COMPONENT24-Textur + Sampling im selben Frame)
 
 ### 5. Binärgröße
-- [ ] **unter 64 KB** (weiche Grenze; Fokus = Prozeduralität)
-- [ ] Optionen: Strings/Shader kürzen, `-ffunction-sections -Wl,--gc-sections`, Font-Atlas verkleinern
+- [x] **unter 64 KB**: 64,032 Byte (siehe Commit "64k-Budget")
+- [ ] Bei neuen Features: Budget-Check im Makefile warnt bei > 65,536
 
 ### 6. Sonstiges
 - [ ] STATUS.md bei Änderungen aktuell halten
@@ -252,11 +274,14 @@ python3 -c "from PIL import Image; Image.open('/tmp/64kdemo_shot.ppm').save('/tm
 - Compositing-Blend-Zone: ±0.03m
 - Gras: STEP 0.30m, Build-Radius = Dichte-Cutoff (~70m bei MD=80),
   Dichte-Falloff `pow(1-smoothstep(8, grassMaxDist, dist), 1.6)` (LUT),
-  Halme/Zelle `4+20*dens` (Cap 12), GRASS_CAP 1.5M, GRASS_FLOATS 10
+  Halme/Zelle `4+20*dens` (Cap 12) * Clumping-Faktor (0.21..1.0, 8m-Grid),
+  GRASS_CAP 1.5M, GRASS_FLOATS 10
   (pos3, hoehe, breite, phase, schattierung, yaw, lean, birth)
   — hoehe/breite = BASIS-Werte, Distanz-Skalierung im Shader (grass.vert)
   — Generator im eigenen Thread ("finish then latest"), Zell-Kopieren
-    macht 1m-Rebuilds ~150ms, VBO-Upload im Main-Thread
+    macht 1m-Rebuilds ~125ms, VBO-Upload im Main-Thread
+  — Shader: Transluzenz, Specular, Grundfarbe aus Terrain (4-Oct-fbm),
+    wandernde Boen (vnoise, ~3.5 m/s)
 - Bäume: Rebuild >12m (camTgt), Gras: Rebuild >1m (camPos)
 - Slider: Dichte 0.2–8.0x, Höhe 0.3–3.0x, Sichtweite 40–120m (Maus, unten Mitte)
 - Tasten: M=AA (4x/8x/OFF), G=Gras-Freeze, V=Nur-Gras, P=Screenshot,
