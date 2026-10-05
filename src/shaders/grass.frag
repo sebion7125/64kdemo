@@ -57,11 +57,11 @@ void main(){
   // die Halm-Basis uebernimmt die lokale Gras-/Sandfarbe, die Spitze bleibt
   // hell (Silhouette gegen den Himmel). Gleiche Albedo-Werte wie terrainColor.
   float g = fbm(vPos.xz * 0.9);
-  vec3 tGrass = mix(vec3(0.22, 0.42, 0.13), vec3(0.48, 0.60, 0.18), g) * vec3(0.87, 0.93, 0.89);
+  vec3 tGrass = mix(vec3(0.18, 0.46, 0.09), vec3(0.37, 0.66, 0.12), g) * vec3(0.87, 0.93, 0.89);
   float sandM = 1.0 - smoothstep(0.05, 0.40, abs(vPos.y - WATER_Y));
   vec3 sand = mix(vec3(0.62, 0.55, 0.38), vec3(0.72, 0.66, 0.48), fbm(vPos.xz * 1.5));
   vec3 base = mix(tGrass, sand, sandM);
-  vec3 tip  = vec3(0.45, 0.58, 0.17);
+  vec3 tip  = vec3(0.34, 0.64, 0.11);
   vec3 albedo = mix(base, tip, vT * vT) * (0.75 + 0.5 * vCol.x);
   float dif = max(dot(n, SUN), 0.0) * 0.85 + 0.15;
   vec3 amb = vec3(0.40, 0.50, 0.68) * (0.45 + 0.55 * max(n.y, 0.0));

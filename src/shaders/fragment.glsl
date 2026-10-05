@@ -141,7 +141,7 @@ vec3 terrainColor(vec3 p, vec3 n, float h, vec3 rd){
   // -> beim LOD-Fade in der Ferne war der Uebergang sichtbar. Scale (0.87,
   // 0.93, 0.89) = Halm-Mittelwert / Terrain-Mittelwert (siehe Albedo in
   // grass.frag: mix(base,tip,vT^2) * (0.75+0.5*sh), Mittel = 0.304/0.475/0.138).
-  vec3 grass = mix(vec3(0.22, 0.42, 0.13), vec3(0.48, 0.60, 0.18), g) * vec3(0.87, 0.93, 0.89);
+  vec3 grass = mix(vec3(0.18, 0.46, 0.09), vec3(0.37, 0.66, 0.12), g) * vec3(0.87, 0.93, 0.89);
   // Blumen
   vec2 fc = floor(p.xz * 1.3);
   float fl = hash12(fc);
