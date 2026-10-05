@@ -56,6 +56,11 @@ void main(){
   float dif = max(dot(n, SUN), 0.0) * 0.85 + 0.15;
   vec3 amb = vec3(0.40, 0.50, 0.68) * (0.45 + 0.55 * max(n.y, 0.0));
   vec3 col = albedo * (vec3(1.0, 0.92, 0.78) * dif + amb);
+  // Transluzenz: Licht, das durch den Halm scheint (Gegenlicht).
+  // Stark wenn die Kamera in Sonnenrichtung schaut (Blickrichtung ~ sun),
+  // an der Spitze mehr als an der Basis (duennere Stelle).
+  float tl = pow(max(dot(-rd, SUN), 0.0), 3.0) * (0.3 + 0.7 * vT);
+  col += albedo * tl * 0.55;
   float t = length(vPos - uCamPos);
   float fog = 1.0 - exp(-t * t * 0.00004);
   col = mix(col, skyColor(rd), fog);
