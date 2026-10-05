@@ -29,7 +29,7 @@ float fbm(vec2 p){
 }
 vec3 skyColor(vec3 rd){
   float t = clamp(rd.y, 0.0, 1.0);
-  vec3 col = mix(vec3(0.72, 0.83, 0.95), vec3(0.22, 0.42, 0.82), pow(t, 0.55));
+  vec3 col = mix(vec3(0.67, 0.78, 0.96), vec3(0.22, 0.42, 0.82), pow(t, 0.55));
   float sd = max(dot(rd, SUN), 0.0);
   col += vec3(1.0, 0.85, 0.6) * (pow(sd, 900.0) * 10.0 + pow(sd, 80.0) * 0.3 + pow(sd, 8.0) * 0.12);
   if(rd.y > 0.03){
@@ -55,7 +55,7 @@ void main(){
   vec3 col = albedo * (vec3(1.0, 0.95, 0.80) * (dif * 0.7 + 0.3) + amb + vec3(0.8, 1.0, 0.5) * thru);
   col *= 0.85 + 0.15 * vT;
   float t = length(vPos - uCamPos);
-  float fog = 1.0 - exp(-t * t * 0.00004);
+  float fog = 1.0 - exp(-t * t * 0.000015);
   col = mix(col, skyColor(rd), fog);
   O = vec4(col, 1.0);
 }

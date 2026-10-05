@@ -120,7 +120,7 @@ vec3 calcNormal(vec3 p, float matId){
 // ---------------- sky ----------------
 vec3 skyColor(vec3 rd){
   float t = clamp(rd.y, 0.0, 1.0);
-  vec3 col = mix(vec3(0.72, 0.83, 0.95), vec3(0.22, 0.42, 0.82), pow(t, 0.55));
+  vec3 col = mix(vec3(0.67, 0.78, 0.96), vec3(0.22, 0.42, 0.82), pow(t, 0.55));
   float sd = max(dot(rd, SUN), 0.0);
   col += vec3(1.0, 0.85, 0.6) * (pow(sd, 900.0) * 10.0 + pow(sd, 80.0) * 0.3 + pow(sd, 8.0) * 0.12);
   if(rd.y > 0.03){
@@ -204,7 +204,7 @@ vec3 waterColor(vec3 p, vec3 n, vec3 rd, float t){
     float rdiff = max(dot(rn, SUN), 0.0) * 0.85 + 0.15;
     vec3 ramb = vec3(0.40, 0.50, 0.68) * (0.45 + 0.55 * max(rn.y, 0.0));
     vec3 rcol = terrainColor(rp, rn, terrainH(rp.xz), -rr) * (vec3(1.0,0.92,0.78) * rdiff + ramb);
-    float rfog = 1.0 - exp(-tr * tr * 0.00004);
+    float rfog = 1.0 - exp(-tr * tr * 0.000015);
     rcol = mix(rcol, skyColor(rr), rfog);
     refl = rcol;
   }
@@ -215,7 +215,7 @@ vec3 waterColor(vec3 p, vec3 n, vec3 rd, float t){
   col += vec3(1.0, 0.95, 0.8) * glint * 1.5;
   float dif = max(dot(n, SUN), 0.0) * 0.85 + 0.15;
   col *= 0.75 + 0.25 * dif;
-  float fog = 1.0 - exp(-t * t * 0.00004);
+  float fog = 1.0 - exp(-t * t * 0.000015);
   col = mix(col, skyColor(rd), fog);
   return col;
 }
@@ -239,7 +239,7 @@ vec3 shade(vec3 p, vec3 n, vec3 rd, float t, float matId){
   }
   vec3 amb = vec3(0.40, 0.50, 0.68) * (0.45 + 0.55 * max(n.y, 0.0));
   vec3 col = albedo * (vec3(1.0, 0.92, 0.78) * dif * ao + amb);
-  float fog = 1.0 - exp(-t * t * 0.00004);
+  float fog = 1.0 - exp(-t * t * 0.000015);
   col = mix(col, skyColor(rd), fog);
   return col;
 }
