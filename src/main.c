@@ -654,9 +654,14 @@ static void draw_sliders(float posD, float posH, float posM, int w, int h, int l
     hd[i*16+8]=(hx-2)/w*2-1; hd[i*16+9]=1-y1/h*2;   hd[i*16+10]=buv[0]; hd[i*16+11]=buv[1];
     hd[i*16+12]=(hx+2)/w*2-1;hd[i*16+13]=1-y1/h*2;  hd[i*16+14]=buv[0]; hd[i*16+15]=buv[1];
   }
-  p_glBufferData(GL_ARRAY_BUFFER, sizeof bg, bg, GL_DYNAMIC_DRAW);
+  // Tracks und Regler: JE Quad als eigener 4-Vertex-Strip. (Ein gemeinsamer
+  // 12-Vertex-Strip wuerde die Quads mit Verbindungsdreiecken verbinden:
+  // dunn graue/weiße Linien zwischen den Slidern.)
   p_glUniform4f(locTint, 0.75f, 0.75f, 0.75f, 0.85f);   // hellgrauer Untergrund
-  p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 12);
+  for (int i = 0; i < 3; i++) {
+    p_glBufferData(GL_ARRAY_BUFFER, 16 * sizeof(float), &bg[i * 16], GL_DYNAMIC_DRAW);
+    p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  }
   for (int i = 0; i < 3; i++) {
     float hx = x0 + pos[i] * slW, y1 = y0[i] + slH;
     float f[16] = {
@@ -669,24 +674,10 @@ static void draw_sliders(float posD, float posH, float posM, int w, int h, int l
     p_glUniform4f(locTint, fill[i][0], fill[i][1], fill[i][2], 0.9f);
     p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
   }
-  p_glBufferData(GL_ARRAY_BUFFER, sizeof hd, hd, GL_DYNAMIC_DRAW);
   p_glUniform4f(locTint, 1.0f, 1.0f, 1.0f, 1.0f);
-  p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 12);
-  // Faden: verbindet die drei Regler-Positionen (dunn, weiss, 2px breit).
-  // Zwei Segmente (unten->Mitte, Mitte->oben) als 2px-Quads.
-  {
-    float fx[3] = { x0 + pos[0] * slW, x0 + pos[1] * slW, x0 + pos[2] * slW };
-    float fy[3] = { y0[0] + slH * 0.5f, y0[1] + slH * 0.5f, y0[2] + slH * 0.5f };
-    float fad[32];
-    for (int s = 0; s < 2; s++) {
-      fad[s*16+0] = (fx[s]-1)/w*2-1;   fad[s*16+1] = 1-fy[s]/h*2; fad[s*16+2] = buv[0]; fad[s*16+3] = buv[1];
-      fad[s*16+4] = (fx[s]+1)/w*2-1;   fad[s*16+5] = 1-fy[s]/h*2; fad[s*16+6] = buv[0]; fad[s*16+7] = buv[1];
-      fad[s*16+8] = (fx[s+1]-1)/w*2-1; fad[s*16+9] = 1-fy[s+1]/h*2; fad[s*16+10] = buv[0]; fad[s*16+11] = buv[1];
-      fad[s*16+12] = (fx[s+1]+1)/w*2-1; fad[s*16+13] = 1-fy[s+1]/h*2; fad[s*16+14] = buv[0]; fad[s*16+15] = buv[1];
-    }
-    p_glBufferData(GL_ARRAY_BUFFER, sizeof fad, fad, GL_DYNAMIC_DRAW);
-    p_glUniform4f(locTint, 1.0f, 1.0f, 1.0f, 0.8f);
-    p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 8);
+  for (int i = 0; i < 3; i++) {
+    p_glBufferData(GL_ARRAY_BUFFER, 16 * sizeof(float), &hd[i * 16], GL_DYNAMIC_DRAW);
+    p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
   }
 }
 
