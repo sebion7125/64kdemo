@@ -2,27 +2,24 @@
 
 Stand: 2026-10-05, Runde 5 (Chat-Wechsel). **Gras-Fade-out: VAO-Fix +
 Kanten-Pop-Fix committet und vom Nutzer bestätigt** (Slider ✓, Pop ✓ weg).
-**NEU: 3 Gras-Issues vom Nutzer-Host-Test gemeldet** (Längensprung in der
-Ferne, nach ~77m kein neues Gras mehr [**in der VM bestätigt**], Gras-
-Inseln abweichend vom Terrain). Details + Hypothesen + Testpläne unten
-in „ISSUES“.
+**NEU: 3 Gras-Issues vom Nutzer-Host-Test gemeldet.** Issue B (nach ~77m
+kein neues Gras mehr) ist **FIXED + VM-verifiziert**. Offen: Issue A
+(Längensprung in der Ferne) + Issue C (Gras-Inseln abweichend vom
+Terrain). Details + Hypothesen + Testpläne unten in „ISSUES“.
 
 ## ⚡ SOFORT NÄCHSTER SCHRITT (nächster Chat)
 
-**Offen: 3 Gras-Issues vom Nutzer-Host-Test (2026-10-05, nach Pop-Fix) +
-1 Wahrnehmungsfrage. Details + Hypothesen unten in „ISSUES“.**
+**Issue B (kein neues Gras nach ~77m) ist FIXED + VM-verifiziert**
+(zentriertes Walk-Quadrat beim CT-Clamp). Nutzer-Host-Test noch offen.
+**Offen: Issue A (Längensprung in der Ferne) + Issue C (Gras-Inseln).**
 
-Empfohlene Reihenfolge:
-1. **Issue B fixen (BESTÄTIGT, VM-Repro steht)**: Walk-Quadrat bei
-  CT-Clamp zentriert auf die Kamera (Code-Zeile steht oben im Issue).
-  Danach beide VM-Richtungen neu messen.
-2. **Issue A reproduzieren/messen** (Längensprung in der Ferne): VM:
+Reihenfolge:
+1. **Issue A reproduzieren/messen** (Längensprung in der Ferne): VM:
    Blade-Daten (Höhe) vor/nach Build für eine Bildschirmposition dumpen
    (in grass_debug_dump integrieren oder neue Taste).
-3. **Issue C (Inseln) in der VM suchen**: Halme-Höhen vs. c_terrainH an
+2. **Issue C (Inseln) in der VM suchen**: Halme-Höhen vs. c_terrainH an
    denselben Positionen dumpen; Raymarcher-SDF (0.85-Dämpfung) prüfen.
-   Issue B vorher fixen (Kandidat „stale Halme“ entfernt).
-4. Danach Wahrnehmungsfrage (Fade sichtbar?) mit Nutzer abstimmen
+3. Danach Wahrnehmungsfrage (Fade sichtbar?) mit Nutzer abstimmen
    (Death-Fade 2s → 3–4s? langsamere Testfahrt?).
 Danach wie bisher: Dichte/Farben/Weite, Entfernungssortierung, Budget,
 Baum-Schatten.
@@ -47,31 +44,28 @@ Baum-Schatten.
   eine feste Bildschirmposition vor/nach dem Swap (neues Debug: Taste?
   oder in grass_debug_dump integrieren).
 
-### Issue B: Nach einer Strecke wird kein neues Gras mehr generiert, Halmzahl fällt nur
+### Issue B: Nach einer Strecke wird kein neues Gras mehr generiert, Halmzahl fällt nur — **FIXED**
 - **Beobachtung (Nutzer):** nach Zurücklegen einer Strecke ein Modus,
   in dem plötzlich gar kein neues Gras mehr generiert wird und die
   Halmzahl nur noch fällt.
-- **BESTÄTIGT (VM-Repro, 2026-10-05):** 75s Geradeausfahrt:
-  - Richtung -x/-z (Taste w): Walk 700×700 (clamped), dcx0=222 →
-    FRONT ok, nur unsichtbarer Hinterkant-Rand abgeschnitten.
-  - Richtung +x/+z (Taste s): Walk 700×700, **dcx0=699** (Kamera am
-    Quadrat-Rand!), Halmzahl kollabiert **257 → 118 → 52, 0 neu** —
-    exakt das Nutzer-Symptom.
-- **Wurzel (Code nachvollzogen):** CT=700 (210m) clamps das Union-
-  Quadrat, behält aber die KLEINERE Kante (gix0/giz0 = ux0/uy0) →
-  Richtung +x/+z bleibt die hintere Kante am Start PINIERT, die vordere
-  (Generierung!) wird nach ~77m Fahrt abgeschnitten; ab ~143m liegt das
-  ganze Feld hinter der Kamera → kein Gras mehr, nur noch sterbende
-  Reste. Richtung -x/-z: nur unsichtbarer Hinterkant-Rand (ok).
-- **Fix (konkret):** Wenn Union-Breite > CT: Quadrat ZENTRIERT auf die
-  Kamera statt Kante behalten:
-  `if (gnx > CT) { gnx = CT; gix0 = (int)floorf(cx / GSTEP) - CT / 2; }`
-  (dito gnz/giz0). Alte Schichel: d-Schimmer (≤ 1m) poppt bei ~105m
-  Kamera-Distanz = jenseits des MD=80-Culls → unsichtbar (MD=120:
-  fadende Halme, nur nach hinten schauend knapp sichtbar — akzeptabel).
-  Frontkante immer volle 66,7m — in allen Richtungen.
-- **Verifizieren nach Fix:** beide VM-Richtungen 75s, b-Dump: gnx=700
-  aber dcx0 ≈ 350 (zentriert), Halmzahl stabil statt Kollaps.
+- **BESTÄTIGT (VM-Repro):** 75s Geradeausfahrt Richtung +x/+z (Taste s):
+  Walk 700×700, **dcx0=699** (Kamera am Quadrat-Rand!), Halmzahl
+  kollabiert **257 → 118 → 52, 0 neu** — exakt das Nutzer-Symptom.
+  Richtung -x/-z (Taste w): nur unsichtbarer Hinterkant-Rand (ok).
+- **Wurzel:** CT=700 (210m) clamps das Union-Quadrat, behält aber die
+  KLEINERE Kante (gix0/giz0 = ux0/uy0) → Richtung +x/+z bleibt die
+  hintere Kante am Start PINIERT, die vordere (Generierung!) wird nach
+  ~77m abgeschnitten; ab ~143m liegt das ganze Feld hinter der Kamera.
+- **Fix (grass_cpu.c, grass_build_begin):** Beim Clamp Quadrat ZENTRIERT
+  auf die Kamera (gix0 = floor(cx/GSTEP) - CT/2, gnx = CT). Mit
+  clampedX/clampedZ-Flags: Sobald der Clamp greift, wird pro Build
+  weiter zentriert (ohne Flags wäre das Quadrat 128m fixiert und es
+  gäbe einen 38m-Fade-in-Sprung an der Kante). Front immer volle
+  66,7m; verlorener Rand-Schimmer (~1m) poppt bei ~105m = jenseits des
+  MD=80-Culls → unsichtbar.
+- **Verifiziert (VM, 75s beide Richtungen):** dcx0=dcz0=350 (zentriert),
+  +x/+z: 700k Halme, ~25k neu/Build (vorher: 52, 0 neu); -x/-z: 960k,
+  ~16k neu. Pop-Unit-Test: 0 Pops. Build-Intervall ohne Regression.
 
 ### Issue C: Inseln, wo das Gras einer „abweichenden Insel“ folgt
 - **Beobachtung (Nutzer):** Inseln, wo die Gras-Geometrie nicht der

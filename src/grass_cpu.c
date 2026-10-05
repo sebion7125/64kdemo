@@ -162,8 +162,18 @@ void grass_build_begin(float cx, float cz, int mode){
     if (oldOffZ0 + old_gnz - 1 > uy1) uy1 = oldOffZ0 + old_gnz - 1;
     gix0 = ux0; giz0 = uy0;
     gnx = ux1 - ux0 + 1; gnz = uy1 - uy0 + 1;
-    if (gnx > CT) gnx = CT;
-    if (gnz > CT) gnz = CT;
+    // Clamp: Quadrat liegt ZENTRIERT auf der Kamera (nicht: kleine Kante
+    // behalten). Kante-behalten pinnte die hintere Kante am Startpunkt —
+    // bei Fahrt in Richtung wachsender Indizes (+x/+z) wurde die FRONT-
+    // KANTE (neue Generierung) nach ~77m abgeschnitten -> "kein neues
+    // Gras mehr" (Issue B, VM-bestaetigt). Sobald der Clamp greift, wird
+    // pro Build weiter zentriert (Flags): Front immer volle 66,7m; der
+    // verlorene Rand-Schimmer (~1m) poppt bei ~105m Kamera-Distanz =
+    // jenseits des MD=80-Culls -> unsichtbar. Ohne Flags waere das
+    // Quadrat 128m fixiert und sprae dann (38m Fade-in-Band an der Kante).
+    static int clampedX = 0, clampedZ = 0;
+    if (gnx > CT || clampedX) { gnx = CT; gix0 = (int)floorf(cx / GSTEP) - CT / 2; clampedX = 1; }
+    if (gnz > CT || clampedZ) { gnz = CT; giz0 = (int)floorf(cz / GSTEP) - CT / 2; clampedZ = 1; }
   }
   offX0 = gix0; offZ0 = giz0;
   // Diamond-Order: Zellen vom Zentrum (Kamera) nach auessen verarbeited.
