@@ -1,6 +1,9 @@
 CC      = gcc
-CFLAGS  = -Os -Wall -Wextra -std=c11 -Ithird_party/include
-LDFLAGS = -s   # 64k-Budget: Binary < 65536 Byte
+# 64k-Budget (< 65536 Byte): -Os, no-pie (kompakteres Layout),
+# keine .eh_frame (kein Unwinding/Backtrace benoetigt),
+# -z,noseparate-code (kein .plt.sec, enges Packen)
+CFLAGS  = -Os -Wall -Wextra -std=c11 -Ithird_party/include -no-pie -fno-asynchronous-unwind-tables
+LDFLAGS = -s -no-pie -Wl,-z,noseparate-code
 LDLIBS  = -ldl -lm -lpthread
 SRC     = src/main.c src/shaders_gen.c src/terrain_cpu.c src/trees_cpu.c src/grass_cpu.c
 BIN     = bin/64kdemo

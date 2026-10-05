@@ -1,11 +1,12 @@
 #!/bin/sh
 # Erzeugt src/shaders_gen.c aus den GLSL-Dateien (64k-Style: alles embedded).
 # Shader werden minifiziert (tools/minify_glsl.py: Kommentare/Leerzeilen
-# raus) -> kleineres Binary, .glsl-Dateien bleiben lesbar.
+# raus) und als EINER String-Literal eingebettet (statt Zeile-fuer-Zeile:
+# spart ~2 Byte pro Zeile an Anführungszeichen).
 emit() {
   printf 'const char %s[] =\n' "$1"
-  python3 "$(dirname "$0")/minify_glsl.py" < "$2" | awk '{ gsub(/\\/,"\\\\"); gsub(/"/,"\\\""); printf "\"%s\\n\"\n", $0 }'
-  printf ';\n\n'
+  python3 "$(dirname "$0")/minify_glsl.py" --embed < "$2"
+  printf '\n\n'
 }
 emit VS_SRC      src/shaders/vertex.glsl
 emit FS_SRC      src/shaders/fragment.glsl

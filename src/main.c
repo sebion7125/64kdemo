@@ -65,7 +65,6 @@ static void (*p_glLinkProgram)(GLuint program);
 static void (*p_glGetProgramiv)(GLuint program, GLenum pname, GLint *params);
 static void (*p_glGetProgramInfoLog)(GLuint program, GLsizei bufSize, GLsizei *length, GLchar *infoLog);
 static void (*p_glDeleteShader)(GLuint shader);
-static void (*p_glDeleteProgram)(GLuint program);
 static void (*p_glGenVertexArrays)(GLsizei n, GLuint *arrays);
 static void (*p_glBindVertexArray)(GLuint array);
 static void (*p_glGenBuffers)(GLsizei n, GLuint *buffers);
@@ -83,9 +82,6 @@ static void (*p_glBindRenderbuffer)(GLenum target, GLuint renderbuffer);
 static void (*p_glRenderbufferStorageMultisample)(GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height);
 static void (*p_glFramebufferRenderbuffer)(GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer);
 static void (*p_glDeleteRenderbuffers)(GLsizei n, const GLuint *renderbuffers);
-static void (*p_glBlitFramebuffer)(GLint readFB, GLint readX0, GLint readY0, GLint readX1, GLint readY1,
-                                   GLint drawFB, GLint drawX0, GLint drawY0, GLint drawX1, GLint drawY1,
-                                   GLbitfield mask, GLenum filter);
 // glBlitNamedFramebuffer: eindeutige 12-Parameter-Signatur (GL 4.2+ / ARB_direct_state_access).
 // Wird statt glBlitFramebuffer verwendet, weil Mesa-GLX (llvmpipe-VM) fuer glBlitFramebuffer
 // den 10-Parameter-ARB-Entrypoint liefert und 12-Parameter-Core-Aufrufe dadurch still verschiebt.
@@ -93,9 +89,7 @@ static void (*p_glBlitNamedFramebuffer)(GLuint readFB, GLuint drawFB,
                                         GLint readX0, GLint readY0, GLint readX1, GLint readY1,
                                         GLint drawX0, GLint drawY0, GLint drawX1, GLint drawY1,
                                         GLbitfield mask, GLenum filter);
-static void (*p_glGetIntegerv)(GLenum pname, GLint *data);
 static void (*p_glDepthFunc)(GLenum func);
-static void (*p_glTexImage2DMultisample)(GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height, GLboolean fixedsamplelocations);
 static void (*p_glViewport)(GLint x, GLint y, GLsizei width, GLsizei height);
 static void (*p_glClear)(GLbitfield mask);
 static void (*p_glClearColor)(GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha);
@@ -178,7 +172,6 @@ static void load_libs(void) {
   LOADGL2(glGetProgramiv);
   LOADGL2(glGetProgramInfoLog);
   LOADGL2(glDeleteShader);
-  LOADGL2(glDeleteProgram);
   LOADGL2(glGenVertexArrays);
   LOADGL2(glBindVertexArray);
   LOADGL2(glGenBuffers);
@@ -196,11 +189,8 @@ static void load_libs(void) {
   LOADGL2(glRenderbufferStorageMultisample);
   LOADGL2(glFramebufferRenderbuffer);
   LOADGL2(glDeleteRenderbuffers);
-  LOADGL2(glBlitFramebuffer);
   LOADGL2(glBlitNamedFramebuffer);
-  LOADGL2(glGetIntegerv);
   LOADGL2(glDepthFunc);
-  LOADGL2(glTexImage2DMultisample);
   LOADGL2(glViewport);
   LOADGL2(glClear);
   LOADGL2(glClearColor);
@@ -518,7 +508,7 @@ static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: t
   p_glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, WIRE_FLOATS * 4, (const void *)0);
 
   p_glBindVertexArray(0);
-  printf("Mesh-Pipeline bereit (Baeume/Gras-Geometrie: trees_cpu.c / grass_cpu.c)\n");
+  printf("Mesh-Pipeline bereit\n");
 }
 
 // ================= MVP-Matrix (exakt wie die Raymarcher-Kamera) =================
@@ -633,6 +623,43 @@ static void save_screenshot_ppm(const char *path, int w, int h) {
   free(buf);
 }
 
+// Slider-Rendering (Hintergrund/Fuellstand/Regler). VBO muss gebunden sein.
+static void draw_slider(float slY0, float pos, float r, float g, float b,
+                        int w, int h, int locTint){
+  const float slW = 300.0f, slH = 18.0f;
+  const float x0 = w/2.0f - slW/2.0f, x1 = w/2.0f + slW/2.0f;
+  float buv[2] = { (ATLAS_W - 0.5f) / ATLAS_W, (ATLAS_H - 0.5f) / ATLAS_H };
+  if (pos < 0.0f) pos = 0.0f; if (pos > 1.0f) pos = 1.0f;
+  float hx = x0 + pos * slW, y1 = slY0 + slH;
+  float bg[16] = {
+    x0/w*2-1, 1-slY0/h*2, buv[0], buv[1],
+    x1/w*2-1, 1-slY0/h*2, buv[0], buv[1],
+    x0/w*2-1, 1-y1/h*2,   buv[0], buv[1],
+    x1/w*2-1, 1-y1/h*2,   buv[0], buv[1],
+  };
+  p_glBufferData(GL_ARRAY_BUFFER, sizeof bg, bg, GL_DYNAMIC_DRAW);
+  p_glUniform4f(locTint, 0.0f, 0.0f, 0.0f, 0.5f);
+  p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  float fill[16] = {
+    x0/w*2-1, 1-slY0/h*2, buv[0], buv[1],
+    hx/w*2-1, 1-slY0/h*2, buv[0], buv[1],
+    x0/w*2-1, 1-y1/h*2,   buv[0], buv[1],
+    hx/w*2-1, 1-y1/h*2,   buv[0], buv[1],
+  };
+  p_glBufferData(GL_ARRAY_BUFFER, sizeof fill, fill, GL_DYNAMIC_DRAW);
+  p_glUniform4f(locTint, r, g, b, 0.9f);
+  p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  float hd[16] = {
+    (hx-2)/w*2-1, 1-slY0/h*2, buv[0], buv[1],
+    (hx+2)/w*2-1, 1-slY0/h*2, buv[0], buv[1],
+    (hx-2)/w*2-1, 1-y1/h*2,   buv[0], buv[1],
+    (hx+2)/w*2-1, 1-y1/h*2,   buv[0], buv[1],
+  };
+  p_glBufferData(GL_ARRAY_BUFFER, sizeof hd, hd, GL_DYNAMIC_DRAW);
+  p_glUniform4f(locTint, 1.0f, 1.0f, 1.0f, 1.0f);
+  p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+}
+
 int main(int argc, char **argv) {
   setvbuf(stdout, 0, _IONBF, 0);
   int winW = 1280, winH = 720;
@@ -734,7 +761,7 @@ int main(int argc, char **argv) {
     p_XLockPointer(win);
     if (p_XWarpPointer) p_XWarpPointer(disp, None, win, 0, 0, 0, 0, winW / 2, winH / 2);
   }
-  printf("Steuerung (FLY): Maus=Schauen, WASD=Fliegen, Space/X=Hoch/Runter, Shift=Turbo, O=Orbit, R=Reset, 1/2/3=Skalierung, T=Wireframe, P=Screenshot, Q/Esc=Beende\n");
+  printf("FLY: Maus=Schauen WASD=Fliegen Space/X=H/R Shift=Turbo O=Orbit R=Reset 1/2/3=Skala T=Wire P=Shot G=GrasFrost V=NurGras M=MSAA Q/Esc=Ende\n");
 
   // ---------- GL-Setup ----------
   GLuint progScene = make_program(VS_SRC, FS_SRC, "scene");
@@ -1145,14 +1172,12 @@ int main(int argc, char **argv) {
       p_glDisable(GL_BLEND);
     }
 
-    // 3) MSAA-Resolve: fboMS -> fbo (Farbe + Tiefe, Single-Sample)
+    // 3) MSAA-Resolve: fboMS -> fbo (Farbe + Tiefe in einem Blit, Single-Sample)
     //    glBlitNamedFramebuffer (eindeutige 12-Param-Signatur) statt glBlitFramebuffer
     //    (Mesa-GLX liefert fuer letzteren den 10-Param-ARB-Entrypoint -> stille No-Op).
     if (useMSAA) {
       p_glBlitNamedFramebuffer(fboMS, fbo, 0, 0, fboW, fboH, 0, 0, fboW, fboH,
-                               GL_COLOR_BUFFER_BIT, GL_NEAREST);
-      p_glBlitNamedFramebuffer(fboMS, fbo, 0, 0, fboW, fboH, 0, 0, fboW, fboH,
-                               GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+                               GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST);
       p_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     }
     // 4) Blit auf den Screen
@@ -1185,8 +1210,8 @@ int main(int argc, char **argv) {
     // 4) HUD
     char hud[128];
     const char *sc = scaleIdx == 0 ? "1x" : (scaleIdx == 1 ? "1/2" : "1/4");
-    snprintf(hud, sizeof hud, "FPS %3d %dx%d RES %s CAM %s AA %s TREES %d QUADS %d GRASS %d D %.1fx H %.1fx MD %d.%dm%s%s",
-             (int)(fpsEMA + 0.5), winW, winH, sc, flyMode ? "FLY" : "ORB", useMSAA ? (msaaSamples == 8 ? "8x" : "4x") : "OFF", nTrees, nCrownVerts / 6, nGrass, grassDensityScale, grassHeightScale, (int)grassMaxDist, (int)(grassMaxDist * 10) % 10, grassFrozen ? " FRZ" : "", grassOnly ? " NUR-GRAS" : "");
+    snprintf(hud, sizeof hud, "FPS %3d %dx%d %s %s AA %s T %d Q %d G %d D %.1f H %.1f MD %dm%s%s",
+             (int)(fpsEMA + 0.5), winW, winH, sc, flyMode ? "FLY" : "ORB", useMSAA ? (msaaSamples == 8 ? "8x" : "4x") : "OFF", nTrees, nCrownVerts / 6, nGrass, grassDensityScale, grassHeightScale, (int)grassMaxDist, grassFrozen ? " F" : "", grassOnly ? " NG" : "");
     int len = (int)strlen(hud);
 
     p_glEnable(GL_BLEND);
@@ -1222,114 +1247,12 @@ int main(int argc, char **argv) {
       p_glDrawArrays(GL_TRIANGLES, 0, n);
     }
 
-    // Gras-Slider (unten Mitte): Hoehe (oben) + Dichte (unten)
-    {
-      const float slW = 300.0f, slH = 18.0f;
-      const float slX0 = winW/2.0f - slW/2.0f, slX1 = winW/2.0f + slW/2.0f;
-      float buv[2] = { (ATLAS_W - 0.5f) / ATLAS_W, (ATLAS_H - 0.5f) / ATLAS_H };
-      // Dichte-Slider (unten)
-      {
-        const float slY0 = winH - 44.0f, slY1 = winH - 44.0f + slH;
-        float pos = (grassDensityScale - 0.2f) / 7.8f;
-        if (pos < 0.0f) pos = 0.0f; if (pos > 1.0f) pos = 1.0f;
-        float hx = slX0 + pos * slW;
-        float bg[16] = {
-          slX0/winW*2-1, 1-slY0/winH*2, buv[0], buv[1],
-          slX1/winW*2-1, 1-slY0/winH*2, buv[0], buv[1],
-          slX0/winW*2-1, 1-slY1/winH*2, buv[0], buv[1],
-          slX1/winW*2-1, 1-slY1/winH*2, buv[0], buv[1],
-        };
-        p_glBufferData(GL_ARRAY_BUFFER, sizeof bg, bg, GL_DYNAMIC_DRAW);
-        p_glUniform4f(locTint, 0.0f, 0.0f, 0.0f, 0.5f);
-        p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        float fill[16] = {
-          slX0/winW*2-1, 1-slY0/winH*2, buv[0], buv[1],
-          hx/winW*2-1, 1-slY0/winH*2, buv[0], buv[1],
-          slX0/winW*2-1, 1-slY1/winH*2, buv[0], buv[1],
-          hx/winW*2-1, 1-slY1/winH*2, buv[0], buv[1],
-        };
-        p_glBufferData(GL_ARRAY_BUFFER, sizeof fill, fill, GL_DYNAMIC_DRAW);
-        p_glUniform4f(locTint, 0.3f, 0.8f, 0.3f, 0.9f);
-        p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        float hd[16] = {
-          (hx-2)/winW*2-1, 1-slY0/winH*2, buv[0], buv[1],
-          (hx+2)/winW*2-1, 1-slY0/winH*2, buv[0], buv[1],
-          (hx-2)/winW*2-1, 1-slY1/winH*2, buv[0], buv[1],
-          (hx+2)/winW*2-1, 1-slY1/winH*2, buv[0], buv[1],
-        };
-        p_glBufferData(GL_ARRAY_BUFFER, sizeof hd, hd, GL_DYNAMIC_DRAW);
-        p_glUniform4f(locTint, 1.0f, 1.0f, 1.0f, 1.0f);
-        p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-      }
-      // Hoehe-Slider (Mitte)
-      {
-        const float slY0 = winH - 72.0f, slY1 = winH - 72.0f + slH;
-        float pos = (grassHeightScale - 0.3f) / 2.7f;
-        if (pos < 0.0f) pos = 0.0f; if (pos > 1.0f) pos = 1.0f;
-        float hx = slX0 + pos * slW;
-        float bg[16] = {
-          slX0/winW*2-1, 1-slY0/winH*2, buv[0], buv[1],
-          slX1/winW*2-1, 1-slY0/winH*2, buv[0], buv[1],
-          slX0/winW*2-1, 1-slY1/winH*2, buv[0], buv[1],
-          slX1/winW*2-1, 1-slY1/winH*2, buv[0], buv[1],
-        };
-        p_glBufferData(GL_ARRAY_BUFFER, sizeof bg, bg, GL_DYNAMIC_DRAW);
-        p_glUniform4f(locTint, 0.0f, 0.0f, 0.0f, 0.5f);
-        p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        float fill[16] = {
-          slX0/winW*2-1, 1-slY0/winH*2, buv[0], buv[1],
-          hx/winW*2-1, 1-slY0/winH*2, buv[0], buv[1],
-          slX0/winW*2-1, 1-slY1/winH*2, buv[0], buv[1],
-          hx/winW*2-1, 1-slY1/winH*2, buv[0], buv[1],
-        };
-        p_glBufferData(GL_ARRAY_BUFFER, sizeof fill, fill, GL_DYNAMIC_DRAW);
-        p_glUniform4f(locTint, 0.5f, 0.8f, 0.3f, 0.9f);
-        p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        float hd[16] = {
-          (hx-2)/winW*2-1, 1-slY0/winH*2, buv[0], buv[1],
-          (hx+2)/winW*2-1, 1-slY0/winH*2, buv[0], buv[1],
-          (hx-2)/winW*2-1, 1-slY1/winH*2, buv[0], buv[1],
-          (hx+2)/winW*2-1, 1-slY1/winH*2, buv[0], buv[1],
-        };
-        p_glBufferData(GL_ARRAY_BUFFER, sizeof hd, hd, GL_DYNAMIC_DRAW);
-        p_glUniform4f(locTint, 1.0f, 1.0f, 1.0f, 1.0f);
-        p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-      }
-      // Sichtweite-Slider (oben)
-      {
-        const float slY0 = winH - 100.0f, slY1 = winH - 100.0f + slH;
-        float pos = (grassMaxDist - 40.0f) / 80.0f;
-        if (pos < 0.0f) pos = 0.0f; if (pos > 1.0f) pos = 1.0f;
-        float hx = slX0 + pos * slW;
-        float bg[16] = {
-          slX0/winW*2-1, 1-slY0/winH*2, buv[0], buv[1],
-          slX1/winW*2-1, 1-slY0/winH*2, buv[0], buv[1],
-          slX0/winW*2-1, 1-slY1/winH*2, buv[0], buv[1],
-          slX1/winW*2-1, 1-slY1/winH*2, buv[0], buv[1],
-        };
-        p_glBufferData(GL_ARRAY_BUFFER, sizeof bg, bg, GL_DYNAMIC_DRAW);
-        p_glUniform4f(locTint, 0.0f, 0.0f, 0.0f, 0.5f);
-        p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        float fill[16] = {
-          slX0/winW*2-1, 1-slY0/winH*2, buv[0], buv[1],
-          hx/winW*2-1, 1-slY0/winH*2, buv[0], buv[1],
-          slX0/winW*2-1, 1-slY1/winH*2, buv[0], buv[1],
-          hx/winW*2-1, 1-slY1/winH*2, buv[0], buv[1],
-        };
-        p_glBufferData(GL_ARRAY_BUFFER, sizeof fill, fill, GL_DYNAMIC_DRAW);
-        p_glUniform4f(locTint, 0.3f, 0.6f, 0.8f, 0.9f);
-        p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        float hd[16] = {
-          (hx-2)/winW*2-1, 1-slY0/winH*2, buv[0], buv[1],
-          (hx+2)/winW*2-1, 1-slY0/winH*2, buv[0], buv[1],
-          (hx-2)/winW*2-1, 1-slY1/winH*2, buv[0], buv[1],
-          (hx+2)/winW*2-1, 1-slY1/winH*2, buv[0], buv[1],
-        };
-        p_glBufferData(GL_ARRAY_BUFFER, sizeof hd, hd, GL_DYNAMIC_DRAW);
-        p_glUniform4f(locTint, 1.0f, 1.0f, 1.0f, 1.0f);
-        p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-      }
-    }
+    // Gras-Slider (unten Mitte): Hoehe (Mitte) + Dichte (unten) + Sichtweite (oben)
+    // Gleicher Aufbau pro Slider (Hintergrund/Fuellstand/Regler) -> draw_slider().
+    // VBO ist schon gebunden (siehe oben), Tint-Uniform wird dort gesetzt.
+    draw_slider(winH - 44.0f,  (grassDensityScale - 0.2f) / 7.8f, 0.3f, 0.8f, 0.3f, winW, winH, locTint);
+    draw_slider(winH - 72.0f,  (grassHeightScale - 0.3f) / 2.7f,  0.5f, 0.8f, 0.3f, winW, winH, locTint);
+    draw_slider(winH - 100.0f, (grassMaxDist - 40.0f) / 80.0f,    0.3f, 0.6f, 0.8f, winW, winH, locTint);
     p_glDisable(GL_BLEND);
 
     // Automatischer Screenshot des vollen Frames (inkl. Wireframe-Overlay) nach dem
