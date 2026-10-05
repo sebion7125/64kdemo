@@ -67,8 +67,12 @@ Danach (in dieser Reihenfolge):
   Darueber: Bounds-Check in build_text_verts verglich Vertex-Anzahl mit
   Zeichen-Limit -> Zeile 1 brach nach 26 Zeichen ab (AA fehlte!).
   Hintergrund-Quad jetzt vor dem Text (deckte ihn frueher ueber).
-- [x] **Slider hellgrau** (Track 0.75 grau/85% statt schwarz/50%) +
-  **Faden** verbindet die drei Regler-Positionen (2px weiss).
+- [x] **Slider hellgrau** (Track 0.75 grau/85% statt schwarz/50%).
+- [x] **Slider-Verbindungslinien (Strip-Bug)**: 3 Quads als gemeinsamer
+  12-Vertex-Strip -> Verbindungsdreiecke zwischen den Quads (duenne
+  Linie zwischen den Regler-Positionen). Jetzt je Quad eigener
+  4-Vertex-Strip. (Der 'Faden' war ein Missverstaendnis: die Linie war
+  der Bug, kein Wunsch.)
 - [x] **Puffer-Verwaltung: Diamond-Order** (grass_build_step): Zellen
   vom Zentrum (Kamera) nach aussen (L1-Ringe, 4*dr Zellen/Ring).
   Bei GRASS_CAP-Ueberlauf fehlen jetzt die WEAESTEN Zellen (frueher:
