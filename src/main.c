@@ -74,6 +74,7 @@ static void (*p_glVertexAttribPointer)(GLuint index, GLint size, GLenum type, GL
 static void (*p_glUseProgram)(GLuint program);
 static void (*p_glDrawArrays)(GLenum mode, GLint first, GLsizei count);
 static void (*p_glDrawArraysInstanced)(GLenum mode, GLint first, GLsizei count, GLsizei primcount);
+static void (*p_glDrawArraysInstancedBaseInstance)(GLenum mode, GLint first, GLsizei count, GLsizei instanceCount, GLuint baseInstance);
 static void (*p_glVertexAttribDivisor)(GLuint index, GLuint divisor);
 static void (*p_glDepthMask)(GLboolean flag);
 static void (*p_glGenRenderbuffers)(GLsizei n, GLuint *renderbuffers);
@@ -181,6 +182,7 @@ static void load_libs(void) {
   LOADGL2(glUseProgram);
   LOADGL2(glDrawArrays);
   LOADGL2(glDrawArraysInstanced);
+  LOADGL2(glDrawArraysInstancedBaseInstance);
   LOADGL2(glVertexAttribDivisor);
   LOADGL2(glDepthMask);
   LOADGL2(glGenRenderbuffers);
@@ -1140,7 +1142,10 @@ int main(int argc, char **argv) {
       p_glDrawArrays(GL_TRIANGLES, 0, nTreeVerts);
     }
 
-    // Gras (instanziert)
+    // Gras (instanziert) — von WEIT nach NAH zeichnen (Alpha-Blending und
+    // MSAA brauchen Raster-Reihenfolge von hinten nach vorne). Die VBO ist
+    // in Diamond-Order sortiert (Instance 0 = naechste Zelle), also in
+    // Chunks vom Buffer-Ende her (keine Index-Buffer-Sortierung pro Frame).
     p_glUseProgram(progGrass);
     p_glUniformMatrix4fv(locGMVP, 1, GL_FALSE, mvp);
     p_glUniform3f(locGCam, camPos[0], camPos[1], camPos[2]);
@@ -1151,7 +1156,14 @@ int main(int argc, char **argv) {
     p_glEnable(GL_BLEND);
     p_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     p_glBindVertexArray(vaoGrass);
-    p_glDrawArraysInstanced(GL_TRIANGLES, 0, 9, nGrass);
+    {
+      int chunk = (nGrass + 31) / 32;   // 32 Chunks (der Fade-Crescent liegt
+                                         // in den letzten 1-2 Chunks -> genuegend fein)
+      for (int off = nGrass; off > 0; off -= chunk) {
+        int c = off > chunk ? chunk : off;
+        p_glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 9, c, (GLuint)(off - c));
+      }
+    }
     p_glDisable(GL_BLEND);
 
     // Blattdach-Billboards: Alpha-Test (discard) -> entweder opak oder unsichtbar,
