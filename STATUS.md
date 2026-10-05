@@ -1,48 +1,102 @@
 # 64kDemo — Status
 
 Stand: 2026-10-05, Runde 5 (Chat-Wechsel). **Gras-Fade-out: VAO-Fix +
-Kanten-Pop-Fix committet und vom Nutzer bestätigt.** Offener Punkt:
-Fade-out beim Rückwärtsfahren ist dem Nutzer visuell noch nicht sichtbar.
+Kanten-Pop-Fix committet und vom Nutzer bestätigt** (Slider ✓, Pop ✓ weg).
+**NEU: 3 Gras-Issues vom Nutzer-Host-Test gemeldet** (Längensprung in der
+Ferne, nach ~77m kein neues Gras mehr [**in der VM bestätigt**], Gras-
+Inseln abweichend vom Terrain). Details + Hypothesen + Testpläne unten
+in „ISSUES“.
 
 ## ⚡ SOFORT NÄCHSTER SCHRITT (nächster Chat)
 
-**Offen: Fade-out beim Rückwärtsfahren „sieht man nicht“** (Nutzer-Test:
-Slider-Change ✓ wie geplant, plötzliches Verschwinden ✓ weg, aber der
-Fade selbst ist beim Rückwärtsfahren nicht sichtbar).
+**Offen: 3 Gras-Issues vom Nutzer-Host-Test (2026-10-05, nach Pop-Fix) +
+1 Wahrnehmungsfrage. Details + Hypothesen unten in „ISSUES“.**
 
-Nutzer-Hypothese: die fadenden Halme seien an der Grenze per Shader (LOD)
-schon gekürzt/unsichtbar. Meiner Analyse nach (NOCH unbestätigt, prüfen!):
-- Bei MD=80 beginnt der LOD-Fade bei 68m, das Gras endet aber bei dCut
-  ≈ 66,7m → der LOD-Fade trifft bei MD=80 KEINEN Halm (Edge-Halme haben
-  volle Höhe). `lod` skaliert nur Höhe (p.y) + Wind, NICHT Alpha
-  (vCol.z = lod wird in grass.frag nicht benutzt).
-- Frage an Nutzer: mit welchem MD-Wert getestet? (Bei MD=40: dCut=34,1,
-  LOD-Zone [28,40] → Edge-Halme SIND gekürzt.)
-- Kandidaten für „nicht sichtbar“:
-  a) Fade (2s) vs. Fahrt (13 m/s → 26m in 2s): Halme werden schneller
-     hinter sich her gelassen, als sie ausblenden → nur dünner werdendes
-     Feld, kein wahrnehmbares Einzel-Ausblenden.
-  b) Nur ~1,3% der Halme sterben pro 1m-Schritt (~11k/850k) — verteilt
-     über das ganze Feld, kein lokaler Effekt.
-  c) Rest-Render-Bug im POS-Pfad (wenig likely: Shader-Pfad identisch
-     zum Slider-OUT, der sichtbar fadet).
-- **Erster Test für nächsten Chat (sauber, ohne Build-Konfundenzen):**
-  Rückwärtsfahren, dann Taste G (Gras-Frost: keine Builds mehr, Shader-
-  Fade läuft weiter), Screenshot-Serie 0–4s → sumG muss monoton über ~2s
-  sinken. Gemessen (noch mit Builds, /tmp/fade_vis2.sh): B..F =
-  5.833/5.856/5.867/5.817/5.844M — Rauschen dominiert, Signal ~2% nicht
-  sauber trennbar. Buffer-Seite ist korrekt (b-Dump: 13119→0 über 2,3s).
-- Falls gemessen OK aber Nutzer sieht nichts: Abstimmung — Death-Fade
-  länger (2s → 3–4s)? Edge-Fade langsamer? Oder Wahrnehmungsfrage
-  (langsame Fahrt zum Testen empfehlen, z.B. 3–5 m/s ohne Shift).
+Empfohlene Reihenfolge:
+1. **Issue B fixen (BESTÄTIGT, VM-Repro steht)**: Walk-Quadrat bei
+  CT-Clamp zentriert auf die Kamera (Code-Zeile steht oben im Issue).
+  Danach beide VM-Richtungen neu messen.
+2. **Issue A reproduzieren/messen** (Längensprung in der Ferne): VM:
+   Blade-Daten (Höhe) vor/nach Build für eine Bildschirmposition dumpen
+   (in grass_debug_dump integrieren oder neue Taste).
+3. **Issue C (Inseln) in der VM suchen**: Halme-Höhen vs. c_terrainH an
+   denselben Positionen dumpen; Raymarcher-SDF (0.85-Dämpfung) prüfen.
+   Issue B vorher fixen (Kandidat „stale Halme“ entfernt).
+4. Danach Wahrnehmungsfrage (Fade sichtbar?) mit Nutzer abstimmen
+   (Death-Fade 2s → 3–4s? langsamere Testfahrt?).
+Danach wie bisher: Dichte/Farben/Weite, Entfernungssortierung, Budget,
+Baum-Schatten.
 
-Danach:
-1. Nutzer-Feedback auf Dichte/Farben/Weite sammeln und abstimmen
-2. Entfernungssortierung verifizieren (genügt die Chunk-Methode oder
-   braucht es pro-Frame-Sortierung?)
-3. Binary-Budget (< 65,536 B) — liegt bei 68,152, Plan steht (Linker-
-   Script /tmp/64k.ld bringt 66,864; .plt.sec discarden + Rest kürzen)
-4. Optional: Schritt 7 (Baum-Schatten, docs/grasplan.md)
+## ISSUES (Nutzer-Beobachtungen 2026-10-05, nach Pop-Fix)
+
+### Issue A: „Neue Halme ploppen in der Entfernung auf“ — vermutlich Längensprung
+- **Beobachtung (Nutzer):** Freeze (G) an + rückwärtsfahren: die
+  Shader-Grenze (LOD 68–80m) ist sichtbar und weich. Freeze aus: ein Teil
+  des Grases fadet sichtbar aus (Death-Fade ✓), aber DANN ploppen in der
+  Entfernung plötzlich Halme „auf“. Nutzer-Hypothese: keine neuen Halme,
+  sondern **nur ihre Länge springt**.
+- **Fakten:** Shader-Längen sind pro Frame kontinuierlich (sizeScale,
+  lod, fadeIn/fadeOut alles smoothstep-basiert) → ein Sprung kommt am
+  ehesten vom **VBO-Swap**: eine Zelle wird statt kopiert REGENERIERT
+  (nb != onb, Zelle nicht in alter Tabelle, oder CAP) → anderer Halm an
+  gleicher Stelle mit anderer Basis-Höhe (d[3] ist Hash von (ix,iz,b)).
+  Oder: Birth/Death-Time wird im Kopier-Pfad versehentlich zurückgesetzt.
+- **Offen:** welcher Mechanismus genau; welche Zellen (Kante? CAP?).
+- **Testplan:** VM, Freeze aus, Screenshot-Serie um den Build-Wechsel
+  (Gras-Swap-Log gibt den Zeitpunkt); zusätzlich Halm-Höhen-Dump für
+  eine feste Bildschirmposition vor/nach dem Swap (neues Debug: Taste?
+  oder in grass_debug_dump integrieren).
+
+### Issue B: Nach einer Strecke wird kein neues Gras mehr generiert, Halmzahl fällt nur
+- **Beobachtung (Nutzer):** nach Zurücklegen einer Strecke ein Modus,
+  in dem plötzlich gar kein neues Gras mehr generiert wird und die
+  Halmzahl nur noch fällt.
+- **BESTÄTIGT (VM-Repro, 2026-10-05):** 75s Geradeausfahrt:
+  - Richtung -x/-z (Taste w): Walk 700×700 (clamped), dcx0=222 →
+    FRONT ok, nur unsichtbarer Hinterkant-Rand abgeschnitten.
+  - Richtung +x/+z (Taste s): Walk 700×700, **dcx0=699** (Kamera am
+    Quadrat-Rand!), Halmzahl kollabiert **257 → 118 → 52, 0 neu** —
+    exakt das Nutzer-Symptom.
+- **Wurzel (Code nachvollzogen):** CT=700 (210m) clamps das Union-
+  Quadrat, behält aber die KLEINERE Kante (gix0/giz0 = ux0/uy0) →
+  Richtung +x/+z bleibt die hintere Kante am Start PINIERT, die vordere
+  (Generierung!) wird nach ~77m Fahrt abgeschnitten; ab ~143m liegt das
+  ganze Feld hinter der Kamera → kein Gras mehr, nur noch sterbende
+  Reste. Richtung -x/-z: nur unsichtbarer Hinterkant-Rand (ok).
+- **Fix (konkret):** Wenn Union-Breite > CT: Quadrat ZENTRIERT auf die
+  Kamera statt Kante behalten:
+  `if (gnx > CT) { gnx = CT; gix0 = (int)floorf(cx / GSTEP) - CT / 2; }`
+  (dito gnz/giz0). Alte Schichel: d-Schimmer (≤ 1m) poppt bei ~105m
+  Kamera-Distanz = jenseits des MD=80-Culls → unsichtbar (MD=120:
+  fadende Halme, nur nach hinten schauend knapp sichtbar — akzeptabel).
+  Frontkante immer volle 66,7m — in allen Richtungen.
+- **Verifizieren nach Fix:** beide VM-Richtungen 75s, b-Dump: gnx=700
+  aber dcx0 ≈ 350 (zentriert), Halmzahl stabil statt Kollaps.
+
+### Issue C: Inseln, wo das Gras einer „abweichenden Insel“ folgt
+- **Beobachtung (Nutzer):** Inseln, wo die Gras-Geometrie nicht der
+  Landschaft folgt, sondern einer abweichenden Insel.
+- **Ausgeschlossen (geprüft):** CPU/GPU-Terrain-Port ist 1:1 identisch
+  (hash12/vnoise/fbm/rfbm/terrainH zeilenweise verglichen, gleiche
+  Konstanten/Reihenfolge) → kein Noise-Port-Fehler. c_terrainH ist reine
+  Weltkoordinaten-Funktion (kein Origin, kein Wrap).
+- **Kandidaten:** (a) Raymarcher rendert das Terrain mit gedämpftem SDF
+  (factor 0.85, fragment.glsl ~Zeile 97) → gerendertes Terrain kann von
+  c_terrainH abweichen (feine/steile Strukturen) → Gras (exakt) vs.
+  Raymarch (approximiert) = „abweichende Insel“. (b) Stale Halme aus
+  Issue-B-Pinning (Feld folgt altem Zustand). (c) Wasser-/Steilhang-
+  Grenze pro Halm vs. pro Zelle (Ufer-Sackgassen). (d) GPU-Präzision
+  (highp vs. float32) — unwahrscheinlich (ulp-Große).
+- **Testplan:** VM: Insel finden (Screenshot), Halme an dieser Position
+  dumpen (bx,bz,d[1]) vs. c_terrainH(bx,bz) vs. Raymarch-Abgleich
+  (z.B. Test-Shader oder Pixelprobe). Issue B fixen vorher — das
+  entfernt Kandidat (b).
+
+### Wahrnehmungsfrage: Fade-out beim Rückwärtsfahren
+- Nutzer sieht den Death-Fade (Freeze-Test), aber beim Fahren ist er
+  schwer wahrzunehmen (2s-Fade vs. 26m in 2s bei 13 m/s; nur ~1,3% der
+  Halme sterben pro 1m, verteilt). Nach Issue-A/B-Fix neu bewerten;
+  evtl. Death-Fade 2s → 3–4s als Tuning-Knopf.
 
 ## Session 2026-10-05, Runde 5 (Gras-Fade-out: VAO-Fix + Kanten-Pop-Fix)
 
