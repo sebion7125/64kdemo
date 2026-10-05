@@ -1,20 +1,21 @@
 # 64kDemo — Status
 
-Stand: 2026-10-05, nach Gras-Optik-Session (Schritte 1,3-6) + 64k-Budget.
+Stand: 2026-10-05, nach Gras-Optik-Session (Plan: docs/grasplan.md).
 
 ## ⚡ SOFORT NÄCHSTER SCHRITT
 
-**Visuelle Verifizierung durch den Nutzer** (Gras-Optik-Änderungen dieser
-Session): Transluzenz (in Sonnenrichtung schauen), Specular, Clumping
-(Büschel + freie Flecken), Grundfarbe aus dem Terrain (Basis nimmt
-Gras-/Sandfarbe an), wandernde Böen (Wind driftet ~3.5 m/s).
+**Visuelle Verifizierung durch den Nutzer** (Gras-Optik + Farb-/Nebel-
+Änderungen dieser Session): Transluzenz (in Sonnenrichtung schauen),
+abgerundete Normalen (weicher Hell-Dunkel-Verlauf quer zur Breite),
+Specular, Büschel (Höhen-/Richtungsflecken, keine Lücken), Grundfarbe
+aus dem Terrain, wandernde Böen, satteres Grün, bläulicher/weiterer
+Nebel. Dichte-Regler sollte wieder gleichmäßig wirken (Nahbereich ist
+wieder dicht).
 
-Danach optional: **Schritt 7 (Baum-Schatten auf Gras)** aus dem
-7-Schritte-Plan (vorher: 1=Transluzenz, 2=Normalen [schon vor der Session
-davon], 3=Specular, 4=Clumping, 5=Grundfarbe, 6=Böen — alle erledigt).
+Danach optional: **Schritt 7 (Baum-Schatten auf Gras)** aus
+docs/grasplan.md.
 
-**64k-Budget: ERREICHT — 64,032 Byte** (Ziel < 65,536 mit -Os -s, jetzt
-zusätzlich -no-pie -fno-asynchronous-unwind-tables -Wl,-z,noseparate-code).
+**64k-Budget: 64,040 Byte** (Ziel < 65,536, Makefile-Check ok).
 
 ### Kontext: was diese Session alles verändert hat
 
@@ -56,6 +57,27 @@ zusätzlich -no-pie -fno-asynchronous-unwind-tables -Wl,-z,noseparate-code).
 
 **Kamera:** Free-Fly (Pointer-Lock, Halten-links = Look, WASD, Space/X hoch/runter, Shift Turbo, O Orbit, R Reset). Pitch ±83° Clamp, invertiert, Sensitivität 0.0008.
 
+## Gefixt (Session 2026-10-05, Gras-Optik-Korrektur + Farben/Nebel)
+
+- [x] **Schritt 4 revertiert + korrigiert** (docs/grasplan.md): Der erste
+  Entwurf skalierte die Halmzahl pro Zelle (Cap 12 davor) -> Luecken
+  zwischen den Buescheln, dummer Nahbereich, Dichte-Regler wirkungslos.
+  Jetzt: naechster Bueschel-Mittelpunkt (1.2m-Grid, 3x3-Suche pro Halm)
+  mischt nur Hoehe/Yaw/Lean weich (w = 1-smoothstep(0,0.7,dc)). Position
+  und Halmzahl unveraendert -> Dichte wie vorher, Regler wirkt wieder.
+  1m-Rebuild ~170ms (3x3-Suche kostet ~40ms).
+- [x] **Schritt 2 (abgerundete Normalen)**: grass.vert sendet vSide (ww
+  -0.5..0.5) + vR (Breitenrichtung); vNrm = Flaechennormale F + Wind.
+  grass.frag: n = normalize(n + 2*0.6*vSide*vR + 0.5*Y) (k=0.6, u=0.5).
+  Weicher Hell-Dunkel-Verlauf quer zur Breite; keine schwarzen Halme.
+- [x] **Satteres Gruen** (Gras + Terrain, per HLS-Skript): Basis
+  (0.22,0.42,0.13)->(0.18,0.46,0.09), hell (0.48,0.60,0.18)->
+  (0.37,0.66,0.12), Halm-Spitze (0.45,0.58,0.17)->(0.34,0.64,0.11).
+  Terrain und Halm-Basis identisch -> LOD-UEbergang bleibt nahtlos.
+- [x] **Nebel weniger + bläulich** (Rayleigh): Koeffizient 0.00004 ->
+  0.000015 in allen 5 Shadern (250m: 92%->61%), Sky-Horizont
+  (0.72,0.83,0.95)->(0.67,0.78,0.96).
+
 ## Gefixt (Session 2026-10-05, Gras-Optik + 64k-Budget)
 
 - [x] **Gras-Optik Schritt 1 (Transluzenz)**: `pow(max(dot(-rd,SUN),0),3)`
@@ -64,8 +86,9 @@ zusätzlich -no-pie -fno-asynchronous-unwind-tables -Wl,-z,noseparate-code).
   Spitzen staerker (dezent: Pixel = mehrere Halme).
 - [x] **Schritt 4 (Clumping)**: 8m-Grid, pro Zelle Hash-Cluster-Mittelpunkt
   + Dichte-Varianz, nb * (0.21..1.0) nach Distanz zum Mittelpunkt.
-  Haengt nur von (x,z) ab -> Zell-Kopieren bleibt gueltig. Halmzahl
-  ~40% (freie Flecken), Build schneller (246k statt 610k Halme).
+  (SPÄTER REVERTIERT — Luecken/dummer Nahbereich, siehe
+  "Gras-Optik-Korrektur"-Sektion; ersetzt durch 1.2m-Bueschel via
+  Hoehe/Yaw/Lean.)
 - [x] **Schritt 5 (Grundfarbe)**: Halm-Basis = Terrain-Grasfarbe
   (4-Oktaven-fbm, gleiche Werte/Scale wie terrainColor) + Sand am Ufer.
   Basis und Terrain nutzen dieselbe Formel -> LOD-UEbergang nahtlos.
@@ -229,10 +252,11 @@ Funktioniert auch auf NVIDIA (dort wird `gl_FragDepth` immer geschrieben).
 
 ## Aktuell offen / To-Do
 
-### 1. Gras (Gras-Optik-Schritte 1,3-6 + Budget sind fertig)
-- [ ] Visuell verifizieren (Nutzer): Transluzenz, Specular, Clumping,
-  Grundfarbe, Böen, Fade-in, Terrainfarbe-Übergang
-- [ ] Optional: Schritt 7 (Baum-Schatten auf Gras)
+### 1. Gras (Gras-Optik-Schritte 1-6 + Budget sind fertig)
+- [ ] Visuell verifizieren (Nutzer): Transluzenz, abgerundete Normalen,
+  Specular, Büschel (keine Lücken), Grundfarbe, Böen, satteres Grün,
+  Nebel, Dichte-Regler im Nahbereich
+- [ ] Optional: Schritt 7 (Baum-Schatten auf Gras, docs/grasplan.md)
 - [ ] V-Modus-Crash auf Host neu testen (maximiert + AA off)
 - [ ] Gras-Flackern sehr nah an der Kamera prüfen (Compositing/Depth)
 
@@ -274,14 +298,15 @@ python3 -c "from PIL import Image; Image.open('/tmp/64kdemo_shot.ppm').save('/tm
 - Compositing-Blend-Zone: ±0.03m
 - Gras: STEP 0.30m, Build-Radius = Dichte-Cutoff (~70m bei MD=80),
   Dichte-Falloff `pow(1-smoothstep(8, grassMaxDist, dist), 1.6)` (LUT),
-  Halme/Zelle `4+20*dens` (Cap 12) * Clumping-Faktor (0.21..1.0, 8m-Grid),
+  Halme/Zelle `4+20*dens` (Cap 12) — Dichte ohne Clumping-Faktor
+  (Clumping mischt nur Hoehe/Yaw/Lean, CLUMP 1.2m-Grid, 3x3-Suche),
   GRASS_CAP 1.5M, GRASS_FLOATS 10
   (pos3, hoehe, breite, phase, schattierung, yaw, lean, birth)
   — hoehe/breite = BASIS-Werte, Distanz-Skalierung im Shader (grass.vert)
   — Generator im eigenen Thread ("finish then latest"), Zell-Kopieren
-    macht 1m-Rebuilds ~125ms, VBO-Upload im Main-Thread
-  — Shader: Transluzenz, Specular, Grundfarbe aus Terrain (4-Oct-fbm),
-    wandernde Boen (vnoise, ~3.5 m/s)
+    macht 1m-Rebuilds ~170ms, VBO-Upload im Main-Thread
+  — Shader: Transluzenz, abgerundete Normalen (vSide/vR, k=0.6 u=0.5),
+    Specular, Grundfarbe aus Terrain (4-Oct-fbm), wandernde Boen (vnoise)
 - Bäume: Rebuild >12m (camTgt), Gras: Rebuild >1m (camPos)
 - Slider: Dichte 0.2–8.0x, Höhe 0.3–3.0x, Sichtweite 40–120m (Maus, unten Mitte)
 - Tasten: M=AA (4x/8x/OFF), G=Gras-Freeze, V=Nur-Gras, P=Screenshot,
