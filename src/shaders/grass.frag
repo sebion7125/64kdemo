@@ -8,6 +8,7 @@ in float vFade;   // 0..1 (Fade-in nach Build)
 uniform vec3 uCamPos;
 out vec4 O;
 const vec3 SUN = normalize(vec3(0.55, 0.38, -0.62));
+const float WATER_Y = 0.25;   // Wasserstand (wie fragment.glsl/scene.h)
 float hash12(vec2 p){
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);
@@ -21,7 +22,7 @@ float vnoise(vec2 p){
 }
 float fbm(vec2 p){
   float s = 0.0, a = 0.5;
-  for(int i = 0; i < 3; i++){
+  for(int i = 0; i < 4; i++){
     s += a * vnoise(p);
     p = p * 2.03 + vec2(17.1, 9.2);
     a *= 0.5;
@@ -49,8 +50,14 @@ void main(){
   // war (Halm hoeher als Kamera) -> dot(n,SUN) negativ -> Halm dunkel.
   // Ohne Flip: stabile, helle Beleuchtung von oben (wie Terrain-Gras).
   vec3 rd = normalize(uCamPos - vPos);
-  // Halmfarbe: dunkle Basis, helle Spitze (zur Terrain-Grasfarbe passend)
-  vec3 base = vec3(0.14, 0.28, 0.08);
+  // Grundfarbe aus dem Terrain (4-Oktaven-fbm, identisch zu fragment.glsl):
+  // die Halm-Basis uebernimmt die lokale Gras-/Sandfarbe, die Spitze bleibt
+  // hell (Silhouette gegen den Himmel). Gleiche Albedo-Werte wie terrainColor.
+  float g = fbm(vPos.xz * 0.9);
+  vec3 tGrass = mix(vec3(0.22, 0.42, 0.13), vec3(0.48, 0.60, 0.18), g) * vec3(0.87, 0.93, 0.89);
+  float sandM = 1.0 - smoothstep(0.05, 0.40, abs(vPos.y - WATER_Y));
+  vec3 sand = mix(vec3(0.62, 0.55, 0.38), vec3(0.72, 0.66, 0.48), fbm(vPos.xz * 1.5));
+  vec3 base = mix(tGrass, sand, sandM);
   vec3 tip  = vec3(0.45, 0.58, 0.17);
   vec3 albedo = mix(base, tip, vT * vT) * (0.75 + 0.5 * vCol.x);
   float dif = max(dot(n, SUN), 0.0) * 0.85 + 0.15;
