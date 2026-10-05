@@ -4,11 +4,19 @@ Stand: 2026-10-05, nach Thread/Fade/Breite/Terrainfarbe-Session. **Chat aktiv** 
 
 ## ⚡ SOFORT NÄCHSTER SCHRITT
 
-**Gras-Rebuild-Trigger auf 1m** (wünscht Nutzer, nach 12m). Dazu evtl. Build-
-Radius durchsatzseitig prüfen (Build dauert ~1.4s; bei 1m-Schritten baut der
-Thread dann fast permanent — "latest wins" rastet aber auf die aktuelle
-Position ein). Danach: visuelles Verifizieren vom Nutzer (Fade-in, Breite,
-Terrainfarbe).
+**Gras-Grafik-Verbesserungen** (Arbeitsplan vom Nutzer, 7 Schritte):
+1. Transluzenz (Gegenlicht) in grass.frag
+2. Abgerundete Normalen (vSide/vR)
+3. Schwaches Glanzlicht (Blinn-Phong)
+4. Büschel/Clumping (Voronoi) in grass_cpu.c
+5. Grundfarbe aus dem Terrain (4-Oktaven-fbm in grass.frag)
+6. Wind als wandernde Böen in grass.vert
+7. (optional) Baum-Schatten auf Gras
+
+Regeln: ein Schritt pro Commit (bauen, Screenshot, vergleichen, committen),
+ur grass_cpu.c/grass.vert/grass.frag ändern, GLSL 330 core, keine neuen
+Uniforms wenn möglich, **Binärgröße < 65536 Byte mit -Os -s** (Makefile
+muss dafür angepasst werden), hash12/vnoise/fbm aus fragment.glsl übernehmen.
 
 ### Kontext: was diese Session alles verändert hat
 
@@ -49,6 +57,25 @@ Terrainfarbe).
 - `main.c` — GL-Setup, Mesh-Pass, Raymarch-Pass, Compositing, Kamera, HUD
 
 **Kamera:** Free-Fly (Pointer-Lock, Halten-links = Look, WASD, Space/X hoch/runter, Shift Turbo, O Orbit, R Reset). Pitch ±83° Clamp, invertiert, Sensitivität 0.0008.
+
+## Gefixt (Session 2026-10-05, 1m-Trigger)
+
+- [x] **Gras-Rebuild-Trigger 12m → 1m** + Rebuilds 4.5x schneller:
+  - **Zell-Kopieren**: Halm-Daten hängen nur von (ix,iz,b) ab (Hashes), NICHT
+    von der Distanz (Größe ist im Shader). Zellen mit unverändertem nb werden
+    kopiert statt regeneriert (per-Zelle Offset/Count-Tabellen, CT=700,
+    ~5MB BSS). 1m-Shift: ~150ms statt ~700ms (VM-Messung; Rest-Kosten sind
+    Loop+memcpy, VM-laufzeitgebunden).
+  - **Build-Radius = Dichte-Cutoff** (Bisektion, ~70m bei MD=80) statt
+    MD+20: Zellen außerhalb generieren keine Halme (dens<0.01), der Margin
+    hat nur Build-Zeit gekostet.
+  - **Dichte-LUT** (0.5m-Resolution, pro MD gecacht) statt powf pro Zelle.
+  - **Worker: "finish then latest"** (kein Mid-Build-Restart): Build wird
+    immer zu Ende gebaut, nächster geht direkt zum neuesten Zentrum.
+  - Step-Loop: (ix,iz) inkrementell statt div/mod (idivl).
+  - Folge: Gras hinkt bei 13 m/s ~2m hinterher, bei Turbo (34 m/s) ~5m,
+    nach Stopp konvergiert in ~150ms. Kopierte Halme behalten ihre
+    Birth-Time (Fade läuft nahtlos weiter).
 
 ## Gefixt (Session 2026-10-05, Thread/Fade/Breite/Terrainfarbe)
 
@@ -180,9 +207,10 @@ Funktioniert auch auf NVIDIA (dort wird `gl_FragDepth` immer geschrieben).
 
 ## Aktuell offen / To-Do
 
-### 1. Gras-Rebuild-Trigger + Qualität (AKTUELL)
-- [ ] Rebuild-Trigger 12m → **1m** (Nutzerwunsch; Thread ist vorbereitet)
-- [ ] Visuell verifizieren (Nutzer): Fade-in, Breite, Terrainfarbe-Übergang
+### 1. Gras-Grafik (AKTUELL, siehe SOFORT NÄCHSTER SCHRITT)
+- [ ] Makefile auf -Os -s (64k-Budget) + Baseline-Größe messen
+- [ ] Schritte 1-6 umsetzen (einer pro Commit)
+- [ ] Visuell verifizieren (Nutzer): Fade-in, Breite, Terrainfarbe, Übergang
 - [ ] V-Modus-Crash auf Host neu testen (maximiert + AA off)
 - [ ] Gras-Flackern sehr nah an der Kamera prüfen (Compositing/Depth)
 
@@ -222,13 +250,14 @@ python3 -c "from PIL import Image; Image.open('/tmp/64kdemo_shot.ppm').save('/tm
 
 - `WATER_Y = 0.25`, `CAM_NEAR = 0.1`, `CAM_FAR = 300`
 - Compositing-Blend-Zone: ±0.03m
-- Gras: STEP 0.30m, Build-Radius = `grassMaxDist+20m` (Default 80+20=100m),
-  Dichte-Falloff `pow(1-smoothstep(8, grassMaxDist, dist), 1.6)`,
+- Gras: STEP 0.30m, Build-Radius = Dichte-Cutoff (~70m bei MD=80),
+  Dichte-Falloff `pow(1-smoothstep(8, grassMaxDist, dist), 1.6)` (LUT),
   Halme/Zelle `4+20*dens` (Cap 12), GRASS_CAP 1.5M, GRASS_FLOATS 10
   (pos3, hoehe, breite, phase, schattierung, yaw, lean, birth)
   — hoehe/breite = BASIS-Werte, Distanz-Skalierung im Shader (grass.vert)
-  — Generator läuft im eigenen Thread ("latest wins"), VBO-Upload im Main-Thread
-- Bäume: Rebuild >12m (camTgt), Gras: Rebuild >12m (camPos, nächster Schritt: 1m)
+  — Generator im eigenen Thread ("finish then latest"), Zell-Kopieren
+    macht 1m-Rebuilds ~150ms, VBO-Upload im Main-Thread
+- Bäume: Rebuild >12m (camTgt), Gras: Rebuild >1m (camPos)
 - Slider: Dichte 0.2–8.0x, Höhe 0.3–3.0x, Sichtweite 40–120m (Maus, unten Mitte)
 - Tasten: M=AA (4x/8x/OFF), G=Gras-Freeze, V=Nur-Gras, P=Screenshot,
   T=Wireframe, O=Fly/Orbit, 1/2/3=Resolution, Q/Esc=Quit

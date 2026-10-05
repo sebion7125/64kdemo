@@ -1041,9 +1041,10 @@ int main(int argc, char **argv) {
         builtG = 1;
         grass_thread_start();
       } else if(!grassFrozen){
-        // Rebuild-Trigger: Positionswechsel >12m (nicht Drehung!) oder
-        // Dichte/Sichtweite-Slider. Der Worker-Thread baut und rastet bei
-        // schneller Bewegung auf das jeweils neueste Zentrum ein.
+        // Rebuild-Trigger: Positionswechsel >1m (nicht Drehung!) oder
+        // Dichte/Sichtweite-Slider. Der Worker-Thread baut "finish then
+        // latest": jeder Build wird zu Ende gebaut, der naechste geht direkt
+        // zum neuesten Zentrum (Zell-Kopieren macht Rebuilds schnell).
         static float lastDensity = 1.0f, lastMaxDist = 80.0f;
         int needBuild = 0;
         if (grassDensityScale != lastDensity || grassMaxDist != lastMaxDist) {
@@ -1051,7 +1052,7 @@ int main(int argc, char **argv) {
           lastMaxDist = grassMaxDist;
           needBuild = 1;
         }
-        if (fabsf(camPos[0] - gCX) > 12.0f || fabsf(camPos[2] - gCZ) > 12.0f)
+        if (fabsf(camPos[0] - gCX) > 1.0f || fabsf(camPos[2] - gCZ) > 1.0f)
           needBuild = 1;
         if (needBuild) {
           gCX = camPos[0]; gCZ = camPos[2];
