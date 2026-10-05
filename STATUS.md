@@ -2,22 +2,20 @@
 
 Stand: 2026-10-05, Runde 5 (Chat-Wechsel). **Gras-Fade-out: VAO-Fix +
 Kanten-Pop-Fix committet und vom Nutzer bestätigt** (Slider ✓, Pop ✓ weg).
-**Issue B (kein neues Gras nach ~77m) ist FIXED und vom Nutzer bestätigt.**
-**Issue A (Längensprung/Ploppen in der Ferne) ist FIXED (VM-verifiziert),
-wartet auf Nutzer-Host-Test. R-Reset (Gras wird nicht mit zurückgesetzt)
-ist FIXED (VM-verifiziert).** Offen: Issue C (Gras-Inseln abweichend vom
-Terrain, seit Issue-B-Fix nicht mehr gesehen). Details unten in „ISSUES“.
+**Issue B FIXED + bestätigt. R-Reset FIXED + vom Nutzer bestätigt.**
+**Issue A: TEILS FIXED (Death-Time-Fix a4ddeb9), aber der Sprung ist auf
+dem Host noch da — Nutzer sieht neu generiertes Gras überall. Overlap-Bug
+im Copy/Gen-Pfad identifiziert (Unit-Test: 560 Duplikate), Fix offen.**
+Offen: Issue C (Gras-Inseln, seit Issue-B-Fix nicht mehr gesehen).
+Details unten in „ISSUES“.
 
 ## ⚡ SOFORT NÄCHSTER SCHRITT (nächster Chat)
 
-**Issue A-Fix (Death-Time erst am Swap-Punkt) + R-Reset-Fix (Gras-Build
-an der Startposition) sind committet. Nutzer-Host-Test anstehen:**
-1. Issue A: gleiche Freeze-Fahrt wie vorher (G an, rückwärtsfahren, G
-   aus) → die sofortigen Sprünge am Build-Wechsel sollten weg sein,
-   stattdessen sanfte 2s-Fades. Falls noch ein „Längensprung" sichtbar:
-   Taste n + m (Halm-Dump mit DIFF) drücken.
-2. R-Reset: weit fahren, R drücken → Kamera + Gras zurück an der
-   Startposition (Gras fadet in 2s ein, auch bei Freeze).
+**Issue A ist NUR TEILS FIXED.** R-Reset ist vom Nutzer bestätigt ✓.
+Der Sprung (neu generiertes Gras, überall sichtbar) ist noch da.
+Nächster Schritt: Overlap-Bug im Copy/Gen-Pfad schließen (siehe
+Issue-A-Sektion, "Nächste Schritte"). Code-Zustand: grass_cpu.c ist
+beim committeten Stand (a4ddeb9), Fix-Versuche revertet.
 
 Danach:
 1. **Issue C (Inseln) in der VM suchen**: Halme-Höhen vs. c_terrainH an
@@ -43,37 +41,63 @@ Baum-Schatten.
   Frozen: 10s fahren + R: 827192 Halme, 0 neu, 532 sterben (alles
   kopiert, 100% sichtbar).
 
-### Issue A: „Neue Halme ploppen in der Entfernung auf“ — **FIXED (VM-verifiziert), wartet auf Nutzer-Host-Test**
-- **Beobachtung (Nutzer):** Freeze (G) an + rückwärtsfahren: die
-  Shader-Grenze (LOD 68–80m) ist sichtbar und weich. Freeze aus: ein Teil
-  des Grases fadet sichtbar aus (Death-Fade ✓), aber DANN ploppen in der
-  Entfernung plötzlich Halme „auf“. Nutzer-Hypothese: keine neuen Halme,
-  sondern **nur ihre Länge springt**.
-- **Wurzel (gemessen, VM):** Die Death-Time wurde WÄHREND des Builds
-  gesetzt (gWorldTime im Kopier-Pfad), nicht beim Swap. Der Build dauert
-  0.3–1s → beim VBO-Swap waren die sterbenden Halme bereits 0.3–1s im
-  Fade (f ≈ 0.7–0.85 statt 1.0) → **sofortiger sichtbarer Sprung von
-  15–30% am Swap-Punkt** (Pixelmessung: -34% in einem Frame vor Fix).
-  Die „ploppenden“ Halme sind die NEUEN Halme (Fade-in über 2s vom Swap
-  ab — korrekt), die aber erst ab ~30% Alpha (~0.5s) deutlich sichtbar
-  werden → Wahrnehmung „ploppen plötzlich auf". Halme-Daten-Dump
-  (Taste n/m) vor/nach Build: 0 Halme verschwinden ohne Death-Time,
-  0 Höhen-Sprünge, Birth/Death korrekt → Regenerierung- und
-  Reset-Hypothesen ausgeschlossen.
-- **Fix (grass_cpu.c):** Death-Time erst beim Finish (Swap-Punkt) setzen:
-  Kopier-Pfad + out_build_step schreiben Platzhalter -1.0f, grass_build_finish
-  setzt d[10] = gWorldTime. (Birth-Time war schon korrekt am Finish.)
-- **Verifiziert (VM, Pixel-Serien + b-Dumps mit exakten Zeitstempeln):**
-  S-Szenario (Kamera vom Feld weg): ferne Zeile vor Fix -34% sofort am
-  Swap; nach Fix sanft: -4% (0.4s) → -15% (1s) → -23% (1.4s) → stabil
-  -11% (Death-Fade über 2s, dann neue Halme faden ein). W-Szenario
-  (Kamera zum Feld hin): ferne Zeile steigt sanft um +13% über 2s
-  (Fade-in), kein Sprung. Buffer-Seite (Summe-ShaderFade) passt exakt
-  zur smoothstep-Kurve ab Swap-Zeit. Edge-Pop-Unit-Test: 0 Pops.
-- **Offen:** Nutzer-Host-Test (gleiche Freeze-Fahrt wie vorher). Falls
-  dort noch ein „Längensprung" sichtbar ist: Taste n (Punkt 45m vor +
-  20m links der Kamera setzen, Halm-Dump) + m (gleiche Punkte erneut,
-  DIFF) während der Szene drücken — zeigt Höhen/Birth/Death pro Halm.
+### Issue A: „Neue Halme ploppen auf“ — **Teils FIXED, Rest offen: Overlap-Bug im Copy/Gen-Pfad**
+
+**Stand nach 2. Nutzer-Feedback (Host):** R-Reset funktioniert ✓. Der
+Sprung ist ABER noch da. Nutzer ist jetzt sicher: es ist **neu generiertes
+Gras**, und er sieht es **überall** — nach Freeze-Off wird der ganze
+Dichte-Verlauf neu generiert. Nutzer-Vorgabe (korrekt, = Design): alte
+Halme bleiben im neuen Puffer und faden aus, dürfen dann gelöscht werden;
+neue Halme faden gleichzeitig ein → weicher Übergang.
+
+**Teil 1 — FIXED (committet a4ddeb9, VM-verifiziert):** Death-Time wurde
+während des Builds gesetzt → sterbende Halme waren beim Swap schon
+0.3–1s im Fade → sofortiger 15–30%-Sprung am Swap-Punkt (gemessen −34%
+in einem Frame). Fix: Death-Time erst am Finish (Swap-Punkt) setzen
+(Platzhalter -1.0f). VM: sanfte 2s-Fades statt Sprung.
+
+**Teil 2 — OFFEN: Overlap-Bug (kopiert + generiert an gleicher Stelle).**
+- **Unit-Test /tmp/test_overlap.c (bestätigt):** 3-Phasen-Szenario
+  (Build (0,0) → Build (−10,0) senkt Dichte in +x → Build (10,0) hebt
+  sie wieder): **560 doppelte Positionen** im End-Buffer. Duplikate sind
+  Buffer-adjacent (gleiche Zelle, b benachbart): alter Halm (Birth 100/103,
+  sofort sichtbar) + neuer Halm (Birth 106, Fade-in) an EXAKT gleicher
+  Stelle. Nutzer sieht den sofort sichtbaren → „Plopp“.
+- **Mechanismus (grass_cpu.c build_cell):** Copy-Loop kopiert die alten
+  Halme (b = 0..ocnt−1, teils übersprungen: sterbende mit fertigem Fade
+  `gWorldTime − death ≥ 2.5s` werden NICHT kopiert). Gen-Loop generiert
+  dann ab `bStart = onb` bis nb−1. Wenn `ocnt > onb` (sterbende Halme aus
+  Dichte-Abfall im Buffer) überlappen kopiert + generiert bei
+  b = onb..ocnt−1 → gleicher b → gleiche Position (deterministisch aus
+  (ix,iz,b)).
+- **Debug-Werte (Zelle 37,70):** Phase 2: copied=22 ocnt=22 nb=20 onb=22.
+  Phase 3: **copied=20** ocnt=22 nb=23 onb=20 — die Copy-Loop kopiert
+  NUR 20 (die 2 sterbenden mit fertigem Fade fehlen!) → kopierte Halme
+  besetzen NICHT b=0..ocnt−1 lückenlos.
+- **Fix-Versuche (nicht committet, revertet):**
+  1. `bStart = max(onb, ocnt)`: Test immer noch 560 Duplikate.
+  2. `bStart = ocnt` + Bedingung `nb > ocnt`: Test 2459 Duplikate (schlechter!).
+- **OFFENE FRAGEN (nächster Chat):**
+  a) Sind die 560 „Duplikate“ echte Overlaps oder Hash-Kollisionen bei
+     1mm-Auflösung des Tests? (32 Halme in 0.28m → mittlere Distanz
+     ~9mm; Test-Präzision 1mm. Test mit 0.1mm oder exaktem Float-Vergleich
+     wiederholen!) Buffer-Adjazenz der Duplikate spricht für echten Overlap.
+  b) Warum macht Fix 2 es schlimmer? (Vermutung: bei nb > ocnt werden
+     nb−ocnt Halme bei b=ocnt..nb−1 generiert, aber die Copy-Loop hat nur
+     ~nb Halme kopiert (lebendig) + wenige sterbende → andere Zellen
+     bekommen mehr Halme als vorher → neue Kollisionen?)
+  c) Duplikat-Daten zeigen Birth-Kombinationen (100→103) und (100→106) —
+     auch PHASE-2-Halme sind dupliziert → Bug tritt schon beim ersten
+     Dichte-Wechsel auf, nicht nur beim Hin-und-Her.
+- **Test-Artefakte:** /tmp/test_overlap.c (Duplikat-Zähler),
+  /tmp/test_overlap2.c (mit Birth/Death-Output), /tmp/test_overlap3.c
+  (Zellen-Check), /tmp/debug_cell.c (Phasen-Szenario),
+  /tmp/grass_cpu_backup.c (Zustand mit Fix 1), /tmp/patch_debug*.py.
+- **Nächste Schritte:** 1) Test-Präzision erhöhen (0.1mm) → echte
+  Overlaps vs. Kollisionen trennen. 2) Falls echt: Copy-Loop muss die
+  tatsächlich kopierten b-Indizes melden (nicht ocnt), Gen-Loop startet
+  danach. 3) VM-Pixeltest im 3-Phasen-Szenario (Hin-und-Her-Fahrt) →
+  Sprung sichtbar? 4) Dann Nutzer-Host-Test.
 
 ### Issue B: Nach einer Strecke wird kein neues Gras mehr generiert, Halmzahl fällt nur — **FIXED + vom Nutzer bestätigt**
 - **Beobachtung (Nutzer):** nach Zurücklegen einer Strecke ein Modus,
