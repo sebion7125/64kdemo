@@ -596,17 +596,26 @@ static int build_text_verts(float *v, const char *s, int w, int h, float px0, fl
 // daher vertikaler Flip.
 static void save_screenshot_ppm(const char *path, int w, int h) {
   if (w < 1 || h < 1) return;   // ungueltige Groesse (Fenster minimiert?)
-  unsigned char *buf = malloc((size_t)w * h * 3);
+  // GL_RGBA statt GL_RGB: Mesa llvmpipe 26.0.8 schreibt mit GL_RGB bei
+  // bestimmten Groessen (w mod 4)*(h-1) EXTRA Bytes ueber das Buffer-Ende
+  // (Heap-Overflow, Crash "malloc(): invalid size"). RGBA ist praezise.
+  unsigned char *buf = malloc((size_t)w * h * 4);
   if (!buf) return;
   // WICHTIG: ReadBuffer VOR ReadPixels setzen (war vorher nachher — Bug!)
   p_glReadBuffer(GL_BACK);
   // Race-Condition-Fix: glFinish() warten bis alle GPU-Threads fertig sind,
   //  sonst crasht glReadPixels (Mesa-Threads rendern noch)
   p_glFinish();
-  p_glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, buf);
+  p_glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, buf);
   if (p_glGetError() != GL_NO_ERROR) {
     free(buf);
     return;
+  }
+  // Alpha entfernen (RGBA -> RGB, in-place von vorne: 3i+2 < 4i ist sicher)
+  for (int i = 0; i < w * h; i++) {
+    buf[i*3+0] = buf[i*4+0];
+    buf[i*3+1] = buf[i*4+1];
+    buf[i*3+2] = buf[i*4+2];
   }
   for (int y = 0; y < h / 2; y++) {
     int y2 = h - 1 - y;
