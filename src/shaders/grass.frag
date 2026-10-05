@@ -61,6 +61,12 @@ void main(){
   // an der Spitze mehr als an der Basis (duennere Stelle).
   float tl = pow(max(dot(-rd, SUN), 0.0), 3.0) * (0.3 + 0.7 * vT);
   col += albedo * tl * 0.55;
+  // Specular: weiches Glanzlicht (Blinn-Phong), an den Spitzen staerker
+  // (duenneres Material reflektiert mehr). Dezent: Halme sind feiner als
+  // ein Pixel, der Glanz ist ein Durchschnitt ueber mehrere Halme.
+  vec3 hv = normalize(rd + SUN);
+  float spec = pow(max(dot(n, hv), 0.0), 24.0) * (0.15 + 0.85 * vT * vT);
+  col += vec3(1.0, 0.98, 0.9) * spec * 0.12;
   float t = length(vPos - uCamPos);
   float fog = 1.0 - exp(-t * t * 0.00004);
   col = mix(col, skyColor(rd), fog);
