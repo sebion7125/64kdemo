@@ -201,6 +201,24 @@ static void build_cell(int ix, int iz){
   int nb = (int)(4.0f + 20.0f * dens * (0.4f + 0.6f * h4) * grassDensityScale);
   if(nb < 1) nb = 1;
   if(nb > 12) nb = 12;
+  // Clumping: Voronoi-artige Buenschel auf grobem 8m-Raster. Jede Rasterzelle
+  // hat einen Cluster-Mittelpunkt (Hash) und eine Dichte-Varianz (Hash);
+  // Halme nah am Mittelpunkt sind wahrscheinlicher -> sichtbare Buenschel
+  // statt gleichmaessiger Streuung. Haengt nur von (x,z) ab (nicht von der
+  // Kamera) -> die Copy-Entscheidung (basis-nb-Vergleich) bleibt gueltig.
+  {
+    int cx8 = (int)floorf(x / 8.0f), cz8 = (int)floorf(z / 8.0f);
+    float hcx = c_hash12(cx8 * 0.731f, cz8 * 0.317f);
+    float hcz = c_hash12(cx8 * 0.271f, cz8 * 0.913f);
+    float hcd = c_hash12(cx8 * 0.557f, cz8 * 0.137f);
+    float dcx = x - (cx8 + 0.15f + 0.7f * hcx) * 8.0f;
+    float dcz = z - (cz8 + 0.15f + 0.7f * hcz) * 8.0f;
+    float dc = sqrtf(dcx * dcx + dcz * dcz);
+    float clump = (0.35f + 0.65f * (1.0f - c_smoothstep(0.0f, 5.5f, dc)))
+                 * (0.6f + 0.4f * hcd);
+    nb = (int)(nb * clump);
+    if(nb > 12) nb = 12;
+  }
   // Halmgroesse: BASIS-Werte ohne Distanz-Skalierung. Die Distanz-Skalierung
   // (groesser in der Ferne, um Flaechen abzudecken) passiert im Shader
   // (grass.vert) kontinuierlich zur aktuellen Kameradistanz.
