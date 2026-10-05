@@ -1,5 +1,6 @@
 CC      = gcc
-CFLAGS  = -O2 -Wall -Wextra -std=c11 -Ithird_party/include
+CFLAGS  = -Os -Wall -Wextra -std=c11 -Ithird_party/include
+LDFLAGS = -s   # 64k-Budget: Binary < 65536 Byte
 LDLIBS  = -ldl -lm -lpthread
 SRC     = src/main.c src/shaders_gen.c src/terrain_cpu.c src/trees_cpu.c src/grass_cpu.c
 BIN     = bin/64kdemo
@@ -12,9 +13,10 @@ all: $(BIN)
 
 $(BIN): $(SRC)
 	@mkdir -p bin
-	$(CC) $(CFLAGS) -o $@ $(SRC) $(LDLIBS)
+	$(CC) $(CFLAGS) -o $@ $(SRC) $(LDFLAGS) $(LDLIBS)
+	@sz=$$(stat -c%s $@); if [ $$sz -gt 65536 ]; then echo "WARNUNG: Binary $$sz Byte > 65536 (64k-Budget)"; else echo "Binary: $$sz Byte (64k-Budget ok)"; fi
 
-src/shaders_gen.c: src/shaders/vertex.glsl src/shaders/fragment.glsl src/shaders/blit.frag src/shaders/hud.vert src/shaders/hud.frag src/shaders/treelines.vert src/shaders/treelines.frag src/shaders/tree.vert src/shaders/tree.frag src/shaders/leaf.vert src/shaders/leaf.frag src/shaders/grass.vert src/shaders/grass.frag src/shaders/crown.vert src/shaders/crown.frag tools/gen_shaders.sh
+src/shaders_gen.c: src/shaders/vertex.glsl src/shaders/fragment.glsl src/shaders/blit.frag src/shaders/hud.vert src/shaders/hud.frag src/shaders/treelines.vert src/shaders/treelines.frag src/shaders/tree.vert src/shaders/tree.frag src/shaders/leaf.vert src/shaders/leaf.frag src/shaders/grass.vert src/shaders/grass.frag src/shaders/crown.vert src/shaders/crown.frag tools/gen_shaders.sh tools/minify_glsl.py
 	./tools/gen_shaders.sh > $@
 
 clean:

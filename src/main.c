@@ -127,6 +127,7 @@ static void (*p_glReadBuffer)(GLenum mode);
 static GLenum (*p_glGetError)(void);
 
 // ================= Bibliotheken laden =================
+static void gl_fail(const char *n) { fprintf(stderr, "GL: %s fehlt\n", n); exit(1); }
 static void load_libs(void) {
   // --- X11 ---
   void *xlib = dlopen("libX11.so.6", RTLD_NOW | RTLD_GLOBAL);
@@ -153,8 +154,7 @@ static void load_libs(void) {
     p_glXGetProcAddressARB = (void *(*)(const char *))dlsym(glxlib, "glXGetProcAddress");
   if (!p_glXGetProcAddressARB) { fprintf(stderr, "glXGetProcAddressARB fehlt\n"); exit(1); }
 
-#define LOADGL(name, type) do { p_##name = (type)p_glXGetProcAddressARB(#name); \
-  if (!p_##name) { fprintf(stderr, "GL: %s fehlt\n", #name); exit(1); } } while (0)
+#define LOADGL(name, type) do { if (!(p_##name = (type)p_glXGetProcAddressARB(#name))) gl_fail(#name); } while (0)
   // GLX 1.3/1.4
   LOADGL(glXChooseFBConfig,           GLXFBConfig *(*)(Display *, int, const int *, int *));
   LOADGL(glXGetVisualFromFBConfig,    XVisualInfo *(*)(Display *, GLXFBConfig));
@@ -165,8 +165,7 @@ static void load_libs(void) {
   LOADGL(glXSwapBuffers,              void (*)(Display *, GLXDrawable));
   LOADGL(glXDestroyContext,           void (*)(Display *, GLXContext));
   // GL (Zeiger haben explizite Signaturen, void*-Cast reicht)
-#define LOADGL2(name) do { p_##name = (void *)p_glXGetProcAddressARB(#name); \
-  if (!p_##name) { fprintf(stderr, "GL: %s fehlt\n", #name); exit(1); } } while (0)
+#define LOADGL2(name) do { if (!(p_##name = (void *)p_glXGetProcAddressARB(#name))) gl_fail(#name); } while (0)
   LOADGL2(glGetString);
   LOADGL2(glCreateShader);
   LOADGL2(glShaderSource);
