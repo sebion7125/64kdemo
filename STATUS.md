@@ -5,8 +5,8 @@ fehrendes glEnableVertexAttribArray(5) in der VAO).
 
 ## ⚡ SOFORT NÄCHSTER SCHRITT
 
-Nutzer-Host-Test: Raeckwaertsfahrt + Slider-Change — fadet das Gras jetzt
-sanft aus (2s) statt ploetzlich weg? Danach:
+Nutzer-Host-Test: Raeckwaertsfahrt — fadet die Gras-Kante jetzt sanft aus
+(kein Pop mehr)? Danach:
 1. Nutzer-Feedback auf Dichte/Farben/Weite sammeln und abstimmen
 2. Entfernungssortierung verifizieren (genügt die Chunk-Methode oder
    braucht es pro-Frame-Sortierung?)
@@ -15,6 +15,24 @@ sanft aus (2s) statt ploetzlich weg? Danach:
 4. Optional: Schritt 7 (Baum-Schatten, docs/grasplan.md)
 
 ## Session 2026-10-05, Runde 5 (Gras-Fade-out: Wurzel = VAO-Attribut 5)
+
+### FIXED: Gras-Fade-out Teil 2 — Kanten-Pop bei Raeckwaertsfahrt
+- **Symptom:** Nach dem VAO-Fix (unten) fadete der Slider-Change wie geplant,
+  aber bei Raeckwaertsfahrt verschwand Gras an der Kante weiter ploetzlich.
+- **Wurzel:** Zellen, die beim 1m-Shift AUSSERHALB des neuen Build-Radius
+  landen (Kanten-Sichel, ~1m breit bei dCut), wurden vom Diamond-Walk nie
+  besucht -> ihre Halme fielen ohne Death-Time aus dem Buffer. Gemessen
+  (/tmp/test_edge_pop.c): ~3000 Halme/1m-Schritt POPTEN vs. ~11000, die
+  korrekt faden. Bei 13 m/s = ~37k Halme/s am Gras-Rand = sichtbarer Pop.
+- **Fix (grass_cpu.c):** Walk-Quadrat des POS-Builds = UNION von neuem
+  Radius-Quadrat und altem Walk-Quadrat (old_gnx/old_gnz werden in finish
+  gesichert). Die Schichel-Zellen laufen durch dieselbe Kopier-Logik
+  (build_cell: outsideNew && oldIdx<0 -> return, sonst Kopieren/sterben;
+  dist/half-Checks mit !partial-Guard). Selbstbegrenzt: sterbende Halme
+  leben max. 2.5s (5 Builds) -> Quadrat waechst max. mit Kamera * 2.5s.
+- **Verifiziert:** /tmp/test_edge_pop.c: 0 Pops pro Schritt (vorher ~3000),
+  auch 2m-Spruenge/Turbo-Test (10 Schritte, 0 Pops). VM: Walk 462x464
+  stabil, Fade 13119 -> 0 ueber 2.3s. Build-Dauer ohne Regression.
 
 ### FIXED: Gras-Fade-out war tot (WURZEL: glEnableVertexAttribArray(5) fehlte)
 - **Symptom:** Raeckwaertsfahrt UND Slider-Change: altes Gras verschwand
@@ -51,6 +69,8 @@ sanft aus (2s) statt ploetzlich weg? Danach:
   aus, wo kein LOD reinwirkt).
 
 ### Test-Infrastruktur (ergänzt, /tmp)
+- /tmp/test_edge_pop.c: Pop-Zaehler (alte vs. neue Buffer ueber Position,
+  1m- und 2m-Schritte) — der Test, der den Kanten-Pog gefunden hat.
 - /tmp/fade_verify.sh: Slider-Test mit Screenshot-Serie (neues Binary).
 - /tmp/fade_verify_old.sh + /tmp/64kdemo_old: identischer Test mit altem
   Binary (Vorher/Nachher-Vergleich).

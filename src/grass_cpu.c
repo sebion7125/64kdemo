@@ -72,6 +72,7 @@ static uint8_t *cellCnt = cellCntA;
 static int     *buildOff = cellOffB;    // Tabelle des aktuellen Builds
 static uint8_t *buildCnt = cellCntB;
 static int oldOffX0 = 0, oldOffZ0 = 0;  // Tabellen-Origin des alten Builds
+static int old_gnx = 0, old_gnz = 0;    // Tabellen-Groesse des alten Builds
 static int offX0 = 0, offZ0 = 0;        // Tabellen-Origin des aktuellen Builds
 
 #define GSTEP 0.30f
@@ -146,6 +147,24 @@ void grass_build_begin(float cx, float cz, int mode){
   gnz = iz1 - giz0 + 1;
   if (gnx > CT) gnx = CT;   // defensive: Tabelle ist CT×CT
   if (gnz > CT) gnz = CT;
+  if (mode == 0 && hasOldBuild) {
+    // Walk-Quadrat = UNION von neuem Radius-Quadrat und altem Walk-Quadrat.
+    // Die Kanten-Sichel (Zellen auBerhalb des neuen Radius, aber im alten
+    // Quadrat: sterbende Halme aus den letzten ~2.5s) wird mitverarbeitet
+    // und fadet 2s aus statt sofort zu pochen (Rueckwaertsfahrt: Gras-Kante
+    // verschwand ploetzlich pro 1m-Shift). Selbstbegrenzt: Halme aelter als
+    // 2.5s werden beim Kopieren verworfen, das Quadrat waechst max. mit der
+    // Kamerageschwindigkeit * 2.5s.
+    int ux0 = gix0, uy0 = giz0, ux1 = gix0 + gnx - 1, uy1 = giz0 + gnz - 1;
+    if (oldOffX0 < ux0) ux0 = oldOffX0;
+    if (oldOffZ0 < uy0) uy0 = oldOffZ0;
+    if (oldOffX0 + old_gnx - 1 > ux1) ux1 = oldOffX0 + old_gnx - 1;
+    if (oldOffZ0 + old_gnz - 1 > uy1) uy1 = oldOffZ0 + old_gnz - 1;
+    gix0 = ux0; giz0 = uy0;
+    gnx = ux1 - ux0 + 1; gnz = uy1 - uy0 + 1;
+    if (gnx > CT) gnx = CT;
+    if (gnz > CT) gnz = CT;
+  }
   offX0 = gix0; offZ0 = giz0;
   // Diamond-Order: Zellen vom Zentrum (Kamera) nach auessen verarbeited.
   // Wenn GRASS_CAP erreicht wird, fehlen die WEAESTEN Zellen (frueher:
@@ -172,10 +191,12 @@ static void build_cell(int ix, int iz){
   int ixl = ix - gix0, izl = iz - giz0;
   buildOff[izl * CT + ixl] = -1;
   buildCnt[izl * CT + ixl] = 0;
-  // Schnelle Ablehnung: auBerhalb des Build-Radius (quadratisch, kein sqrt)
+  // AuBerhalb des NEUEN Build-Radius: nur Zellen mit altem Gras verarbeiten
+  // (Kanten-Sichel: ihre Halme faden 2s aus statt sofort zu pochen; der
+  // Walk-Radius deckt die Union der alten/neuen Disks ab, s. begin).
   float dx = x - bcx, dz = z - bcz;
   float half = g_half();
-  if (dx * dx + dz * dz > half * half) return;
+  int outsideNew = dx * dx + dz * dz > half * half;
   float h4 = c_hash12(ix * 0.271f, iz * 0.711f);
   // --- Kopier-Entscheidung (vor der teuren Terrain-Berechnung) ---
   // Halm-Daten sind eine reine Funktion von (ix,iz,b) (Hashes + Terrain,
@@ -198,6 +219,7 @@ static void build_cell(int ix, int iz){
       if (cellOff[oi] >= 0) oldIdx = oi;
     }
   }
+  if (outsideNew && oldIdx < 0) return;   // neue Zelle auBerhalb: nichts zu tun
   if (oldIdx >= 0) {
     float dist = sqrtf(dx * dx + dz * dz);
     float dens = dens_at(dist);
@@ -262,7 +284,7 @@ static void build_cell(int ix, int iz){
   // Distanz zur Kamera -> Dichte-Falloff
   float pxd = px - bcx, pzd = pz - bcz;
   float dist = sqrtf(pxd * pxd + pzd * pzd);
-  if(dist > half) return;
+  if(dist > half && !partial) return;   // Teil-Kopie: Zelle ist bestockt
   // Dichte: nah 1.0, fern 0.0. Weicher Falloff (kein plötzliches Null):
   //   - Falloff von 8m bis grassMaxDist (skaliert mit Sichtweite-Slider)
   //   - Pow 1.6: nimmt in der Ferne starker ab (nah bleibt dicht)
@@ -433,6 +455,7 @@ void grass_build_finish(void){
   int *to = cellOff; cellOff = buildOff; buildOff = to;
   uint8_t *tc = cellCnt; cellCnt = buildCnt; buildCnt = tc;
   oldOffX0 = offX0; oldOffZ0 = offZ0;
+  old_gnx = gnx; old_gnz = gnz;
   nGrass = nGrassNew;
   gBuildMode = 0;
   gBuilding = 0;
@@ -490,6 +513,8 @@ void grass_debug_dump(void){
   }
   printf("GRAS-DEBUG t=%.2f: %d Halme: %d lebendig, %d fadet, %d verblasst; Summe-ShaderFade=%.0f (%.1f%%)\n",
          gWorldTime, nGrass, nAlive, nFading, nFaded, sumFade, 100.0f * sumFade / (float)nGrass);
+  printf("GRAS-DEBUG walk: gix0=%d giz0=%d gnx=%d gnz=%d dmaxR=%d dcx0=%d dcz0=%d bcx=%.2f bcz=%.2f\n",
+         gix0, giz0, gnx, gnz, dmaxR, dcx0, dcz0, bcx, bcz);
 }
 
 // Build laeuft gerade? (Request wartet oder Worker generiert) — fuer den HUD.
