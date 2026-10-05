@@ -62,6 +62,7 @@ static int oldOffX0 = 0, oldOffZ0 = 0;  // Tabellen-Origin des alten Builds
 static int offX0 = 0, offZ0 = 0;        // Tabellen-Origin des aktuellen Builds
 
 #define GSTEP 0.30f
+#define CLUMP 1.2f   // Bueschel-Grid (Schritt 4): naechster Mittelpunkt in 3x3-Zellen
 // Build-Radius = Dichte-Cutoff (wo dens auf 0.01 faellt), NICHT
 // grassMaxDist+20: auBerhalb generiert build_cell keine Halme (dens < 0.01),
 // der alte +20m-Margin hat nur Build-Zeit gekostet. Cutoff = Loesung von
@@ -225,6 +226,28 @@ static void build_cell(int ix, int iz){
     d[6] = 0.75f + 0.5f * b2;                     // Schattierung
     d[7] = b5 * 6.283f;                           // Yaw (Ebenen-Rotation)
     d[8] = 0.15f + 0.45f * b6;                    // Lean (Spitzen-Neigung)
+    // Clumping (Schritt 4): naechster Bueschel-Mittelpunkt (1.2m-Grid, 3x3-Suche
+    // pro Halm). NUR Eigenschaften (Hoehe/Yaw/Lean) werden weich zum Bueschel
+    // gemischt — Position und Halmzahl bleiben unveraendert (Verschieben wuerde
+    // Luecken reißen und den Dichte-Regler ungleichmäßig machen).
+    {
+      int cix = (int)floorf(bx / CLUMP), ciz = (int)floorf(bz / CLUMP);
+      float best = 1e9f, cid = 0.0f;
+      for (int j = -1; j <= 1; j++)
+        for (int i = -1; i <= 1; i++) {
+          float hx = c_hash12((cix + i) * 0.731f, (ciz + j) * 0.219f);
+          float hz = c_hash12((cix + i) * 0.219f, (ciz + j) * 0.731f);
+          float mx = (cix + i + hx) * CLUMP, mz = (ciz + j + hz) * CLUMP;
+          float d2 = (bx - mx) * (bx - mx) + (bz - mz) * (bz - mz);
+          if (d2 < best) { best = d2; cid = c_hash12(mx, mz); }
+        }
+      float dc = sqrtf(best) / CLUMP;                  // 0 = Mitte, ~0.7 = Rand
+      float w = 1.0f - c_smoothstep(0.0f, 0.7f, dc);   // Bueschel-Einfluss 1..0
+      d[3] *= 1.0f + 0.25f * w * (2.0f * cid - 1.0f);  // Hoehe (symmetrisch um 1)
+      float yawC = cid * 6.283f;
+      d[7] += w * 0.6f * remainderf(yawC - d[7], 6.283f); // Richtung (kuerzester Weg)
+      d[8] *= 0.8f + 0.4f * w;                             // Neigung
+    }
     // Birth-Time: Placeholder (0.0), wird in grass_build_finish gesetzt
     //  (erst beim Swap, nicht waehrend des Builds, sonst sind Halme schon "alt")
     d[9] = 0.0f;
