@@ -4,33 +4,50 @@ Stand: 2026-10-05, Runde 5 (Chat-Wechsel). **Gras-Fade-out: VAO-Fix +
 Kanten-Pop-Fix committet und vom Nutzer bestätigt** (Slider ✓, Pop ✓ weg).
 **Issue B (kein neues Gras nach ~77m) ist FIXED und vom Nutzer bestätigt.**
 **Issue A (Längensprung/Ploppen in der Ferne) ist FIXED (VM-verifiziert),
-wartet auf Nutzer-Host-Test.** Offen: Issue C (Gras-Inseln abweichend vom
-Terrain). Details + Hypothesen + Testpläne unten in „ISSUES“.
+wartet auf Nutzer-Host-Test. R-Reset (Gras wird nicht mit zurückgesetzt)
+ist FIXED (VM-verifiziert).** Offen: Issue C (Gras-Inseln abweichend vom
+Terrain, seit Issue-B-Fix nicht mehr gesehen). Details unten in „ISSUES“.
 
 ## ⚡ SOFORT NÄCHSTER SCHRITT (nächster Chat)
 
-**Issue A-Fix ist committet (Death-Time erst am Swap-Punkt, nicht während
-des Builds). Nutzer-Host-Test anstehen:** gleiche Freeze-Fahrt wie vorher
-(G an, rückwärtsfahren, G aus) → die sofortigen Sprünge am Build-Wechsel
-sollten weg sein, stattdessen sanfte 2s-Fades. Falls noch ein
-„Längensprung" sichtbar: Taste n + m (Halm-Dump mit DIFF) drücken.
+**Issue A-Fix (Death-Time erst am Swap-Punkt) + R-Reset-Fix (Gras-Build
+an der Startposition) sind committet. Nutzer-Host-Test anstehen:**
+1. Issue A: gleiche Freeze-Fahrt wie vorher (G an, rückwärtsfahren, G
+   aus) → die sofortigen Sprünge am Build-Wechsel sollten weg sein,
+   stattdessen sanfte 2s-Fades. Falls noch ein „Längensprung" sichtbar:
+   Taste n + m (Halm-Dump mit DIFF) drücken.
+2. R-Reset: weit fahren, R drücken → Kamera + Gras zurück an der
+   Startposition (Gras fadet in 2s ein, auch bei Freeze).
 
-Reihenfolge:
-1. **Issue A:** Nutzer-Host-Test (siehe oben).
-2. **Issue C (Inseln) in der VM suchen**: Halme-Höhen vs. c_terrainH an
+Danach:
+1. **Issue C (Inseln) in der VM suchen**: Halme-Höhen vs. c_terrainH an
    denselben Positionen dumpen; Raymarcher-SDF (0.85-Dämpfung) prüfen.
-3. Danach Wahrnehmungsfrage (Fade sichtbar?) mit Nutzer abstimmen
+   (Seit Issue-B-Fix nicht mehr vom Nutzer gesehen — Priorität unten.)
+2. Danach Wahrnehmungsfrage (Fade sichtbar?) mit Nutzer abstimmen
    (Death-Fade 2s → 3–4s? langsamere Testfahrt?).
 Danach wie bisher: Dichte/Farben/Weite, Entfernungssortierung, Budget,
 Baum-Schatten.
 
 ## ISSUES (Nutzer-Beobachtungen 2026-10-05, nach Pop-Fix)
 
+### R-Reset: Gras wird nicht mit zurueckgesetzt — **FIXED (VM-verifiziert)**
+- **Beobachtung (Nutzer):** R setzt nur die Kamera zurueck, das Gras
+  bleibt am alten Build-Zentrum (bzw. bei Freeze gar kein Build).
+- **Fix (main.c):** R-Handler ruft nach der Kamera-Reset auch
+  grass_build_request(30, 34, 0) auf (gCX/gCZ auf File-Scope geholt,
+  damit der automatische Trigger nicht noch ein zweites Build feuert).
+  Funktioniert auch im Frozen-Zustand (Worker arbeitet explizite
+  Requests ab, Abholung/Upload ist frozen-unabhaengig).
+- **Verifiziert (VM):** 10s fahren + R: Build an (30,34), 159k neu
+  (Fade-in), 220k alt (Fade-out), sichtbar 839731 ≈ Start 827192.
+  Frozen: 10s fahren + R: 827192 Halme, 0 neu, 532 sterben (alles
+  kopiert, 100% sichtbar).
+
 ### Issue A: „Neue Halme ploppen in der Entfernung auf“ — **FIXED (VM-verifiziert), wartet auf Nutzer-Host-Test**
 - **Beobachtung (Nutzer):** Freeze (G) an + rückwärtsfahren: die
   Shader-Grenze (LOD 68–80m) ist sichtbar und weich. Freeze aus: ein Teil
   des Grases fadet sichtbar aus (Death-Fade ✓), aber DANN ploppen in der
-  Entfernung plötzlich Halme „auf“. Nutzer-Hypothothese: keine neuen Halme,
+  Entfernung plötzlich Halme „auf“. Nutzer-Hypothese: keine neuen Halme,
   sondern **nur ihre Länge springt**.
 - **Wurzel (gemessen, VM):** Die Death-Time wurde WÄHREND des Builds
   gesetzt (gWorldTime im Kopier-Pfad), nicht beim Swap. Der Build dauert

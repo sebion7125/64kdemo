@@ -373,6 +373,7 @@ static int fboW = 0, fboH = 0;
 static int useMSAA = 1;   // 1 = MSAA an (M-Taste zum Umschalten: 4x -> 8x -> off)
 static int msaaSamples = 4;  // 4 oder 8 (M-Taste zyklisch)
 static int grassFrozen = 0;   // 1 = Gras-Rebuild eingefroren (G-Taste): gleiche Halme, egal wo die Kamera hin
+static float gCX = 0, gCZ = 0;   // letztes Gras-Build-Zentrum (auch fuer R-Reset)
 static int grassOnly = 0;     // 1 = TEST: nur Gras zeichnen (V-Taste), kein Terrain/Baeume/Blattdach
 static int hudMode = 2;       // H-Taste: 2 = Vollstats (2 Zeilen), 1 = reduziert (1 Zeile), 0 = aus
 float grassDensityScale = 1.0f;  // 0.2 - 8.0 (Slider unten im Fenster, extern in scene.h)
@@ -958,7 +959,15 @@ int main(int argc, char **argv) {
             }
             flyMode = !flyMode;
           }
-          if (ks == XK_r) { flyPos[0]=30; flyPos[1]=20; flyPos[2]=34; flyYaw=-2.42f; flyPitch=-0.32f; }
+          if (ks == XK_r) {
+            flyPos[0]=30; flyPos[1]=20; flyPos[2]=34; flyYaw=-2.42f; flyPitch=-0.32f;
+            // Gras mit zuruecksetzen: Build an der Startposition. Altes Gras
+            // im Walk-Quadrat wird kopiert/gefadet, der Rest (meist weit
+            // ueber dem MD-Cull) ist einfach weg; das Start-Gras (deterministisch)
+            // fadet in 2s ein.
+            gCX = 30.0f; gCZ = 34.0f;
+            grass_build_request(gCX, gCZ, 0);
+          }
           if (ks == XK_w) keyW = 1;
           if (ks == XK_a) keyA = 1;
           if (ks == XK_s) keyS = 1;
@@ -1136,7 +1145,7 @@ int main(int argc, char **argv) {
     // Gras: inkrementell (Zweipuffer, ~8000 Zellen/Frame), Schwellwert 12m.
     {
       static int builtT = 0, builtG = 0;
-      static float tCX = 0, tCZ = 0, gCX = 0, gCZ = 0;
+      static float tCX = 0, tCZ = 0;
       if(!builtT || fabsf(camTgt[0] - tCX) > 12.0f || fabsf(camTgt[2] - tCZ) > 12.0f){
         tCX = camTgt[0]; tCZ = camTgt[2];
         trees_build(tCX, tCZ);
