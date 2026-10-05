@@ -1,0 +1,8 @@
+# Binaries
+bin/
+
+# Generiert vom Makefile (tools/gen_shaders.sh aus src/shaders/*.glsl)
+src/shaders_gen.c
+
+# Paket (Build nimmt die Header aus third_party/include)
+*.deb
