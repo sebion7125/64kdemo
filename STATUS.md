@@ -1,14 +1,54 @@
 # 64kDemo — Status
 
-Stand: 2026-10-05, nach Skalierungs-/Crash-/Fade-in-Fixes.
+Stand: 2026-10-05, nach Feedback-Runde. **Nutzer: die letzten zwei Fixes
+(skalierende Slider, Gras-Fade-in) sind NICHT behoben.**
 
-## ⚡ SOFORT NÄCHSTER SCHRITT
+## ⚡ SOFORT NÄCHSTER SCHRITT (frischer Kontext)
 
-**Visuelle Verifizierung durch den Nutzer**:
-- Maximiertes Fenster: Slider+Labels skalieren mit (keine Ueberlappung)
-- Gras-Fade-in beim Positions-Shift (Crescent am Gras-Rand blendet 2s ein)
-- Dichte in Nähe UND Ferne, CAP/BUILD-Indikator (H-Taste Vollstats)
-- Screenshot (P) crasht nicht mehr bei breiten Fenstern (VM)
+**Zwei offene Bugs — Nutzer hat beides als nicht behoben gemeldet:**
+
+### Bug 1: Maximiertes Fenster → Schriften überlappen
+- Nutzer-Beschreibung: "wenn ich das fenster maximiere, überlappen die
+  schriften, weil sie mit der fenstergröße größer werden, während die
+  slider pixelgenau gleich hoch bleiben."
+- **Versuchter Fix (nicht ausreichend):** Slider-Geometrie (Breite/Höhe,
+  y-Abstände, Regler, Hit-Test, Label-Positionen) mit `hud_scale` skaliert
+  (draw_sliders + HUD-Block + ButtonPress/MotionNotify in main.c).
+  VM-Pixel-Scan bei 781 px Höhe sah korrekt aus — aber der Nutzer sieht
+  beim Maximieren weiterhin Überlappung.
+- **Offene Fragen für die Untersuchung:**
+  - Welches Fenster hat der Nutzer genau? (Host, vermutlich 1440p/2160p →
+    hsc = 2..3. In der VM wurde nur bis hsc ~1.1 getestet!)
+  - Welche Schriften überlappen? (Statuszeilen untereinander? Labels mit
+    Tracks? Statuszeile mit Hintergrund-Quad?) — beim Nutzer nachfragen
+    oder Screenshot vom Host holen.
+  - Verdacht: VM-WM resize-t Fenster (1920x1080 → 1705x781), VM-Tests
+    sind unzuverlässig für dieses Problem.
+
+### Bug 2: Gras-Halme werden nicht eingeblendet (Fade-in)
+- Nutzer-Beschreibung: "Die Grashalme werden wieder nicht mehr
+  eingeblendet."
+- **Versuchter Fix (nicht ausreichend):** Build-Kante (g_half) von
+  dens>=0.01 auf dens>=0.09 + stochastisches Runden von nb. Unit-Test
+  zeigt jetzt ~1300-1500 neue Halme pro 1m-Shift (Birth-Time korrekt
+  gesetzt, "Gras-Swap: ... neu (blenden 2s ein)" im Log).
+- **Offene Fragen für die Untersuchung:**
+  - Die neuen Halme liegen NUR im 1m-Crescent am WEITEN Gras-Rand
+    (~77m, dort 1-2 px gross) — ist der Fade dort überhaupt sichtbar?
+    Nutzer erwartet den Fade vermutlich im sichtbaren Bereich.
+  - Shader-Pfad prüfen: grass.vert `age = uTime - iBirth; fade =
+    clamp(age/2,0,1)` → vFade → grass.frag Alpha. Ist attr4 (iBirth,
+    offset 36) korrekt gebunden? Wird d[9] beim VBO-Upload mitgeliefert?
+  - Wechselspiel mit dem weit->nah-Chunk-Rendering (32 Chunks,
+    glDrawArraysInstancedBaseInstance) + Depth-Mask? (Halme schreiben
+    Tiefe bei Alpha<1 — Reihenfolge/Blend kann den Fade maskieren.)
+  - G=Gras-Freeze testet: friert der Fade? (Grosser Hinweis auf den
+    uTime-Pfad.)
+
+**Wichtig:** Nutzer testet auf dem HOST (NVIDIA), nicht in der VM.
+VM-Pixel-Scans sind für visuelle Fragen nur grobe Anhaltspunkte
+(WM-Resize, llvmpipe-Bugs). Bei visuellen Bugs: lieber nachfragen/
+Screenshot vom Host holen als am VM-Scan festzuhalten.
 
 Danach (in dieser Reihenfolge):
 1. Nutzer-Feedback auf Dichte/Farben/Weite sammeln und abstimmen
@@ -17,6 +57,45 @@ Danach (in dieser Reihenfolge):
 3. Binary-Budget (< 65,536 B) — liegt bei 68,136, Plan steht (Linker-
    Script /tmp/64k.ld bringt 66,864; .plt.sec discarden + Rest kürzen)
 4. Optional: Schritt 7 (Baum-Schatten, docs/grasplan.md)
+
+### Auslieferung (wichtig, schonmal verwechselt!)
+
+- **Ordner** `64kDemo` (grosses D) + **Executable** `64kdemo` (kleines d):
+  Die Testversion liegt in `/media/sf_Quarantine/64kDemo/64kdemo`.
+  `make` kopiert automatisch dorthin (Makefile-Ziel `all`). NICHT in
+  ein bin-Unterverzeichnis, NICHT direkt unter Quarantine.
+- Projekt-Kopie + Zip in Quarantine sind optional, Binary ist das Wichtige.
+
+### Aktueller Code-Stand (fuer die Bug-Untersuchung)
+
+**HUD/Slider (main.c):**
+- `hud_scale(h) = max(h/720, 1.0f)` — Schrifthoehe `cs = 16*hsc`.
+- Statuszeilen: y = h - 20*hsc, -20*hsc - cs, -20*hsc - 2cs (Vollstats,
+  hudMode=2). Hintergrund-Quad 180*cs breit, 24*cs hoch.
+- Slider: `draw_sliders()` — 3 Tracks (y = h-44/72/100*hsc, Breite
+  300*hsc, Hoehe 18*hsc), Labels rechtsbuerig am Track-Linkskanten
+  (x = winW/2 - 150*hsc - strlen*cs - 8*hsc). Hit-Test in ButtonPress/
+  MotionNotify mit denselben Formeln.
+- Font-Atlas: NUR Grossbuchstaben + Ziffern + `x / . -` (build_text_verts
+  mappt a-z auf A-Z). 16x8-Zellen im 256x128-Atlas.
+
+**Gras (grass_cpu.c + grass.vert/frag):**
+- `GRASS_FLOATS=10` (d[9] = Birth-Time), `GRASS_CAP=1500000`,
+  `GSTEP=0.30m`, Zellen 0.3x0.3m, Tabelle 240x240 (CT=240).
+- nb-Formel: `32*dens*(0.4+0.6*h4)*grassDensityScale` (Cap 32) +
+  stochastisches Runden (c_hash12(ix*0.917, iz*0.311)).
+- Falloff: `pow(1 - smoothstep(8, grassMaxDist, dist), 1.0)` (LUT mit
+  1024 Eintraegen, dens_at()); Build-Kante g_half() bei dens>=0.09.
+- Diamond-Order: Zellen in L1-Ringen vom Zentrum (Kamera) nach aussen;
+  bei CAP-Uberlauf fehlen die WEAESTEN Zellen.
+- Zweipuffer + Worker-Thread; "finish then latest"; 1m-Shift-Trigger
+  (~300ms auf der VM). hasOldBuild/old_bcx/old_bcz fuer Copy-Entscheidung
+  und Birth-Time (d[9] != 0 = kopiert; "alt" = odist <= dCut).
+- Rendering: 32 Chunks von WEIT nach NAH (glDrawArraysInstancedBaseInstance,
+  GL 4.2), Chunk-Index = Distanz-Slot 31-near...; Fade im Shader:
+  `age = uTime - iBirth; fade = clamp(age/2,0,1)` (smoothstep), vFade
+  -> Alpha in grass.frag.
+- `gWorldTime` (main.c, pro Frame = tNow) und uTime = tNow (gleiche Basis).
 
 ### Kontext: was diese Session alles verändert hat
 
@@ -58,18 +137,19 @@ Danach (in dieser Reihenfolge):
 
 **Kamera:** Free-Fly (Pointer-Lock, Halten-links = Look, WASD, Space/X hoch/runter, Shift Turbo, O Orbit, R Reset). Pitch ±83° Clamp, invertiert, Sensitivität 0.0008.
 
-## Gefixt (Session 2026-10-05, Runde 2: Skalierung, Crash, Fade-in)
+## Session 2026-10-05, Runde 2 (Skalierung, Crash, Fade-in)
 
-- [x] **Slider+Labels skalieren mit hud_scale** (maximiertes Fenster:
-  Schrift waechst, Slider blieben pixelgenau -> Ueberlappung).
+- [ ] **Slider+Labels skalieren mit hud_scale** — Code ist drin
+  (draw_sliders, Labels, Hit-Test), VM-Scan ok, **aber Nutzer: nicht
+  behoben** (s. oben, Bug 1).
 - [x] **Screenshot-Crash (>1600px breit, VM)**: Mesa llvmpipe 26.0.8
   glReadPixels(GL_BACK, GL_RGB) schreibt (w mod 4)*(h-1) EXTRA Bytes
-  ueber das Buffer-Ende (Heap-Overflow). Mindest-Test ohne Demo
-  reproduziert es. Fix: GL_RGBA + Alpha entfernen.
-- [x] **Gras-Fade-in repariert**: Die 32*dens-Formel (weiche Kante)
-  machte die 1m-Crescent-Zone leer (nb<1 -> 0 Halme). Fix: Build-Kante
-  bei dens>=0.09 (mittlere Halmzahl ~2) + stochastisches Runden.
-  1m-Shift -> ~1300-1500 neue Halme (2s Fade), 12m -> ~31500.
+  ueber das Buffer-Ende (Heap-Overflow, 'malloc(): invalid size').
+  Mindest-Test /tmp/readpix_test.c reproduziert es ohne die Demo.
+  Fix: GL_RGBA + Alpha entfernen. (Nutzer-Feedback dazu: noch offen.)
+- [ ] **Gras-Fade-in** — Build-Kante dens>=0.09 + stochastisches Runden,
+  Unit-Test zeigt neue Halme, **aber Nutzer: nicht behoben** (s. oben,
+  Bug 2).
 
 ## Gefixt (Session 2026-10-05, Gras-Puffer + HUD)
 
@@ -346,6 +426,8 @@ python3 -c "from PIL import Image; Image.open('/tmp/64kdemo_shot.ppm').save('/tm
 - VM: Mesa/llvmpipe (DISPLAY=:0), Host: NVIDIA
 - Debug: `gcc -O1 -g -Wall -Wextra -std=c11 -Ithird_party/include -o /tmp/64kdemo_dbg src/*.c -ldl -lm`
 - gdb: `gdb -nx` (.gdbinit hat kaputte Breakpoints)
+- Gras-Unit-Tests (ohne GL): `gcc -O2 -Wall -Wextra -std=c11 -Isrc -Ithird_party/include -o /tmp/test_1m /tmp/test_1m.c src/grass_cpu.c src/terrain_cpu.c -lm -lpthread` (gleiche Zeile fuer /tmp/test_fade2.c; Test-Dateien haben eigene grassDensityScale/grassHeightScale/grassMaxDist/gWorldTime-Definitionen)
+- Mesa-Readback-Mindest-Test: /tmp/readpix_test.c (glReadPixels-Overflow-Check)
 
 ## Wichtige Konstanten
 
