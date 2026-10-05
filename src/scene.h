@@ -63,7 +63,7 @@ extern float gWorldTime;          // aktuelle Weltzeit (fuer Birth-Time der Halm
 //   begin  startet einen neuen Build in den zweiten Buffer (alt bleibt sichtbar)
 //   step   verarbeitet max. maxCells Zellen, liefert 1 wenn fertig
 //   finish tauscht die Buffer (grassInst/nGrass zeigen auf den neuen Build)
-void grass_build_begin(float cx, float cz);
+void grass_build_begin(float cx, float cz, int full);
 int  grass_build_step(int maxCells);
 void grass_build_finish(void);
 
@@ -72,8 +72,9 @@ void grass_build_finish(void);
 //   snapshot     fertigen Build abholen: buf (==NULL wenn nichts), n (Main-Thread,
 //                danach VBO-Upload mit buf/n)
 //   thread_start Worker-Thread starten (einmalig, nach dem ersten synchronen Build)
-void grass_build_request(float cx, float cz);
+void grass_build_request(float cx, float cz, int full);
 void grass_build_finished_snapshot(float **buf, int *n);
+int  grass_build_busy(void);   // 1 = Request wartet oder Worker generiert
 int  grass_thread_start(void);
 
 #endif

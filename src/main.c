@@ -31,11 +31,10 @@ static Status   (*p_XSync)(Display *, int);
 static int      (*p_XPending)(Display *);
 static int      (*p_XNextEvent)(Display *, XEvent *);
 static void     (*p_XCloseDisplay)(Display *);
-static void     (*p_XStoreName)(Display *, Window, const char *);
+static void     (*p_XSetWMProtocols)(Display *, Window, Atom *, int);
 static Atom     (*p_XInternAtom)(Display *, const char *, int);
 static void     (*p_XSetWMProtocols)(Display *, Window, Atom *, int);
 static KeySym   (*p_XLookupKeysym)(XKeyEvent *, int);
-static void     (*p_XFree)(void *);
 static int      (*p_XLockPointer)(Window);
 static int      (*p_XUnlockPointer)(Window);
 static int      (*p_XQueryPointer)(Display *, Window, int *, int *, int *, int *, unsigned int *, unsigned int *, unsigned int *);
@@ -130,8 +129,8 @@ static void load_libs(void) {
   if (!p_##name) { fprintf(stderr, "X11: %s fehlt\n", #name); exit(1); } } while (0)
   LOADX(XOpenDisplay); LOADX(XDefaultRootWindow); LOADX(XCreateWindow);
   LOADX(XCreateColormap); LOADX(XMapWindow); LOADX(XSync); LOADX(XPending);
-  LOADX(XNextEvent); LOADX(XCloseDisplay); LOADX(XStoreName); LOADX(XInternAtom);
-  LOADX(XSetWMProtocols); LOADX(XLookupKeysym); LOADX(XFree);
+  LOADX(XNextEvent); LOADX(XCloseDisplay); LOADX(XInternAtom);
+  LOADX(XSetWMProtocols); LOADX(XLookupKeysym);
   // Pointer-Lock (optional; fehlt es, greift der Held-Maus-Modus)
   p_XLockPointer   = (void *)dlsym(xlib, "XLockPointer");
   p_XUnlockPointer = (void *)dlsym(xlib, "XUnlockPointer");
@@ -344,7 +343,7 @@ static void build_font(void) {
 }
 
 // ================= Zustand =================
-#define HUD_MAX_CHARS 128   // erhöht (war 96): HUD-String mit MD-Feld ist bis zu 100 Zeichen
+#define HUD_MAX_CHARS 160   // pro Zeile; insgesamt ~140 Zeichen (3 Zeilen + Labels)
 static float camYaw = 0.85f, camPitch = 0.32f, camRadius = 48.0f;
 static float camTgt[3] = { 0.0f, 5.0f, 0.0f };
 static int mouseHeld = 0, lastMX = 0, lastMY = 0;
@@ -373,6 +372,7 @@ static int useMSAA = 1;   // 1 = MSAA an (M-Taste zum Umschalten: 4x -> 8x -> of
 static int msaaSamples = 4;  // 4 oder 8 (M-Taste zyklisch)
 static int grassFrozen = 0;   // 1 = Gras-Rebuild eingefroren (G-Taste): gleiche Halme, egal wo die Kamera hin
 static int grassOnly = 0;     // 1 = TEST: nur Gras zeichnen (V-Taste), kein Terrain/Baeume/Blattdach
+static int hudMode = 2;       // H-Taste: 2 = Vollstats (2 Zeilen), 1 = reduziert (1 Zeile), 0 = aus
 float grassDensityScale = 1.0f;  // 0.2 - 8.0 (Slider unten im Fenster, extern in scene.h)
 float grassHeightScale = 1.0f;   // 0.3 - 3.0 (Halmhoehe-Slider)
 float grassMaxDist = 80.0f;      // 40 - 120m (max. Gras-Sichtweite, Slider)
@@ -544,18 +544,16 @@ static void build_mvp(const float camPos[3], const float camTgt[3], int w, int h
   const float zn = CAM_NEAR, zf = CAM_FAR;
   const float za = (zn + zf) / (zn - zf);
   const float zb = 2.0f * zn * zf / (zn - zf);
-  float P[16] = {
-    pfx, 0.0f, 0.0f, 0.0f,
-    0.0f, pfy, 0.0f, 0.0f,
-    0.0f, 0.0f, za, -1.0f,
-    0.0f, 0.0f, zb, 0.0f
-  };
-  for(int c = 0; c < 4; c++)
-    for(int r = 0; r < 4; r++){
-      float s = 0.0f;
-      for(int k = 0; k < 4; k++) s += P[k * 4 + r] * V[c * 4 + k];
-      out[c * 4 + r] = s;
-    }
+  // P (Projektion) ist fast diagonal: [pfx,0,0,0 | 0,pfy,0,0 | 0,0,za,-1 | 0,0,zb,0]
+  // P ist fast diagonal -> Multiplikation spezialisiert (kein 4x4x4-Loop):
+  //   out[c,0] = pfx*V[c,0], out[c,1] = pfy*V[c,1],
+  //   out[c,2] = za*V[c,2] + zb*V[c,3], out[c,3] = -V[c,2]
+  for(int c = 0; c < 4; c++){
+    out[c*4+0] = pfx * V[c*4+0];
+    out[c*4+1] = pfy * V[c*4+1];
+    out[c*4+2] = za * V[c*4+2] + zb * V[c*4+3];
+    out[c*4+3] = -V[c*4+2];
+  }
 }
 
 
@@ -566,10 +564,10 @@ static float hud_scale(int h) {
   if (s < 1.0f) s = 1.0f;
   return s;
 }
-static int build_text_verts(float *v, const char *s, int w, int h) {
+static int build_text_verts(float *v, const char *s, int w, int h, float px0, float py0) {
   int n = 0;
   float sc = hud_scale(h);
-  float px = 24.0f * sc, py = 20.0f * sc, cs = 16.0f * sc;
+  float px = px0, py = py0, cs = 16.0f * sc;
   static const float pts[6][2] = { {0,0},{1,0},{0,1},{1,0},{1,1},{0,1} };
   for (const char *c = s; *c; c++) {
     const char *f = strchr(FONT_STR, *c);
@@ -623,41 +621,55 @@ static void save_screenshot_ppm(const char *path, int w, int h) {
   free(buf);
 }
 
-// Slider-Rendering (Hintergrund/Fuellstand/Regler). VBO muss gebunden sein.
-static void draw_slider(float slY0, float pos, float r, float g, float b,
-                        int w, int h, int locTint){
+// Slider-Setzen (1=Dichte, 2=Hoehe, 3=Sichtweite), pos = 0..1
+static void set_slider(int which, float pos){
+  if (pos < 0.0f) pos = 0.0f; if (pos > 1.0f) pos = 1.0f;
+  if (which == 1) grassDensityScale = 0.2f + pos * 7.8f;
+  else if (which == 2) grassHeightScale = 0.3f + pos * 2.7f;
+  else grassMaxDist = 40.0f + pos * 80.0f;
+}
+
+// Slider-Rendering (3 Slider: Dichte/Hoehe/Sichtweite). VBO muss gebunden
+// sein. Hintergrund- und Regler-Quads werden je in EINEM Draw gezeichnet
+// (gleiche Tints), der Fuellstand pro Farbe (3 Draws).
+static void draw_sliders(float posD, float posH, float posM, int w, int h, int locTint){
   const float slW = 300.0f, slH = 18.0f;
   const float x0 = w/2.0f - slW/2.0f, x1 = w/2.0f + slW/2.0f;
   float buv[2] = { (ATLAS_W - 0.5f) / ATLAS_W, (ATLAS_H - 0.5f) / ATLAS_H };
-  if (pos < 0.0f) pos = 0.0f; if (pos > 1.0f) pos = 1.0f;
-  float hx = x0 + pos * slW, y1 = slY0 + slH;
-  float bg[16] = {
-    x0/w*2-1, 1-slY0/h*2, buv[0], buv[1],
-    x1/w*2-1, 1-slY0/h*2, buv[0], buv[1],
-    x0/w*2-1, 1-y1/h*2,   buv[0], buv[1],
-    x1/w*2-1, 1-y1/h*2,   buv[0], buv[1],
-  };
+  float y0[3] = { h - 44.0f, h - 72.0f, h - 100.0f };
+  float pos[3] = { posD, posH, posM };
+  float fill[3][3] = { {0.3f,0.8f,0.3f}, {0.5f,0.8f,0.3f}, {0.3f,0.6f,0.8f} };
+  float bg[48], hd[48];
+  for (int i = 0; i < 3; i++) {
+    if (pos[i] < 0.0f) pos[i] = 0.0f; if (pos[i] > 1.0f) pos[i] = 1.0f;
+    float hx = x0 + pos[i] * slW, y1 = y0[i] + slH;
+    bg[i*16+0]=x0/w*2-1;   bg[i*16+1]=1-y0[i]/h*2; bg[i*16+2]=buv[0]; bg[i*16+3]=buv[1];
+    bg[i*16+4]=x1/w*2-1;   bg[i*16+5]=1-y0[i]/h*2; bg[i*16+6]=buv[0]; bg[i*16+7]=buv[1];
+    bg[i*16+8]=x0/w*2-1;   bg[i*16+9]=1-y1/h*2;   bg[i*16+10]=buv[0]; bg[i*16+11]=buv[1];
+    bg[i*16+12]=x1/w*2-1;  bg[i*16+13]=1-y1/h*2;  bg[i*16+14]=buv[0]; bg[i*16+15]=buv[1];
+    hd[i*16+0]=(hx-2)/w*2-1; hd[i*16+1]=1-y0[i]/h*2; hd[i*16+2]=buv[0]; hd[i*16+3]=buv[1];
+    hd[i*16+4]=(hx+2)/w*2-1; hd[i*16+5]=1-y0[i]/h*2; hd[i*16+6]=buv[0]; hd[i*16+7]=buv[1];
+    hd[i*16+8]=(hx-2)/w*2-1; hd[i*16+9]=1-y1/h*2;   hd[i*16+10]=buv[0]; hd[i*16+11]=buv[1];
+    hd[i*16+12]=(hx+2)/w*2-1;hd[i*16+13]=1-y1/h*2;  hd[i*16+14]=buv[0]; hd[i*16+15]=buv[1];
+  }
   p_glBufferData(GL_ARRAY_BUFFER, sizeof bg, bg, GL_DYNAMIC_DRAW);
   p_glUniform4f(locTint, 0.0f, 0.0f, 0.0f, 0.5f);
-  p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-  float fill[16] = {
-    x0/w*2-1, 1-slY0/h*2, buv[0], buv[1],
-    hx/w*2-1, 1-slY0/h*2, buv[0], buv[1],
-    x0/w*2-1, 1-y1/h*2,   buv[0], buv[1],
-    hx/w*2-1, 1-y1/h*2,   buv[0], buv[1],
-  };
-  p_glBufferData(GL_ARRAY_BUFFER, sizeof fill, fill, GL_DYNAMIC_DRAW);
-  p_glUniform4f(locTint, r, g, b, 0.9f);
-  p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-  float hd[16] = {
-    (hx-2)/w*2-1, 1-slY0/h*2, buv[0], buv[1],
-    (hx+2)/w*2-1, 1-slY0/h*2, buv[0], buv[1],
-    (hx-2)/w*2-1, 1-y1/h*2,   buv[0], buv[1],
-    (hx+2)/w*2-1, 1-y1/h*2,   buv[0], buv[1],
-  };
+  p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 12);
+  for (int i = 0; i < 3; i++) {
+    float hx = x0 + pos[i] * slW, y1 = y0[i] + slH;
+    float f[16] = {
+      x0/w*2-1, 1-y0[i]/h*2, buv[0], buv[1],
+      hx/w*2-1, 1-y0[i]/h*2, buv[0], buv[1],
+      x0/w*2-1, 1-y1/h*2,   buv[0], buv[1],
+      hx/w*2-1, 1-y1/h*2,   buv[0], buv[1],
+    };
+    p_glBufferData(GL_ARRAY_BUFFER, sizeof f, f, GL_DYNAMIC_DRAW);
+    p_glUniform4f(locTint, fill[i][0], fill[i][1], fill[i][2], 0.9f);
+    p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  }
   p_glBufferData(GL_ARRAY_BUFFER, sizeof hd, hd, GL_DYNAMIC_DRAW);
   p_glUniform4f(locTint, 1.0f, 1.0f, 1.0f, 1.0f);
-  p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 12);
 }
 
 int main(int argc, char **argv) {
@@ -694,7 +706,7 @@ int main(int argc, char **argv) {
     if (fbs && nfb > 0) {
       fbconfig = fbs[0];
       vi = p_glXGetVisualFromFBConfig(disp, fbconfig);
-      p_XFree(fbs); // FBConfig-Array wird mit XFree freigegeben
+      // fbs bleibt allocated (einmaliges kleines Leak, 64k-Budget)
     }
   }
   // Fallback: glXChooseVisual (klassische API, nur GL 2.1-Kontext)
@@ -724,7 +736,6 @@ int main(int argc, char **argv) {
                                CWColormap | CWBorderPixel | CWEventMask,
                                &swa);
   p_XSync(disp, 0);
-  p_XStoreName(disp, win, "64kDemo");
   static Atom protos[1];
   protos[0] = p_XInternAtom(disp, "WM_DELETE_WINDOW", 0);
   p_XSetWMProtocols(disp, win, protos, 1);
@@ -761,7 +772,7 @@ int main(int argc, char **argv) {
     p_XLockPointer(win);
     if (p_XWarpPointer) p_XWarpPointer(disp, None, win, 0, 0, 0, 0, winW / 2, winH / 2);
   }
-  printf("FLY: Maus=Schauen WASD=Fliegen Space/X=H/R Shift=Turbo O=Orbit R=Reset 1/2/3=Skala T=Wire P=Shot G=GrasFrost V=NurGras M=MSAA Q/Esc=Ende\n");
+  printf("FLY: Maus=Schauen WASD=Fliegen Space/X=Hoch/Runter Shift=Turbo O=Orbit R=Reset 1/2/3=Skala T=Wire P=Shot G=GrasFrost V=NurGras M=MSAA H=HUD Q/Esc=Ende\n");
 
   // ---------- GL-Setup ----------
   GLuint progScene = make_program(VS_SRC, FS_SRC, "scene");
@@ -866,6 +877,10 @@ int main(int argc, char **argv) {
             else { useMSAA = 1; msaaSamples = 4; fboW = 0; printf("MSAA: 4x\n"); }
           }
           if (ks == XK_g) { grassFrozen = !grassFrozen; printf("Gras-Rebuild: %s\n", grassFrozen ? "EINGEFROREN (gleiche Halme)" : "aktiv"); }
+          if (ks == XK_h) {   // HUD zyklisch: Vollstats -> reduziert -> aus
+            hudMode = (hudMode + 2) % 3;
+            printf("HUD: %s\n", hudMode == 2 ? "Vollstats (2 Zeilen)" : (hudMode == 1 ? "reduziert (1 Zeile)" : "aus"));
+          }
           if (ks == XK_v) { grassOnly = !grassOnly; printf("TEST: nur Gras zeichnen: %s\n", grassOnly ? "AN" : "aus"); }
           if (ks == XK_o) {
             // Fly <-> Orbit umschalten, ohne Sprung synchronisieren
@@ -914,29 +929,16 @@ int main(int argc, char **argv) {
         case ButtonPress:
           if (e.xbutton.button == 1) {
             mouseHeld = 1;
-            // Slider-Treffer? (unten Mitte, 300px breit, 3 Slider)
-            int sx0 = winW/2 - 150, sx1 = winW/2 + 150;
-            int syD = winH - 52, syD1 = winH - 30;   // Dichte-Slider (unten)
-            int syH = winH - 80, syH1 = winH - 58;   // Hoehe-Slider (Mitte)
-            int syM = winH - 108, syM1 = winH - 86;  // Sichtweite-Slider (oben)
-            if (e.xbutton.x >= sx0 && e.xbutton.x <= sx1) {
-              if (e.xbutton.y >= syD && e.xbutton.y <= syD1) {
-                sliderDragging = 1;   // Dichte
-                float pos = (e.xbutton.x - sx0) / 300.0f;
-                if (pos < 0) pos = 0; if (pos > 1) pos = 1;
-                grassDensityScale = 0.2f + pos * 7.8f;
-              } else if (e.xbutton.y >= syH && e.xbutton.y <= syH1) {
-                sliderDragging = 2;   // Hoehe
-                float pos = (e.xbutton.x - sx0) / 300.0f;
-                if (pos < 0) pos = 0; if (pos > 1) pos = 1;
-                grassHeightScale = 0.3f + pos * 2.7f;
-              } else if (e.xbutton.y >= syM && e.xbutton.y <= syM1) {
-                sliderDragging = 3;   // Sichtweite
-                float pos = (e.xbutton.x - sx0) / 300.0f;
-                if (pos < 0) pos = 0; if (pos > 1) pos = 1;
-                grassMaxDist = 40.0f + pos * 80.0f;
+            // Slider-Treffer? (unten Mitte, 300px breit; y-Offsets tabellarisch)
+            int sx0 = winW/2 - 150;
+            static const int slY[3][2] = { {-52,-30}, {-80,-58}, {-108,-86} };
+            for (int i = 0; i < 3; i++)
+              if (e.xbutton.x >= sx0 && e.xbutton.x <= sx0 + 300 &&
+                  e.xbutton.y >= winH + slY[i][0] && e.xbutton.y <= winH + slY[i][1]) {
+                sliderDragging = i + 1;
+                set_slider(i + 1, (e.xbutton.x - sx0) / 300.0f);
+                break;
               }
-            }
           }
           else if (e.xbutton.button == 4) camRadius *= 0.9f;
           else if (e.xbutton.button == 5) camRadius *= 1.1f;
@@ -945,14 +947,8 @@ int main(int argc, char **argv) {
           if (e.xbutton.button == 1) { mouseHeld = 0; sliderDragging = 0; }
           break;
         case MotionNotify:
-          if (sliderDragging) {
-            int sx0 = winW/2 - 150;
-            float pos = (e.xmotion.x - sx0) / 300.0f;
-            if (pos < 0) pos = 0; if (pos > 1) pos = 1;
-            if (sliderDragging == 1) grassDensityScale = 0.2f + pos * 7.8f;
-            else if (sliderDragging == 2) grassHeightScale = 0.3f + pos * 2.7f;
-            else if (sliderDragging == 3) grassMaxDist = 40.0f + pos * 80.0f;
-          }
+          if (sliderDragging)
+            set_slider(sliderDragging, (e.xmotion.x - (winW/2 - 150)) / 300.0f);
           if (!flyMode && mouseHeld && !sliderDragging) {
             camYaw += (e.xmotion.x - lastMX) * 0.005f;
             camPitch += (e.xmotion.y - lastMY) * 0.005f;
@@ -989,7 +985,7 @@ int main(int argc, char **argv) {
         if (dx < -winW / 2) dx += winW;
         if (dy >  winH / 2) dy -= winH;
         if (dy < -winH / 2) dy += winH;
-        if (mouseHeld && (dx != 0 || dy != 0)) {
+        if (mouseHeld && !sliderDragging && (dx != 0 || dy != 0)) {
           flyYaw   += dx * 0.0008f;
           flyPitch += dy * 0.0008f;   // invertiert: Maus hoch -> Blick runter (Klick-Nav)
           if (flyPitch >  1.45f) flyPitch =  1.45f;   // +83°
@@ -1059,7 +1055,7 @@ int main(int argc, char **argv) {
         // Zentrum = camPos (nicht camTgt): Bei Kameradrehung bleibt das Gras
         //  "da" (kein Neubuild). Build-Radius = grassMaxDist + 20m Margin.
         gCX = camPos[0]; gCZ = camPos[2];
-        grass_build_begin(gCX, gCZ);
+        grass_build_begin(gCX, gCZ, 1);
         while(!grass_build_step(16000)) {}
         grass_build_finish();
         p_glBindBuffer(GL_ARRAY_BUFFER, vboGrass);
@@ -1072,17 +1068,18 @@ int main(int argc, char **argv) {
         // latest": jeder Build wird zu Ende gebaut, der naechste geht direkt
         // zum neuesten Zentrum (Zell-Kopieren macht Rebuilds schnell).
         static float lastDensity = 1.0f, lastMaxDist = 80.0f;
-        int needBuild = 0;
+        int needBuild = 0, fullBuild = 0;
         if (grassDensityScale != lastDensity || grassMaxDist != lastMaxDist) {
           lastDensity = grassDensityScale;
           lastMaxDist = grassMaxDist;
           needBuild = 1;
+          fullBuild = 1;   // Slider-Change: Voll-Generation (sprunghaft, egal)
         }
         if (fabsf(camPos[0] - gCX) > 1.0f || fabsf(camPos[2] - gCZ) > 1.0f)
           needBuild = 1;
         if (needBuild) {
           gCX = camPos[0]; gCZ = camPos[2];
-          grass_build_request(gCX, gCZ);
+          grass_build_request(gCX, gCZ, fullBuild);
         }
       }
       // Fertigen Build vom Worker-Thread abholen (VBO-Upload im Main-Thread,
@@ -1207,12 +1204,20 @@ int main(int argc, char **argv) {
       p_glDisable(GL_BLEND);
     }
 
-    // 4) HUD
-    char hud[128];
+    // 4) HUD (H-Taste: Vollstats 3 Zeilen -> reduziert 1 Zeile -> aus)
+    char hud1[128], hud2[128], hud3[128];
     const char *sc = scaleIdx == 0 ? "1x" : (scaleIdx == 1 ? "1/2" : "1/4");
-    snprintf(hud, sizeof hud, "FPS %3d %dx%d %s %s AA %s T %d Q %d G %d D %.1f H %.1f MD %dm%s%s",
-             (int)(fpsEMA + 0.5), winW, winH, sc, flyMode ? "FLY" : "ORB", useMSAA ? (msaaSamples == 8 ? "8x" : "4x") : "OFF", nTrees, nCrownVerts / 6, nGrass, grassDensityScale, grassHeightScale, (int)grassMaxDist, grassFrozen ? " F" : "", grassOnly ? " NG" : "");
-    int len = (int)strlen(hud);
+    snprintf(hud1, sizeof hud1, "FPS %3d %dx%d RES %s CAM %s AA %s TREES %d QUADS %d GRASS %d",
+             (int)(fpsEMA + 0.5), winW, winH, sc, flyMode ? "FLY" : "ORB",
+             useMSAA ? (msaaSamples == 8 ? "8x" : "4x") : "OFF",
+             nTrees, nCrownVerts / 6, nGrass);
+    snprintf(hud2, sizeof hud2, "D %.1fx H %.1fx MD %d.%dm%s%s",
+             grassDensityScale, grassHeightScale, (int)grassMaxDist, (int)(grassMaxDist * 10) % 10,
+             grassFrozen ? " FRZ" : "", grassOnly ? " NUR-GRAS" : "");
+    snprintf(hud3, sizeof hud3, "POS %d %d %d%s%s",
+             (int)camPos[0], (int)camPos[1], (int)camPos[2],
+             nGrass >= GRASS_CAP ? " CAP" : "", grass_build_busy() ? " BUILD" : "");
+    int len1 = (int)strlen(hud1), len2 = (int)strlen(hud2), len3 = (int)strlen(hud3);
 
     p_glEnable(GL_BLEND);
     p_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -1221,38 +1226,51 @@ int main(int argc, char **argv) {
     p_glUniform1i(locHudFont, 0);
     p_glBindVertexArray(vaoHud);
     p_glBindBuffer(GL_ARRAY_BUFFER, vboHud);
-
-    // Hintergrund-Quad
     {
-      float sc = hud_scale(winH);
-      float cs = 16.0f * sc;
-      float bx0 = 16.0f * sc, by0 = 12.0f * sc;
-      float bx1 = 16.0f * sc + len * cs + 8.0f * sc, by1 = 12.0f * sc + cs + 8.0f * sc;
+      float hsc = hud_scale(winH);
+      float cs = 16.0f * hsc;
       float buv[2] = { (ATLAS_W - 0.5f) / ATLAS_W, (ATLAS_H - 0.5f) / ATLAS_H };
-      float bg[16] = {
-        bx0/winW*2-1, 1-by0/winH*2, buv[0], buv[1],
-        bx1/winW*2-1, 1-by0/winH*2, buv[0], buv[1],
-        bx0/winW*2-1, 1-by1/winH*2, buv[0], buv[1],
-        bx1/winW*2-1, 1-by1/winH*2, buv[0], buv[1],
-      };
-      p_glBufferData(GL_ARRAY_BUFFER, sizeof bg, bg, GL_DYNAMIC_DRAW);
-      p_glUniform4f(locTint, 0.0f, 0.0f, 0.0f, 0.35f);
-      p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-    }
-    // Text
-    {
-      int n = build_text_verts(hudVerts, hud, winW, winH);
+      // Sämtlicher Text (Statuszeilen + Slider-Beschriftung) in EINEM
+      // Buffer/einem Draw (spart Code+Calls). Beschriftung links der Slider:
+      // Sichtweite (oben), Hoehe (Mitte), Dichte (unten).
+      int n = 0;
+      if (hudMode > 0) {
+        n += build_text_verts(hudVerts + n * 4, hud1, winW, winH, 24.0f * hsc, 20.0f * hsc);
+        if (hudMode == 2) {
+          n += build_text_verts(hudVerts + n * 4, hud2, winW, winH, 24.0f * hsc, 20.0f * hsc + cs);
+          n += build_text_verts(hudVerts + n * 4, hud3, winW, winH, 24.0f * hsc, 20.0f * hsc + 2 * cs);
+        }
+      }
+      const char *lbl[3] = { "Sichtweite", "Hohe", "Dichte" };
+      float slY[3] = { winH - 100.0f, winH - 72.0f, winH - 44.0f };
+      for (int i = 0; i < 3; i++)
+        n += build_text_verts(hudVerts + n * 4, lbl[i], winW, winH,
+                              winW / 2.0f - 150.0f - (float)strlen(lbl[i]) * cs - 8.0f * hsc, slY[i] + 1.0f);
       p_glBufferData(GL_ARRAY_BUFFER, n * 4 * sizeof(float), hudVerts, GL_DYNAMIC_DRAW);
       p_glUniform4f(locTint, 1.0f, 1.0f, 1.0f, 1.0f);
       p_glDrawArrays(GL_TRIANGLES, 0, n);
+      // Hintergrund-Quad (Statuszeilen)
+      if (hudMode > 0) {
+        int len = len1 > len2 ? len1 : len2;
+        if (hudMode == 2 && len3 > len) len = len3;
+        int nLines = hudMode == 2 ? 3 : 1;
+        float bx0 = 16.0f * hsc, by0 = 12.0f * hsc;
+        float bx1 = 16.0f * hsc + len * cs + 8.0f * hsc;
+        float by1 = 12.0f * hsc + nLines * cs + 8.0f * hsc;
+        float bg[16] = {
+          bx0/winW*2-1, 1-by0/winH*2, buv[0], buv[1],
+          bx1/winW*2-1, 1-by0/winH*2, buv[0], buv[1],
+          bx0/winW*2-1, 1-by1/winH*2, buv[0], buv[1],
+          bx1/winW*2-1, 1-by1/winH*2, buv[0], buv[1],
+        };
+        p_glBufferData(GL_ARRAY_BUFFER, sizeof bg, bg, GL_DYNAMIC_DRAW);
+        p_glUniform4f(locTint, 0.0f, 0.0f, 0.0f, 0.35f);
+        p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+      }
+      draw_sliders((grassDensityScale - 0.2f) / 7.8f,
+                   (grassHeightScale - 0.3f) / 2.7f,
+                   (grassMaxDist - 40.0f) / 80.0f, winW, winH, locTint);
     }
-
-    // Gras-Slider (unten Mitte): Hoehe (Mitte) + Dichte (unten) + Sichtweite (oben)
-    // Gleicher Aufbau pro Slider (Hintergrund/Fuellstand/Regler) -> draw_slider().
-    // VBO ist schon gebunden (siehe oben), Tint-Uniform wird dort gesetzt.
-    draw_slider(winH - 44.0f,  (grassDensityScale - 0.2f) / 7.8f, 0.3f, 0.8f, 0.3f, winW, winH, locTint);
-    draw_slider(winH - 72.0f,  (grassHeightScale - 0.3f) / 2.7f,  0.5f, 0.8f, 0.3f, winW, winH, locTint);
-    draw_slider(winH - 100.0f, (grassMaxDist - 40.0f) / 80.0f,    0.3f, 0.6f, 0.8f, winW, winH, locTint);
     p_glDisable(GL_BLEND);
 
     // Automatischer Screenshot des vollen Frames (inkl. Wireframe-Overlay) nach dem

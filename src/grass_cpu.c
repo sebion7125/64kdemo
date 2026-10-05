@@ -34,19 +34,23 @@ int nGrass = 0;
 
 static float *buildBuf = gB;
 static int nGrassNew = 0;
-static int cix = 0, ciz = 0, gnz = 0;   // aktuelle Zelle (inkrementell, kein div/mod)
+static int gnz = 0;
+static int dr = 0, drp = 0, dcx0 = 0, dcz0 = 0, dmaxR = 0;   // Diamond-Order-State
 static int gix0 = 0, giz0 = 0, gnx = 0;
 static float bcx = 0, bcz = 0;
 // Alter Build-Zentrum (fuer Fade-in: nur Halme außerhalb des alten Bereichs sind "neu")
 static float old_bcx = 0, old_bcz = 0;
 static int hasOldBuild = 0;
+static int gForceFull = 0;   // 1 = aktueller Build generiert alles neu (Slider-Change)
 
 // Build-Thread-Synchronisation (siehe grass_worker am Dateiende):
 //   gReqPending = Request wartet, gBuildDone = Build fertig (Abholung)
 static pthread_mutex_t gMu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  gCv = PTHREAD_COND_INITIALIZER;
 static int   gReqPending = 0, gBuildDone = 0;
+static int   gBuilding = 0;   // Worker baut gerade (fuer HUD-Indikator)
 static float gReqCX = 0, gReqCZ = 0;
+static int   gReqFull = 0;   // 1 = Voll-Generation (Slider-Change), kein Zell-Kopieren
 
 // Zell-Index-Tabellen (eine pro Halm-Buffer): Start-Index und Halm-Anzahl
 // pro Weltzelle (ix,iz absolut -> 1:1-Mapping ueber Builds hinweg).
@@ -74,7 +78,7 @@ static float g_half(void){
     float lo = 8.0f, hi = md;
     for (int i = 0; i < 30; i++) {
       float mid = (lo + hi) * 0.5f;
-      float dens = powf(1.0f - c_smoothstep(8.0f, md, mid), 1.6f);
+      float dens = powf(1.0f - c_smoothstep(8.0f, md, mid), 1.0f);
       if (dens >= 0.01f) lo = mid; else hi = mid;
     }
     gDCut = (lo + hi) * 0.5f;
@@ -93,7 +97,7 @@ static float dens_at(float dist){
   float md = grassMaxDist;
   if (md != densLutMD) {
     for (int i = 0; i < DENS_LUT_N; i++)
-      densLut[i] = powf(1.0f - c_smoothstep(8.0f, md, i * 0.5f), 1.6f);
+      densLut[i] = powf(1.0f - c_smoothstep(8.0f, md, i * 0.5f), 1.0f);
     densLutMD = md;
   }
   int i = (int)(dist * 2.0f);
@@ -101,12 +105,13 @@ static float dens_at(float dist){
   return densLut[i];
 }
 
-void grass_build_begin(float cx, float cz){
+void grass_build_begin(float cx, float cz, int full){
   // Altes Zentrum merken (fuer Fade-in: Halme im alten Bereich sind "alt").
   // hasOldBuild wird erst in grass_build_finish gesetzt (erster Build =
   // alle Halme sofort sichtbar, kein Vergleich gegen das (0,0)-Zentrum).
   if (hasOldBuild) { old_bcx = bcx; old_bcz = bcz; }
   bcx = cx; bcz = cz;
+  gForceFull = full;   // Slider-Change: alles neu generieren (kein Kopieren)
   nGrassNew = 0;
   buildBuf = (grassInst == gA) ? gB : gA;
   float half = g_half();
@@ -119,7 +124,18 @@ void grass_build_begin(float cx, float cz){
   if (gnx > CT) gnx = CT;   // defensive: Tabelle ist CT×CT
   if (gnz > CT) gnz = CT;
   offX0 = gix0; offZ0 = giz0;
-  cix = 0; ciz = 0;
+  // Diamond-Order: Zellen vom Zentrum (Kamera) nach auessen verarbeited.
+  // Wenn GRASS_CAP erreicht wird, fehlen die WEAESTEN Zellen (frueher:
+  // Gitter-Order von der Ecke -> naehere Zellen konnten fehlen).
+  dcx0 = (int)floorf(cx / GSTEP) - gix0;
+  dcz0 = (int)floorf(cz / GSTEP) - giz0;
+  if (dcx0 < 0) dcx0 = 0;
+  if (dcx0 >= gnx) dcx0 = gnx - 1;
+  if (dcz0 < 0) dcz0 = 0;
+  if (dcz0 >= gnz) dcz0 = gnz - 1;
+  dmaxR = (dcx0 > gnx - 1 - dcx0 ? dcx0 : gnx - 1 - dcx0)
+        + (dcz0 > gnz - 1 - dcz0 ? dcz0 : gnz - 1 - dcz0);
+  dr = 0; drp = 0;
 }
 
 // Eine Zelle: kopieren oder generieren.
@@ -139,8 +155,10 @@ static void build_cell(int ix, int iz){
   if (dx * dx + dz * dz > half * half) return;
   float h4 = c_hash12(ix * 0.271f, iz * 0.711f);
   // --- Kopier-Entscheidung (vor der teuren Terrain-Berechnung) ---
+  // Nur bei Positions-Rebuilds; bei Slider-Change (gForceFull) wird alles
+  // neu generiert (Dichte/Sichtweite betrifft jede Zelle).
   int oldIdx = -1;
-  if (hasOldBuild) {
+  if (hasOldBuild && !gForceFull) {
     int ox = ix - oldOffX0, oz = iz - oldOffZ0;
     if (ox >= 0 && ox < CT && oz >= 0 && oz < CT) {
       int oi = oz * CT + ox;
@@ -151,17 +169,15 @@ static void build_cell(int ix, int iz){
     float dist = sqrtf(dx * dx + dz * dz);
     float dens = dens_at(dist);
     if (dens >= 0.01f) {
-      int nb = (int)(4.0f + 20.0f * dens * (0.4f + 0.6f * h4) * grassDensityScale);
-      if (nb < 1) nb = 1;
-      if (nb > 12) nb = 12;
+      int nb = (int)(32.0f * dens * (0.4f + 0.6f * h4) * grassDensityScale);
+      if (nb > 32) nb = 32;
       // altes nb mit den aktuellen Parametern (altes Zentrum): gleich =
       // Halm-Menge unveraendert -> kopieren
       float odx = x - old_bcx, odz = z - old_bcz;
       float odist = sqrtf(odx * odx + odz * odz);
       float odens = dens_at(odist);
-      int onb = (int)(4.0f + 20.0f * odens * (0.4f + 0.6f * h4) * grassDensityScale);
-      if (onb < 1) onb = 1;
-      if (onb > 12) onb = 12;
+      int onb = (int)(32.0f * odens * (0.4f + 0.6f * h4) * grassDensityScale);
+      if (onb > 32) onb = 32;
       if (onb == nb) {
         int cnt = cellCnt[oldIdx];
         if (nGrassNew + cnt > GRASS_CAP) cnt = GRASS_CAP - nGrassNew;
@@ -199,12 +215,33 @@ static void build_cell(int ix, int iz){
   if(h3 > cl + 0.50f) return;                     // Flecken
   // Anzahl Halme: 4x mehr im Nahbereich (war 1+5*dens, jetzt 4+20*dens),
   // skaliert mit Dichte und Dichte-Skala (Slider)
-  int nb = (int)(4.0f + 20.0f * dens * (0.4f + 0.6f * h4) * grassDensityScale);
-  if(nb < 1) nb = 1;
-  if(nb > 12) nb = 12;
+  // Anzahl Halme: 32*dens (ohne Basis-Offset) -> laeuft weich gegen 0 an der
+  // Sichtweite-Kante (kein harter Gras-Rand mehr). Cap 32 laesst dem
+  // Dichte-Slider Spielraum im Nahbereich. (Frueher 24: zu dunn in der
+  // Nahe UND in der Ferne — flacher Blickwinkel braucht mehr Haelme.)
+  int nb = (int)(32.0f * dens * (0.4f + 0.6f * h4) * grassDensityScale);
+  if(nb > 32) nb = 32;
   // Halmgroesse: BASIS-Werte ohne Distanz-Skalierung. Die Distanz-Skalierung
   // (groesser in der Ferne, um Flaechen abzudecken) passiert im Shader
   // (grass.vert) kontinuierlich zur aktuellen Kameradistanz.
+  // Clumping (Schritt 4): naechster Bueschel-Mittelpunkt (1.2m-Grid, 3x3).
+  // Einmal pro ZELLE gesucht (am Zellzentrum, nicht pro Halm: 18 Sin-Hashes
+  // pro Halm waeren zu teuer fuer 1m-Rebuilds; Halm-Offsets in der Zelle
+  // sind ±0.14m = 12% von CLUMP, visuell vernachlaessigbar). Der Einfluss
+  // w wird pro Halm aus der eigenen Distanz zum Mittelpunkt berechnet.
+  int cix = (int)floorf(px / CLUMP), ciz = (int)floorf(pz / CLUMP);
+  float cxm = px, czm = pz, cid = 0.0f;
+  if (nb > 0) {
+    float best = 1e9f;
+    for (int j = -1; j <= 1; j++)
+      for (int i = -1; i <= 1; i++) {
+        float hx = c_hash12((cix + i) * 0.731f, (ciz + j) * 0.219f);
+        float hz = c_hash12((cix + i) * 0.219f, (ciz + j) * 0.731f);
+        float mx = (cix + i + hx) * CLUMP, mz = (ciz + j + hz) * CLUMP;
+        float d2 = (px - mx) * (px - mx) + (pz - mz) * (pz - mz);
+        if (d2 < best) { best = d2; cxm = mx; czm = mz; cid = c_hash12(mx, mz); }
+      }
+  }
   int start = nGrassNew;
   for(int b = 0; b < nb; b++){
     if(nGrassNew >= GRASS_CAP) return;
@@ -226,24 +263,15 @@ static void build_cell(int ix, int iz){
     d[6] = 0.75f + 0.5f * b2;                     // Schattierung
     d[7] = b5 * 6.283f;                           // Yaw (Ebenen-Rotation)
     d[8] = 0.15f + 0.45f * b6;                    // Lean (Spitzen-Neigung)
-    // Clumping (Schritt 4): naechster Bueschel-Mittelpunkt (1.2m-Grid, 3x3-Suche
-    // pro Halm). NUR Eigenschaften (Hoehe/Yaw/Lean) werden weich zum Bueschel
-    // gemischt — Position und Halmzahl bleiben unveraendert (Verschieben wuerde
-    // Luecken reißen und den Dichte-Regler ungleichmäßig machen).
+    // Bueschel-Einfluss: nur Eigenschaften (Hoehe/Yaw/Lean) werden weich
+    // zum Bueschel gemischt — Position und Halmzahl bleiben unveraendert
+    // (Verschieben wuerde Luecken reißen und den Dichte-Regler ungleichmäßig
+    // machen).
     {
-      int cix = (int)floorf(bx / CLUMP), ciz = (int)floorf(bz / CLUMP);
-      float best = 1e9f, cid = 0.0f;
-      for (int j = -1; j <= 1; j++)
-        for (int i = -1; i <= 1; i++) {
-          float hx = c_hash12((cix + i) * 0.731f, (ciz + j) * 0.219f);
-          float hz = c_hash12((cix + i) * 0.219f, (ciz + j) * 0.731f);
-          float mx = (cix + i + hx) * CLUMP, mz = (ciz + j + hz) * CLUMP;
-          float d2 = (bx - mx) * (bx - mx) + (bz - mz) * (bz - mz);
-          if (d2 < best) { best = d2; cid = c_hash12(mx, mz); }
-        }
-      float dc = sqrtf(best) / CLUMP;                  // 0 = Mitte, ~0.7 = Rand
-      float w = 1.0f - c_smoothstep(0.0f, 0.7f, dc);   // Bueschel-Einfluss 1..0
-      d[3] *= 1.0f + 0.25f * w * (2.0f * cid - 1.0f);  // Hoehe (symmetrisch um 1)
+      float tdx = bx - cxm, tdz = bz - czm;
+      float dc = sqrtf(tdx * tdx + tdz * tdz) / CLUMP;  // 0 = Mitte, ~0.7 = Rand
+      float w = 1.0f - c_smoothstep(0.0f, 0.7f, dc);    // Bueschel-Einfluss 1..0
+      d[3] *= 1.0f + 0.25f * w * (2.0f * cid - 1.0f);   // Hoehe (symmetrisch um 1)
       float yawC = cid * 6.283f;
       d[7] += w * 0.6f * remainderf(yawC - d[7], 6.283f); // Richtung (kuerzester Weg)
       d[8] *= 0.8f + 0.4f * w;                             // Neigung
@@ -262,14 +290,28 @@ static void build_cell(int ix, int iz){
 
 
 int grass_build_step(int maxCells){
-  // (ix,iz) inkrementell fortschreiben: cellNext % gnx / gnx waere pro Zelle
-  // eine Integer-Division (idivl ~30 Zyklen).
-  for(int i = 0; i < maxCells && ciz < gnz; i++){
-    build_cell(gix0 + cix, giz0 + ciz);
-    if(nGrassNew >= GRASS_CAP){ ciz = gnz; break; }
-    if(++cix >= gnx){ cix = 0; ciz++; }
+  // Diamond-Order (L1-Distanz): Ring dr um das Zentrum, 4*dr Zellen pro Ring
+  // (4 Kanten zu je dr Schritten, im Uhrzeigersinn vom oberen Punkt).
+  // Bei GRASS_CAP-Ueberlauf fehlen die weitesten Zellen.
+  for(int i = 0; i < maxCells; i++){
+    if (dr > dmaxR) return 1;
+    int x, y;
+    if (dr == 0) { x = dcx0; y = dcz0; }
+    else {
+      int seg = drp / dr, t = drp % dr;
+      switch (seg) {
+        case 0: x = dcx0 + t;        y = dcz0 - dr + t;      break;  // oben -> rechts
+        case 1: x = dcx0 + dr - t;   y = dcz0 + t;           break;  // rechts -> unten
+        case 2: x = dcx0 - t;        y = dcz0 + dr - t;      break;  // unten -> links
+        default: x = dcx0 - dr + t;  y = dcz0 - t;           break;  // links -> oben
+      }
+    }
+    if (x >= 0 && x < gnx && y >= 0 && y < gnz)
+      build_cell(gix0 + x, giz0 + y);
+    if (nGrassNew >= GRASS_CAP) return 1;   // Puffer voll: fertig (ferne Zellen weglassen)
+    if (++drp >= 4 * dr) { drp = 0; dr++; }
   }
-  return ciz >= gnz;
+  return dr > dmaxR;
 }
 
 void grass_build_finish(void){
@@ -306,6 +348,8 @@ void grass_build_finish(void){
   uint8_t *tc = cellCnt; cellCnt = buildCnt; buildCnt = tc;
   oldOffX0 = offX0; oldOffZ0 = offZ0;
   nGrass = nGrassNew;
+  gForceFull = 0;
+  gBuilding = 0;
   gBuildDone = 1;   // Main-Thread holt den Build per grass_build_finished_snapshot()
   pthread_mutex_unlock(&gMu);
 }
@@ -322,9 +366,9 @@ void grass_build_finish(void){
 // geht direkt zum jeweils neuesten Zentrum. Mit Zell-Kopieren dauert ein
 // Build bei kleinen Verschiebungen nur ~100ms -> das Gras hinkt der
 // Kamera hochstens ~1-2m hinterher.
-void grass_build_request(float cx, float cz){
+void grass_build_request(float cx, float cz, int full){
   pthread_mutex_lock(&gMu);
-  gReqCX = cx; gReqCZ = cz;
+  gReqCX = cx; gReqCZ = cz; gReqFull = full;
   gReqPending = 1;
   pthread_cond_signal(&gCv);
   pthread_mutex_unlock(&gMu);
@@ -339,6 +383,14 @@ void grass_build_finished_snapshot(float **buf, int *n){
   pthread_mutex_unlock(&gMu);
 }
 
+// Build laeuft gerade? (Request wartet oder Worker generiert) — fuer den HUD.
+int grass_build_busy(void){
+  pthread_mutex_lock(&gMu);
+  int b = gReqPending || gBuilding;
+  pthread_mutex_unlock(&gMu);
+  return b;
+}
+
 static void* grass_worker(void* arg){
   (void)arg;
   for(;;){
@@ -346,8 +398,10 @@ static void* grass_worker(void* arg){
     while(!gReqPending) pthread_cond_wait(&gCv, &gMu);
     gReqPending = 0;
     float cx = gReqCX, cz = gReqCZ;
+    int full = gReqFull;
+    gBuilding = 1;
     pthread_mutex_unlock(&gMu);
-    grass_build_begin(cx, cz);
+    grass_build_begin(cx, cz, full);
     while(!grass_build_step(1 << 30)) {}
     grass_build_finish();
     // Request, der während des Builds kam: gReqPending ist gesetzt ->
