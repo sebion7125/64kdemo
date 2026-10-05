@@ -5,5 +5,7 @@ uniform sampler2D uFont;
 uniform vec4 uTint;
 void main(){
   vec4 c = texture(uFont, vUV);
-  O = vec4(c.rgb * uTint.rgb, c.a * uTint.a);
+  // Farbe aus dem Tint (Font-Textur hat nur Alpha, RGB=0);
+  // alpha = Textur-Maske * Tint-Alpha.
+  O = vec4(uTint.rgb, c.a * uTint.a);
 }

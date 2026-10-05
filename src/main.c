@@ -575,7 +575,7 @@ static int build_text_verts(float *v, const char *s, int w, int h, float px0, fl
     const char *f = strchr(FONT_STR, *c);
     if (f) {
       int gi = (int)(f - FONT_STR);
-      if (n >= HUD_MAX_CHARS) break;   // Bounds-Check: kein Buffer-Overflow
+      if (n >= HUD_MAX_CHARS * 6) break;   // Bounds-Check: kein Buffer-Overflow
       for (int i = 0; i < 6; i++) {
         float fx = pts[i][0], fy = pts[i][1];
         v[n*4+0] = (px + fx*cs) / w * 2.0f - 1.0f;
@@ -655,7 +655,7 @@ static void draw_sliders(float posD, float posH, float posM, int w, int h, int l
     hd[i*16+12]=(hx+2)/w*2-1;hd[i*16+13]=1-y1/h*2;  hd[i*16+14]=buv[0]; hd[i*16+15]=buv[1];
   }
   p_glBufferData(GL_ARRAY_BUFFER, sizeof bg, bg, GL_DYNAMIC_DRAW);
-  p_glUniform4f(locTint, 0.0f, 0.0f, 0.0f, 0.5f);
+  p_glUniform4f(locTint, 0.75f, 0.75f, 0.75f, 0.85f);   // hellgrauer Untergrund
   p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 12);
   for (int i = 0; i < 3; i++) {
     float hx = x0 + pos[i] * slW, y1 = y0[i] + slH;
@@ -672,6 +672,22 @@ static void draw_sliders(float posD, float posH, float posM, int w, int h, int l
   p_glBufferData(GL_ARRAY_BUFFER, sizeof hd, hd, GL_DYNAMIC_DRAW);
   p_glUniform4f(locTint, 1.0f, 1.0f, 1.0f, 1.0f);
   p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 12);
+  // Faden: verbindet die drei Regler-Positionen (dunn, weiss, 2px breit).
+  // Zwei Segmente (unten->Mitte, Mitte->oben) als 2px-Quads.
+  {
+    float fx[3] = { x0 + pos[0] * slW, x0 + pos[1] * slW, x0 + pos[2] * slW };
+    float fy[3] = { y0[0] + slH * 0.5f, y0[1] + slH * 0.5f, y0[2] + slH * 0.5f };
+    float fad[32];
+    for (int s = 0; s < 2; s++) {
+      fad[s*16+0] = (fx[s]-1)/w*2-1;   fad[s*16+1] = 1-fy[s]/h*2; fad[s*16+2] = buv[0]; fad[s*16+3] = buv[1];
+      fad[s*16+4] = (fx[s]+1)/w*2-1;   fad[s*16+5] = 1-fy[s]/h*2; fad[s*16+6] = buv[0]; fad[s*16+7] = buv[1];
+      fad[s*16+8] = (fx[s+1]-1)/w*2-1; fad[s*16+9] = 1-fy[s+1]/h*2; fad[s*16+10] = buv[0]; fad[s*16+11] = buv[1];
+      fad[s*16+12] = (fx[s+1]+1)/w*2-1; fad[s*16+13] = 1-fy[s+1]/h*2; fad[s*16+14] = buv[0]; fad[s*16+15] = buv[1];
+    }
+    p_glBufferData(GL_ARRAY_BUFFER, sizeof fad, fad, GL_DYNAMIC_DRAW);
+    p_glUniform4f(locTint, 1.0f, 1.0f, 1.0f, 0.8f);
+    p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 8);
+  }
 }
 
 int main(int argc, char **argv) {
@@ -1242,6 +1258,24 @@ int main(int argc, char **argv) {
       float hsc = hud_scale(winH);
       float cs = 16.0f * hsc;
       float buv[2] = { (ATLAS_W - 0.5f) / ATLAS_W, (ATLAS_H - 0.5f) / ATLAS_H };
+      // Hintergrund-Quad (Statuszeilen) ERST (Text wird drueber gezeichnet)
+      if (hudMode > 0) {
+        int len = len1 > len2 ? len1 : len2;
+        if (hudMode == 2 && len3 > len) len = len3;
+        int nLines = hudMode == 2 ? 3 : 1;
+        float bx0 = 16.0f * hsc, by0 = 12.0f * hsc;
+        float bx1 = 16.0f * hsc + len * cs + 8.0f * hsc;
+        float by1 = 12.0f * hsc + nLines * cs + 8.0f * hsc;
+        float bg[16] = {
+          bx0/winW*2-1, 1-by0/winH*2, buv[0], buv[1],
+          bx1/winW*2-1, 1-by0/winH*2, buv[0], buv[1],
+          bx0/winW*2-1, 1-by1/winH*2, buv[0], buv[1],
+          bx1/winW*2-1, 1-by1/winH*2, buv[0], buv[1],
+        };
+        p_glBufferData(GL_ARRAY_BUFFER, sizeof bg, bg, GL_DYNAMIC_DRAW);
+        p_glUniform4f(locTint, 0.0f, 0.0f, 0.0f, 0.35f);
+        p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+      }
       // Sämtlicher Text (Statuszeilen + Slider-Beschriftung) in EINEM
       // Buffer/einem Draw (spart Code+Calls). Beschriftung links der Slider:
       // Sichtweite (oben), Hoehe (Mitte), Dichte (unten).
@@ -1261,24 +1295,6 @@ int main(int argc, char **argv) {
       p_glBufferData(GL_ARRAY_BUFFER, n * 4 * sizeof(float), hudVerts, GL_DYNAMIC_DRAW);
       p_glUniform4f(locTint, 1.0f, 1.0f, 1.0f, 1.0f);
       p_glDrawArrays(GL_TRIANGLES, 0, n);
-      // Hintergrund-Quad (Statuszeilen)
-      if (hudMode > 0) {
-        int len = len1 > len2 ? len1 : len2;
-        if (hudMode == 2 && len3 > len) len = len3;
-        int nLines = hudMode == 2 ? 3 : 1;
-        float bx0 = 16.0f * hsc, by0 = 12.0f * hsc;
-        float bx1 = 16.0f * hsc + len * cs + 8.0f * hsc;
-        float by1 = 12.0f * hsc + nLines * cs + 8.0f * hsc;
-        float bg[16] = {
-          bx0/winW*2-1, 1-by0/winH*2, buv[0], buv[1],
-          bx1/winW*2-1, 1-by0/winH*2, buv[0], buv[1],
-          bx0/winW*2-1, 1-by1/winH*2, buv[0], buv[1],
-          bx1/winW*2-1, 1-by1/winH*2, buv[0], buv[1],
-        };
-        p_glBufferData(GL_ARRAY_BUFFER, sizeof bg, bg, GL_DYNAMIC_DRAW);
-        p_glUniform4f(locTint, 0.0f, 0.0f, 0.0f, 0.35f);
-        p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-      }
       draw_sliders((grassDensityScale - 0.2f) / 7.8f,
                    (grassHeightScale - 0.3f) / 2.7f,
                    (grassMaxDist - 40.0f) / 80.0f, winW, winH, locTint);
