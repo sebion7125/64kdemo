@@ -5,6 +5,8 @@ in vec3 vPos;
 in vec3 vCol;
 in float vT;
 in float vFade;   // 0..1 (Fade-in nach Build)
+in float vSide;   // Schritt 2: Breitenposition (-0.5..0.5)
+in vec3 vR;       // Schritt 2: Breitenrichtung
 uniform vec3 uCamPos;
 out vec4 O;
 const vec3 SUN = normalize(vec3(0.55, 0.38, -0.62));
@@ -45,10 +47,11 @@ vec3 skyColor(vec3 rd){
 }
 void main(){
   vec3 n = normalize(vNrm);
-  // KEIN Double-Sided-Flip: Halm-Normale zeigt fast immer nach oben.
-  // Mit Flip wurde die Normale umgekippt, wenn die Kamera unter dem Halmpixel
-  // war (Halm hoeher als Kamera) -> dot(n,SUN) negativ -> Halm dunkel.
-  // Ohne Flip: stabile, helle Beleuchtung von oben (wie Terrain-Gras).
+  // Abgerundete Normale (Schritt 2): ueber die Breite (vSide) kippt die
+  // Normale zur Breitenrichtung vR (Halm wie leicht gewoelbtes Band), dazu
+  // Aufwaertsanteil u (verhindert schwarze Halme). k=0.6, u=0.5 (Startwerte).
+  // KEIN Double-Sided-Flip (dortflackern ueberlappender Haelme).
+  n = normalize(n + 2.0 * 0.6 * vSide * vR + 0.5 * vec3(0.0, 1.0, 0.0));
   vec3 rd = normalize(uCamPos - vPos);
   // Grundfarbe aus dem Terrain (4-Oktaven-fbm, identisch zu fragment.glsl):
   // die Halm-Basis uebernimmt die lokale Gras-/Sandfarbe, die Spitze bleibt

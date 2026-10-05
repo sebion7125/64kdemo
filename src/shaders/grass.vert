@@ -14,6 +14,8 @@ out vec3 vPos;
 out vec3 vCol;
 out float vT;
 out float vFade;
+out float vSide;   // Schritt 2: Breitenposition (ww: -0.5..0.5)
+out vec3 vR;       // Schritt 2: Breitenrichtung (Halm-"rechts")
 // hash12/vnoise: identisch zu fragment.glsl (Consistency-Regel)
 float hash12(vec2 p){
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -67,12 +69,16 @@ void main(){
   vec2 woff = vec2(ww * w * taper, ww * w * taper * 0.7);
   p.x += woff.x * cy - woff.y * sy;
   p.z += woff.x * sy + woff.y * cy;
-  // Normale: fast immer nach oben (wenig Wind/Yaw-Abhaengigkeit).
-  // Vorher: vec3(-wnd*0.25, 1.0, -wnd2*0.18) -> Beleuchtung wechselte
-  // zwischen hellgruen und dunkelgruen, je nach Wind/Yaw (sah aus wie
-  // Halme, die ihre Farbe wechseln). Jetzt: stabile, helle Beleuchtung.
-  vec3 n = vec3(-wx * 0.7, 1.0, -wz * 0.7);
-  vNrm = normalize(vec3(n.x * cy - n.z * sy, n.y, n.x * sy + n.z * cy));
+  // Abgerundete Normale (Schritt 2): Halm ist kein flaches Band, sondern
+  // leicht gewoelbt. vNrm = Flaechennormale F (horizontal, senkrecht zur
+  // Breitenrichtung R) + kleine Wind-Stoerung; die Rundung ueber die Breite
+  // (2k*vSide*R) und der Aufwaertsanteil u*Y kommen im Fragment-Shader
+  // (k=0.6, u=0.5). F/R folgen aus der woff-Rechnung (0.7-Scherung).
+  vec3 R = normalize(vec3(cy - 0.7 * sy, 0.0, sy + 0.7 * cy));
+  vec3 F = vec3(-R.z, 0.0, R.x);
+  vNrm = F + vec3(-wx * 0.7, 0.0, -wz * 0.7);
+  vR = R;
+  vSide = ww;
   vPos = p;
   vCol = vec3(sh, t, lod);
   vT = t;
