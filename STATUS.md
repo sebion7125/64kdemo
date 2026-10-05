@@ -1,21 +1,24 @@
 # 64kDemo — Status
 
-Stand: 2026-10-05, nach Gras-Optik-Session (Plan: docs/grasplan.md).
+Stand: 2026-10-05, nach Gras-Puffer-Session (Distanz-Order, Dichte, HUD).
 
 ## ⚡ SOFORT NÄCHSTER SCHRITT
 
-**Visuelle Verifizierung durch den Nutzer** (Gras-Optik + Farb-/Nebel-
-Änderungen dieser Session): Transluzenz (in Sonnenrichtung schauen),
-abgerundete Normalen (weicher Hell-Dunkel-Verlauf quer zur Breite),
-Specular, Büschel (Höhen-/Richtungsflecken, keine Lücken), Grundfarbe
-aus dem Terrain, wandernde Böen, satteres Grün, bläulicher/weiterer
-Nebel. Dichte-Regler sollte wieder gleichmäßig wirken (Nahbereich ist
-wieder dicht).
+**Visuelle Verifizierung durch den Nutzer**:
+- Gras-Puffer: Dichte in Nähe UND Ferne (802k Halme bei Standard),
+  bei CAP-Uberlauf (Dichte-Slider hoch) fehlen jetzt die WEAESTEN
+  Zellen (Diamond-Order), nicht zufällige.
+- HUD-Vollstats (H-Taste): 3 Zeilen — FPS/RES/CAM/AA/TREES/QUADS/GRASS,
+  D/H/MD/FRZ/NUR-GRAS, POS/CAP/BUILD. Slider beschriftet.
+- Rendering von weit nach nah (Fade-in/Transparenz + MSAA korrekt).
 
-Danach optional: **Schritt 7 (Baum-Schatten auf Gras)** aus
-docs/grasplan.md.
-
-**64k-Budget: 64,040 Byte** (Ziel < 65,536, Makefile-Check ok).
+Danach (in dieser Reihenfolge):
+1. Nutzer-Feedback auf Dichte/Farben/Weite sammeln und abstimmen
+2. Entfernungssortierung verifizieren (genügt die Chunk-Methode oder
+   braucht es pro-Frame-Sortierung?)
+3. Binary-Budget (< 65,536 B) — liegt bei 68,136, Plan steht (Linker-
+   Script /tmp/64k.ld bringt 66,864; .plt.sec discarden + Rest kürzen)
+4. Optional: Schritt 7 (Baum-Schatten, docs/grasplan.md)
 
 ### Kontext: was diese Session alles verändert hat
 
@@ -56,6 +59,30 @@ docs/grasplan.md.
 - `main.c` — GL-Setup, Mesh-Pass, Raymarch-Pass, Compositing, Kamera, HUD
 
 **Kamera:** Free-Fly (Pointer-Lock, Halten-links = Look, WASD, Space/X hoch/runter, Shift Turbo, O Orbit, R Reset). Pitch ±83° Clamp, invertiert, Sensitivität 0.0008.
+
+## Gefixt (Session 2026-10-05, Gras-Puffer + HUD)
+
+- [x] **Puffer-Verwaltung: Diamond-Order** (grass_build_step): Zellen
+  vom Zentrum (Kamera) nach aussen (L1-Ringe, 4*dr Zellen/Ring).
+  Bei GRASS_CAP-Ueberlauf fehlen jetzt die WEAESTEN Zellen (frueher:
+  Gitter-Order von der Ecke -> naehere Zellen konnten fehlen).
+- [x] **Mehr Dichte**: Basis 24->32 (Cap 32), Falloff-Exponent 1.6->1.0
+  (flacher Blickwinkel in der Ferne braucht mehr Halme). 442k->802k
+  Halme bei Standard. Dichte-Slider wirkt ueber den ganzen Bereich.
+- [x] **Weit->nah Rendering**: 32 Chunks via glDrawArraysInstanced-
+  BaseInstance (GL 4.2) vom Buffer-Ende her. Alpha-Blending (Fade-in)
+  und MSAA brauchen Raster-Reihenfolge von hinten nach vorne; die
+  Diamond-Order der VBO genuegt (Rebuild zentriert sie auf die Kamera).
+- [x] **HUD-Vollstats (H-Taste, 3 Modi)**: Zeile 1 FPS/RES/CAM/AA
+  (OFF/4x/8x)/TREES/QUADS/GRASS, Zeile 2 D/H/MD/FRZ/NUR-GRAS, Zeile 3
+  POS (Kamera) + CAP (Gras-Puffer voll) + BUILD (Rebuild aktiv).
+  Reduziert = Zeile 1, aus = nichts. Slider beschriftet (Sichtweite/
+  Hoehe/Dichte).
+- [x] **grass_build_busy()**: Worker-Status (Request wartet oder
+  generiert) fuer den BUILD-Indikator.
+- [x] **Kamera-Rotation pausiert waehrend Slider-Drag** (Fly-Modus).
+- [x] **Slider-Change triggert Voll-Generation** (kein Zell-Kopieren):
+  sprunghaftes Aendern ist gewollt (Nutzer).
 
 ## Gefixt (Session 2026-10-05, Gras-Optik-Korrektur + Farben/Nebel)
 
@@ -252,13 +279,16 @@ Funktioniert auch auf NVIDIA (dort wird `gl_FragDepth` immer geschrieben).
 
 ## Aktuell offen / To-Do
 
-### 1. Gras (Gras-Optik-Schritte 1-6 + Budget sind fertig)
-- [ ] Visuell verifizieren (Nutzer): Transluzenz, abgerundete Normalen,
-  Specular, Büschel (keine Lücken), Grundfarbe, Böen, satteres Grün,
-  Nebel, Dichte-Regler im Nahbereich
+### 1. Gras (Puffer-Verwaltung + Dichte + Rendering-Order erledigt)
+- [ ] Visuell verifizieren (Nutzer): Dichte naeher/ferner, CAP/BUILD-
+  Indikator, HUD-Vollstats, Wide->nah-Fade-in (keine verdeckten Halme)
+- [ ] Entfernungssortierung: genuegt die Chunk-Methode (32 Chunks) oder
+  braucht es pro-Frame-Sortierung? (Nur waehrend Fade-in relevant —
+  dann ist die Order auf die Kamera zentriert)
 - [ ] Optional: Schritt 7 (Baum-Schatten auf Gras, docs/grasplan.md)
 - [ ] V-Modus-Crash auf Host neu testen (maximiert + AA off)
-- [ ] Gras-Flackern sehr nah an der Kamera prüfen (Compositing/Depth)
+- [ ] Gras-Flackern sehr nah an der Kamera pruefen (Compositing/Depth;
+  Wide->nah-Order Koennte es bereits behoben haben)
 
 ### 2. Bäume
 - [ ] **Nähte in den Röhren** (Tube-Segmente) → parallel transport frames
@@ -273,7 +303,10 @@ Funktioniert auch auf NVIDIA (dort wird `gl_FragDepth` immer geschrieben).
 - [ ] llvmpipe (VM): Root-Cause für schwarzes Bild mit MSAA finden (vermutlich Depth-Blit → DEPTH_COMPONENT24-Textur + Sampling im selben Frame)
 
 ### 5. Binärgröße
-- [x] **unter 64 KB**: 64,032 Byte (siehe Commit "64k-Budget")
+- [ ] **Momentan 68,136 Byte** (Budget pausiert, bis die Demo fertig ist —
+  Nutzer). Letzter unter Budget: 64,032 (Commit "64k-Budget").
+  Plan steht: Linker-Script (/tmp/64k.ld) -> 66,864; .plt.sec (528B)
+  discarden; REST: ~1,3KB aus main()/Strings sparen.
 - [ ] Bei neuen Features: Budget-Check im Makefile warnt bei > 65,536
 
 ### 6. Sonstiges
@@ -296,19 +329,23 @@ python3 -c "from PIL import Image; Image.open('/tmp/64kdemo_shot.ppm').save('/tm
 
 - `WATER_Y = 0.25`, `CAM_NEAR = 0.1`, `CAM_FAR = 300`
 - Compositing-Blend-Zone: ±0.03m
-- Gras: STEP 0.30m, Build-Radius = Dichte-Cutoff (~70m bei MD=80),
-  Dichte-Falloff `pow(1-smoothstep(8, grassMaxDist, dist), 1.6)` (LUT),
-  Halme/Zelle `4+20*dens` (Cap 12) — Dichte ohne Clumping-Faktor
+- Gras: STEP 0.30m, Build-Radius = Dichte-Cutoff (~79m bei MD=80),
+  Dichte-Falloff `pow(1-smoothstep(8, grassMaxDist, dist), 1.0)` (LUT),
+  Halme/Zelle `32*dens` (Cap 32) — Dichte ohne Clumping-Faktor
   (Clumping mischt nur Hoehe/Yaw/Lean, CLUMP 1.2m-Grid, 3x3-Suche),
   GRASS_CAP 1.5M, GRASS_FLOATS 10
   (pos3, hoehe, breite, phase, schattierung, yaw, lean, birth)
   — hoehe/breite = BASIS-Werte, Distanz-Skalierung im Shader (grass.vert)
   — Generator im eigenen Thread ("finish then latest"), Zell-Kopieren
-    macht 1m-Rebuilds ~170ms, VBO-Upload im Main-Thread
+    macht 1m-Rebuilds ~340ms, VBO-Upload im Main-Thread
+  — Zellen in Diamond-Order (Zentrum->auessen): bei CAP-Ueberlauf
+    fehlen die weitesten Zellen; Rendering in 32 Chunks von weit
+    nach nah (glDrawArraysInstancedBaseInstance, Blending/MSAA-Korrektur)
   — Shader: Transluzenz, abgerundete Normalen (vSide/vR, k=0.6 u=0.5),
     Specular, Grundfarbe aus Terrain (4-Oct-fbm), wandernde Boen (vnoise)
 - Bäume: Rebuild >12m (camTgt), Gras: Rebuild >1m (camPos)
 - Slider: Dichte 0.2–8.0x, Höhe 0.3–3.0x, Sichtweite 40–120m (Maus, unten Mitte)
 - Tasten: M=AA (4x/8x/OFF), G=Gras-Freeze, V=Nur-Gras, P=Screenshot,
-  T=Wireframe, O=Fly/Orbit, 1/2/3=Resolution, Q/Esc=Quit
+  T=Wireframe, O=Fly/Orbit, 1/2/3=Resolution, H=HUD (Voll/reduziert/aus),
+  Q/Esc=Quit
 - Caps: TREE_VERT_CAP 420000, CROWN_CAP 55000, GRASS_CAP 1500000, WIRE_CAP 90000
