@@ -572,7 +572,9 @@ static int build_text_verts(float *v, const char *s, int w, int h, float px0, fl
   float px = px0, py = py0, cs = 16.0f * sc;
   static const float pts[6][2] = { {0,0},{1,0},{0,1},{1,0},{1,1},{0,1} };
   for (const char *c = s; *c; c++) {
-    const char *f = strchr(FONT_STR, *c);
+    char ch = *c;
+    if (ch >= 'a' && ch <= 'z') ch -= 32;   // Font hat nur Grossbuchstaben
+    const char *f = strchr(FONT_STR, ch);
     if (f) {
       int gi = (int)(f - FONT_STR);
       if (n >= HUD_MAX_CHARS * 6) break;   // Bounds-Check: kein Buffer-Overflow

@@ -7,9 +7,10 @@ LDFLAGS = -s -no-pie -Wl,-z,noseparate-code
 LDLIBS  = -ldl -lm -lpthread
 SRC     = src/main.c src/shaders_gen.c src/terrain_cpu.c src/trees_cpu.c src/grass_cpu.c
 BIN     = bin/64kdemo
-SHARE   = /media/sf_Quarantine
+SHARE   = /media/sf_Quarantine/64kDemo
 
 all: $(BIN)
+	@mkdir -p $(SHARE)
 	@cp $(BIN) $(SHARE)/64kdemo
 	@echo "Kopiert nach $(SHARE)/64kdemo"
 
