@@ -1,51 +1,42 @@
 # 64kDemo — Status
 
-Stand: 2026-10-06, Runde 10. **Issue A: URSACHE GEFUNDEN und behoben** —
-halbtransparente, sterbende Halme schreiben Tiefe und verdecken eingespielte
-Halme dahinter; beim harten Cull werden die schlagartig sichtbar (gemessen:
-55,8 % der eingespielten Halme im Bild betreffen das). Fix: **Alpha-to-Coverage**
-(Y, standardmaessig AN, wirkt mit MSAA). Nutzer-Host-Test mit J hat das
-eindeutig gezeigt. **Sortierte Zeichenreihenfolge (I) ist gebaut und gemessen
-(Abweichung von ideal 31,77 m -> 0,12 m), viseller Nutzen noch offen.**
-Runde 9: Fade-GRUPPEN + Intervall-Markierung (12 -> 10 Floats/Halm, Puffer −16 %,
+Stand: 2026-10-06, Runde 10. **Issue A GELÖST.** Ursache: halbtransparente,
+sterbende Halme schreiben Tiefe und verdecken eingespielte Halme dahinter;
+beim harten Cull werden die schlagartig sichtbar (gemessen: 55,8 % der
+eingespielten Halme im Bild betrifft das). Fix: **Alpha-to-Coverage** im
+Gras-Pass (Standard AN, wirkt mit MSAA). Vom Nutzer auf dem Host bestätigt.
+Sortierte Zeichenreihenfolge ist gebaut und gemessen (Abweichung von ideal
+31,77 m → 0,12 m), aber der Effekt ist „mild bis unsichtbar“ — **A2C genügt,
+Sortierung kommt nicht in main.**
+Runde 9: Fade-GRUPPEN + Intervall-Markierung (12 → 10 Floats/Halm, Puffer −16 %,
 POS-Build −11 %, Fade-Bilanz exakt 0,00 %, Idempotenz exakt).
 **Fade-Dauer Standard 1 s.** Slider-UI blendet bei gehaltener Maustaste aus.
 **Issue B FIXED + bestätigt. R-Reset FIXED + vom Nutzer bestätigt.**
-Offen: Issue C (Gras-Inseln, seit Issue-B-Fix nicht mehr gesehen).
+Offen: Issue C (Gras-Inseln, seit Issue-B-Fix nicht mehr gesehen) und Budget.
 Befund: vorbestehende Hash-Kollision (Zelle 83,9, b=11 vs b=12 → 2 Halme doppelt,
 im Original schon da, visuell vernachlässigbar).
-Details unten in „ISSUES“ und in „Session Runde 10/9/8“.
+Nächster Schritt: siehe „⚡ SOFORT NÄCHSTER SCHRITT“ unten.
 
 ## ⚡ SOFORT NÄCHSTER SCHRITT (nächster Chat)
 
-**Issue A: Ursache eingegrenzt, aber nicht behoben.** Der Kanten-Fix (666de2c)
-hat das Symptom laut Nutzer NICHT beseitigt. Nächster Schritt ist der
-**Nutzer-Host-TEST mit dem Debug-Build** (`/media/sf_Quarantine/64kDemo/64kdemo_dbg`,
-Branch `dbg-gras-fade`):
+**Issue A ist abgeschlossen.** A2C ist der Fix, vom Nutzer auf dem Host
+bestätigt; Sortierung bringt nichts Sichtbares mehr. Alles Weitere hier:
 
-1. **C** (Farbcodierung) an, **L** einmal → Fade 2 s (beobachtbar).
-2. **G** Freeze → rückwärts fahren → **G** Freeze aus. Gelb = läuft aus,
-   Cyan = läuft ein, danach normales Gras.
-3. Derselbe Ablauf einmal mit **J** umgeschaltet (Depth-Write aus).
-   - Sprung mit `DW-` **weg** → Ursache ist Zeichenreihenfolge + Depth-Write.
-     Fix: Gras ohne Depth-Write, oder echtes Sortieren statt 32-Chunks-Näherung.
-   - Sprung **bleibt** → die Farben zeigen, WELCHE Halme WO erscheinen.
-4. **K** schaltet zusätzlich die Dichte-Kante ganz ab (CUT 0).
-
-Code-Zustand `main`: copiedMask-Fix (d[11], GRASS_FLOATS 12) +
-`GRASS_DENS_CUT = 0.01f`. Kosten des Kanten-Fix: Build +10..22 %
-(1 m-Shift 141→172 ms), Halme +2,7 %, Binary unverändert 72248 B.
-
-Danach:
-1. **Issue C (Inseln) in der VM suchen**: Halme-Höhen vs. c_terrainH an
-   denselben Positionen dumpen; Raymarcher-SDF (0.85-Dämpfung) prüfen.
-   (Seit Issue-B-Fix nicht mehr vom Nutzer gesehen — Priorität unten.)
-2. Danach Wahrnehmungsfrage (Fade sichtbar?) mit Nutzer abstimmen
-   (Death-Fade 2s → 3–4s? langsamere Testfahrt?).
-3. Optional: vorbestehende Hash-Kollision (Zelle 83,9, b=11 vs b=12) fixen
-   (Hash-Funktion ändern — betrifft alle Halme, nur 1 Halm von 587k).
-Danach wie bisher: Dichte/Farben/Weite, Entfernungssortierung, Budget,
-Baum-Schatten.
+1. **Fix nach `main` bringen** (Branch `dbg-gras-fade`, 8 Commits vor `main`
+   = `666de2c`). Nur die Sachteile: Fade-Gruppen + Intervall-Markierung
+   (`grass_cpu.c`, `scene.h`, `grass.vert`, `uFadeGrp`-Upload) und
+   A2C-ohne-Blending im Gras-Pass. Die Debug-Schalter C/J/K/L/Y/I, der
+   Farbmodus und die Debug-Dumps bleiben draußen. Binary aktuell 76.416 B
+   (Debug-Zweig, über Budget) — nach dem Abspecken neu messen.
+2. **Issue C (Gras-Inseln)**: seit Issue-B-Fix nicht mehr vom Nutzer gesehen —
+   erst nachfragen, dann ggf. Halme-Höhen vs. `c_terrainH` an denselben
+   Positionen dumpen und die 0,85-Dämpfung des Raymarcher-SDF prüfen.
+3. **Wahrnehmung**: sind 1 s Fade lang genug?
+4. **Dichte, Halmbreite, Farben, Baum-Schatten.**
+5. **Budget zurück unter 64 KB.** Der Gruppen-Umbau ist der Hauptgewinn
+   (−16 % Puffer, −17 % Upload, −11 % Build-Zeit).
+6. Optional: vorbestehende Hash-Kollision (Zelle 83,9, b=11 vs b=12) fixen —
+   2 Halme von ~850k, im Original schon vorhanden.
 
 ## ISSUES (Nutzer-Beobachtungen 2026-10-05, nach Pop-Fix)
 
@@ -62,7 +53,19 @@ Baum-Schatten.
   Frozen: 10s fahren + R: 827192 Halme, 0 neu, 532 sterben (alles
   kopiert, 100% sichtbar).
 
-### Issue A: „Neue Halme ploppen auf“ — **NICHT gelöst** (Teil 1 gefixt, Teil 2+3 halfen nicht)
+### Issue A: „Neue Halme ploppen auf“ — **GELÖST (Alpha-to-Coverage, Nutzer-Host-Test)**
+
+**Ursache (Runde 10):** halbtransparente sterbende Halme schreiben Tiefe und
+verdecken eingespielte Halme dahinter; beim harten Cull (`f < 0.004`) fallen die
+Tiefen weg und die verdeckten Halme werden schlagartig sichtbar. Gemessen:
+55,8 % der eingespielten Halme im Bild liegen hinter einem näheren sterbenden
+(`/tmp/test_zhide.c`). Fix: `GL_SAMPLE_ALPHA_TO_COVERAGE` im Gras-Pass, dabei
+`GL_BLEND` aus (sonst doppelte Dämpfung). Sortierte Zeichenreihenfolge bringt
+daneben nichts Sichtbares mehr.
+
+Die folgenden drei Teile waren Umwege über die Daten-Seite — die Daten waren
+die ganze Zeit sauber. Teil 1 war ein echter Bug, Teil 2 und 3 auch, aber nicht
+die Ursache des sichtbaren Sprungs.
 
 **Teil 1 — FIXED (committet a4ddeb9, VM-verifiziert):** Death-Time wurde
 während des Builds gesetzt → sterbende Halme waren beim Swap schon
@@ -232,6 +235,56 @@ ein weicher, aber deutlicher Dichte-Aufbau ueber 2s. Wer das auch noch will:
 Dichte-Profil weltfest machen oder Build-Zentrum nach dem Freeze-AUS
 interpolieren (hoch prioritaer, noch nicht gemacht).
 
+## Uebergabe an die naechste Session (Stand nach Runde 10)
+
+**Branch:** `dbg-gras-fade`, 8 Commits vor `main` (`666de2c`). Arbeitsbaum sauber.
+Binary 76.416 Byte — der Debug-Zweig ist NICHT budget-konform (64k-Ziel), er ist
+nur zum Testen auf dem Host.
+
+**Issue A ist geloest.** Nutzerbefund: mit A2C kein Sprung, keine sichtbare
+Abstufung. Sortierte Zeichenreihenfolge: Effekt 'mild bis unsichtbar'.
+**Entscheidung: A2C genuegt, Sortierung kommt nicht in main.**
+
+**Was von diesem Zweig nach `main` gehoert (minimaler Fix):**
+1. `grass.vert`: `iGrp` + `uniform vec2 uFadeGrp[NGRP]` + Fade ueber Gruppen
+   (nur zusammen mit dem CPU-Teil aus e5249ef moeglich — Layoutaenderung).
+2. `main.c`: `GL_SAMPLE_ALPHA_TO_COVERAGE` im Gras-Pass AN, `GL_BLEND` dann AUS
+   (und umgekehrt), nach dem Pass wieder disablen. Plus `p_glUniform2fv` + `locGrp`.
+3. `grass_cpu.c` + `scene.h`: Fade-Gruppen, Intervall-Markierung, `cellNextB`,
+   `GRASS_FLOATS` 12->10, `GRASS_NGRP` 512.
+**Was NICHT nach main gehoert:** C/J/K/L/Y/I-Schalter, Farbmodus, Debug-Dumps,
+`dbgGrassDepth`, sortierte Walk-Ordnung. Slider-Hide bei Maushalt ist gewollt,
+aber separat gegenpruefen (in der VM nicht testbar).
+
+**Offene Punkte (grobe Reihenfolge):**
+- Issue C: Gras-Inseln (seit Issue-B-Fix nicht mehr gesehen — nachfragen, ob erledigt).
+- Wahrnehmung: sind 1 s Fade lang genug?
+- Dichte, Halmbreite, Farben, Baum-Schatten.
+- Budget: zurueck unter 64 KB. Der Gruppen-Umbau bringt -16 % Puffer und
+  -17 % Upload; das ist der Hauptgewinn, aber der Debug-Zweig muss erst
+  abgespeckt werden.
+- `src/shaders_gen.c` ist generiert (.gitignore) — nie von Hand editieren.
+
+**Testbasis (alles /tmp, laeuft ohne Grafikausgabe):**
+- `test_grp.c` Duplikate / Pops / Fade-Bilanz / Gruppenbelegung
+- `test_idem.c` Idempotenz, `test_there.c` Hin-und-zurueck (kein Leck)
+- `test_growth.c` alive/dying, `test_grplive.c` Gruppen bei 1s/30s
+- `test_zhide.c` **der Beweis fuer Issue A**: 55,8 % der eingespielten Halme
+  liegen hinter einem naeheren sterbenden
+- `test_order3.c` Sortierqualitaet (31,77 m -> 0,12 m Abweichung)
+- `timing.c` alt vs. neu (157 -> 139 ms/Build, 43,8 -> 36,6 MB)
+- `/tmp/oldver/` alter Code fuer Vergleiche, `/tmp/backup_runde9/` vor Refactor
+
+**Messfallen, die wir schon hatten (nicht nochmal reinlaufen):**
+- G-Kanal-Screenshots sind als Pop-Mass wertlos: das Shader skaliert Halmgroesse
+  mit Kameradistanz (`sizeScale`), reine Bewegung aendert die bedeckten Pixel um ~50 %.
+- 'Falsche Nachbarpaare' (~50 %) ist kein brauchbares Ordnungsmass — innerhalb
+  eines Slabs egal. Aussagekraeftig ist die Abweichung von der idealen Ordnung.
+- VM laeuft mit 1-2 FPS und llvmpipe: visuelle Beurteilung unbrauchbar, nur
+  CPU-Tests und Host-Augen zaehlen.
+- `xdotool mousedown` erreicht das Demo-Fenster in der VM nicht -> Maus-UI nicht
+  automatisierbar.
+
 ## Session 2026-10-06, Runde 10 (URSACHE GEFUNDEN: Depth-Write halbtransparenter Halme)
 
 **Nutzer-Host-Test mit J (Depth-Write) hat die Ursache geklaert.** Mit `DW-`
@@ -283,6 +336,11 @@ Die ~50 % "falschen Nachbarpaare" bleiben in beiden Faellen: innerhalb eines
 0,3-m-Slabs ist die Reihenfolge egal (Tiefenunterschied < Slab-Breite). Dieses
 Mass war vorher irrefuehrend — aussagekraeftig ist die Abweichung von der
 idealen Ordnung.
+
+**ENTSCHEIDUNG (Nutzer, nach Host-Test auf dem Zweig mit A2C):** der Effekt der
+Sortierung ist 'mild bis unsichtbar'. **A2C genuegt vollauf.** Die sortierte
+Walk-Ordnung bleibt als Debug-Schalter (I) in diesem Zweig, kommt aber **nicht
+nach main**. Damit ist Issue A abgeschlossen.
 
 **Debug-Schalter gesamt:** C Farbmodus, J Depth-Write, K Dichte-Kante,
 L Fade-Dauer (1/2/10/30 s), Y Alpha-to-Coverage, I sortierte Reihenfolge,
