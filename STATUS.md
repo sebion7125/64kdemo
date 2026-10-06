@@ -1,21 +1,22 @@
 # 64kDemo — Status
 
-Stand: 2026-10-05, Runde 5 (Chat-Wechsel). **Gras-Fade-out: VAO-Fix +
-Kanten-Pop-Fix committet und vom Nutzer bestätigt** (Slider ✓, Pop ✓ weg).
+Stand: 2026-10-06, Runde 6. **Issue A Teil 2 (Overlap-Bug im Copy/Gen-Pfad)
+FIXED (Unit-Test: 331/983/63790 Duplikate → 1), VM-Test ohne Regression,
+committet — HOST-TEST vom Nutzer ausstehend.**
 **Issue B FIXED + bestätigt. R-Reset FIXED + vom Nutzer bestätigt.**
-**Issue A: TEILS FIXED (Death-Time-Fix a4ddeb9), aber der Sprung ist auf
-dem Host noch da — Nutzer sieht neu generiertes Gras überall. Overlap-Bug
-im Copy/Gen-Pfad identifiziert (Unit-Test: 560 Duplikate), Fix offen.**
+**Issue A Teil 1 (Death-Time a4ddeb9) FIXED + bestätigt.**
 Offen: Issue C (Gras-Inseln, seit Issue-B-Fix nicht mehr gesehen).
+NEU Befund: vorbestehende Hash-Kollision (Zelle 83,9, b=11 vs b=12 → 1
+Halm doppelt, im Original schon da, visuell vernachlässigbar).
 Details unten in „ISSUES“.
 
 ## ⚡ SOFORT NÄCHSTER SCHRITT (nächster Chat)
 
-**Issue A ist NUR TEILS FIXED.** R-Reset ist vom Nutzer bestätigt ✓.
-Der Sprung (neu generiertes Gras, überall sichtbar) ist noch da.
-Nächster Schritt: Overlap-Bug im Copy/Gen-Pfad schließen (siehe
-Issue-A-Sektion, "Nächste Schritte"). Code-Zustand: grass_cpu.c ist
-beim committeten Stand (a4ddeb9), Fix-Versuche revertet.
+**Issue A Teil 2 (Overlap-Bug) ist FIXED + committet, aber NOCH NICHT vom
+Nutzer auf dem Host bestätigt.** Nächster Schritt: **Nutzer-Host-Test**
+(Hin-und-Her-Fahrt, Dichte-Wechsel) → ist der Sprung (neu generiertes
+Gras überall) weg? Code-Zustand: grass_cpu.c mit copiedMask-Fix (b-Index
+pro Halm d[11], GRASS_FLOATS 12).
 
 Danach:
 1. **Issue C (Inseln) in der VM suchen**: Halme-Höhen vs. c_terrainH an
@@ -23,6 +24,8 @@ Danach:
    (Seit Issue-B-Fix nicht mehr vom Nutzer gesehen — Priorität unten.)
 2. Danach Wahrnehmungsfrage (Fade sichtbar?) mit Nutzer abstimmen
    (Death-Fade 2s → 3–4s? langsamere Testfahrt?).
+3. Optional: vorbestehende Hash-Kollision (Zelle 83,9, b=11 vs b=12) fixen
+   (Hash-Funktion ändern — betrifft alle Halme, nur 1 Halm von 587k).
 Danach wie bisher: Dichte/Farben/Weite, Entfernungssortierung, Budget,
 Baum-Schatten.
 
@@ -41,63 +44,51 @@ Baum-Schatten.
   Frozen: 10s fahren + R: 827192 Halme, 0 neu, 532 sterben (alles
   kopiert, 100% sichtbar).
 
-### Issue A: „Neue Halme ploppen auf“ — **Teils FIXED, Rest offen: Overlap-Bug im Copy/Gen-Pfad**
-
-**Stand nach 2. Nutzer-Feedback (Host):** R-Reset funktioniert ✓. Der
-Sprung ist ABER noch da. Nutzer ist jetzt sicher: es ist **neu generiertes
-Gras**, und er sieht es **überall** — nach Freeze-Off wird der ganze
-Dichte-Verlauf neu generiert. Nutzer-Vorgabe (korrekt, = Design): alte
-Halme bleiben im neuen Puffer und faden aus, dürfen dann gelöscht werden;
-neue Halme faden gleichzeitig ein → weicher Übergang.
+### Issue A: „Neue Halme ploppen auf“ — **FIXED (VM-verifiziert), Host-Test ausstehend**
 
 **Teil 1 — FIXED (committet a4ddeb9, VM-verifiziert):** Death-Time wurde
 während des Builds gesetzt → sterbende Halme waren beim Swap schon
-0.3–1s im Fade → sofortiger 15–30%-Sprung am Swap-Punkt (gemessen −34%
-in einem Frame). Fix: Death-Time erst am Finish (Swap-Punkt) setzen
-(Platzhalter -1.0f). VM: sanfte 2s-Fades statt Sprung.
+0.3–1s im Fade → sofortiger 15–30%-Sprung am Swap-Punkt. Fix: Death-Time
+erst am Finish (Swap-Punkt) setzen (Platzhalter -1.0f).
 
-**Teil 2 — OFFEN: Overlap-Bug (kopiert + generiert an gleicher Stelle).**
-- **Unit-Test /tmp/test_overlap.c (bestätigt):** 3-Phasen-Szenario
-  (Build (0,0) → Build (−10,0) senkt Dichte in +x → Build (10,0) hebt
-  sie wieder): **560 doppelte Positionen** im End-Buffer. Duplikate sind
-  Buffer-adjacent (gleiche Zelle, b benachbart): alter Halm (Birth 100/103,
-  sofort sichtbar) + neuer Halm (Birth 106, Fade-in) an EXAKT gleicher
-  Stelle. Nutzer sieht den sofort sichtbaren → „Plopp“.
-- **Mechanismus (grass_cpu.c build_cell):** Copy-Loop kopiert die alten
-  Halme (b = 0..ocnt−1, teils übersprungen: sterbende mit fertigem Fade
-  `gWorldTime − death ≥ 2.5s` werden NICHT kopiert). Gen-Loop generiert
-  dann ab `bStart = onb` bis nb−1. Wenn `ocnt > onb` (sterbende Halme aus
-  Dichte-Abfall im Buffer) überlappen kopiert + generiert bei
-  b = onb..ocnt−1 → gleicher b → gleiche Position (deterministisch aus
-  (ix,iz,b)).
-- **Debug-Werte (Zelle 37,70):** Phase 2: copied=22 ocnt=22 nb=20 onb=22.
-  Phase 3: **copied=20** ocnt=22 nb=23 onb=20 — die Copy-Loop kopiert
-  NUR 20 (die 2 sterbenden mit fertigem Fade fehlen!) → kopierte Halme
-  besetzen NICHT b=0..ocnt−1 lückenlos.
-- **Fix-Versuche (nicht committet, revertet):**
-  1. `bStart = max(onb, ocnt)`: Test immer noch 560 Duplikate.
-  2. `bStart = ocnt` + Bedingung `nb > ocnt`: Test 2459 Duplikate (schlechter!).
-- **OFFENE FRAGEN (nächster Chat):**
-  a) Sind die 560 „Duplikate“ echte Overlaps oder Hash-Kollisionen bei
-     1mm-Auflösung des Tests? (32 Halme in 0.28m → mittlere Distanz
-     ~9mm; Test-Präzision 1mm. Test mit 0.1mm oder exaktem Float-Vergleich
-     wiederholen!) Buffer-Adjazenz der Duplikate spricht für echten Overlap.
-  b) Warum macht Fix 2 es schlimmer? (Vermutung: bei nb > ocnt werden
-     nb−ocnt Halme bei b=ocnt..nb−1 generiert, aber die Copy-Loop hat nur
-     ~nb Halme kopiert (lebendig) + wenige sterbende → andere Zellen
-     bekommen mehr Halme als vorher → neue Kollisionen?)
-  c) Duplikat-Daten zeigen Birth-Kombinationen (100→103) und (100→106) —
-     auch PHASE-2-Halme sind dupliziert → Bug tritt schon beim ersten
-     Dichte-Wechsel auf, nicht nur beim Hin-und-Her.
-- **Test-Artefakte:** /tmp/test_overlap.c (Duplikat-Zähler),
-  /tmp/test_overlap2.c (mit Birth/Death-Output), /tmp/test_overlap3.c
-  (Zellen-Check), /tmp/debug_cell.c (Phasen-Szenario),
-  /tmp/grass_cpu_backup.c (Zustand mit Fix 1), /tmp/patch_debug*.py.
-- **Nächste Schritte:** 1) Test-Präzision erhöhen (0.1mm) → echte
-  Overlaps vs. Kollisionen trennen. 2) Falls echt: Copy-Loop muss die
-  tatsächlich kopierten b-Indizes melden (nicht ocnt), Gen-Loop startet
-  danach. 3) VM-Pixeltest im 3-Phasen-Szenario (Hin-und-Her-Fahrt) →
-  Sprung sichtbar? 4) Dann Nutzer-Host-Test.
+**Teil 2 — FIXED (committet, VM-verifiziert): Overlap-Bug im Copy/Gen-Pfad.**
+- **Wurzel (zwei Mechanismen, per exaktem Float-Vergleich belegt):**
+  1. **onb-Off-by-one:** onb (altes nb) wurde im Copy-Pfad am
+     ZELLENZENTRUM (x,z) berechnet, aber der alte Build generierte am
+     PATCH-ZENTRUM (px,pz, bis 0.106m Offset) → LUT-Bin + stochastisches
+     Runden → onb weicht vom echten alten nb um ±1 ab → generierter Halm
+     bei b=onb dupliziert den kopierten Halm. (Bereits nach EINEM
+     Dichte-Wechsel: 331 Duplikate.)
+  2. **Sterbende-Halme-Overlap:** Bei Dichte-Abfall werden Halme
+     b=nb..ocnt-1 sterbend; steigen sie innerhalb des 2.5s-Fade-Fensters
+     wieder, werden sie kopiert (Fade läuft) UND ab bStart=onb neu
+     generiert → Overlap. (Mit dichten Builds: 63.790 Duplikate.)
+- **Fix (grass_cpu.c):** b-Index pro Halm speichern (d[11], GRASS_FLOATS
+  11→12, CPU-nur, Shader liest ihn nicht, VAO-Stride automatisch). Copy-
+  Loop baut eine 32-Bit-Maske `copiedMask` der tatsächlich kopierten b's;
+  Gen-Loop erzeugt nur b < nb, die NICHT kopiert wurden (statt bStart=onb).
+  onb-Berechnung + old_bcx/old_bcz entfernt (wurde überflüssig).
+- **Verifiziert (Unit-Test /tmp/test_overlap4.c, exakter Float-Vergleich,
+  3-Phasen-Szenario (0,0)→(−10,0)→(10,0)):**
+  - Vorher: Phase 2 = 331, Phase 3 = 983 Duplikate (3s-Abstand);
+    Phase 3 = 63.790 (0.3s-Abstand, Fade läuft).
+  - Nachher: Phase 2 = 1, Phase 3 = 1 (beide Szenarien) — nur noch die
+    vorbestehende Hash-Kollision (s. u.).
+  - Regressionstests: test_edge_pop (0 Pops), test_death (6 Szenarien OK),
+    test_1m (1m ~140ms, 12m ~311ms, wie vorher). Binary-Größe unverändert
+    (72.248 B). VM-Pixeltest Hin-und-Her-Fahrt: G-Kanal + Summe-ShaderFade
+    identisch zum Original-Binary (kein Regression).
+- **NEU Befund (vorbestehend, eigenständig): Hash-Kollision.** Zelle (83,9):
+  b=11 und b=12 liefern exakt dasselbe (bx,bz) (doppelte Hash-Kollision
+  c_hash12). 1 Halm von 587k doppelt, im Original-Code schon da, visuell
+  vernachlässigbar (perfektes Überlappen). Fix = Hash-Funktion ändern
+  (betrifft alle Halme) — optional, eigener Schritt.
+- **Test-Artefakte:** /tmp/test_overlap4.c (exakter Float-Vergleich,
+  3-Phasen + 0.3s/3s-Szenarien), /tmp/test_phase1.c (Phase-1-Duplikate),
+  /tmp/test_dupdetail.c (b-Indizes der Duplikate), /tmp/grass_cpu_orig.c
+  (Original für Vorher/Nachher), /tmp/issueA2.sh + /tmp/issueA2_orig.sh
+  (VM-Pixeltest Hin-und-Her, G-Kanal).
+- **Nächster Schritt:** Nutzer-Host-Test (Hin-und-Her-Fahrt) → Sprung weg?
 
 ### Issue B: Nach einer Strecke wird kein neues Gras mehr generiert, Halmzahl fällt nur — **FIXED + vom Nutzer bestätigt**
 - **Beobachtung (Nutzer):** nach Zurücklegen einer Strecke ein Modus,
@@ -147,6 +138,46 @@ in einem Frame). Fix: Death-Time erst am Finish (Swap-Punkt) setzen
   schwer wahrzunehmen (2s-Fade vs. 26m in 2s bei 13 m/s; nur ~1,3% der
   Halme sterben pro 1m, verteilt). Nach Issue-A/B-Fix neu bewerten;
   evtl. Death-Fade 2s → 3–4s als Tuning-Knopf.
+
+## Session 2026-10-06, Runde 6 (Issue A Teil 2: Overlap-Bug FIXED)
+
+### FIXED: Overlap-Bug im Copy/Gen-Pfad (Issue A Teil 2)
+- **Wurzel (zwei Mechanismen, per exaktem Float-Vergleich belegt, s. Issue-A-
+  Sektion):** (1) onb-Off-by-one (Zellen- vs. Patch-Zentrum → ±1, bereits
+  nach einem Dichte-Wechsel 331 Duplikate), (2) sterbende Halme werden
+  kopiert UND ab bStart=onb neu generiert (mit dichten Builds 63.790
+  Duplikate).
+- **Fix (grass_cpu.c, scene.h):** b-Index pro Halm speichern (d[11],
+  GRASS_FLOATS 11→12, CPU-nur). Copy-Loop baut 32-Bit-Maske `copiedMask`
+  der tatsächlich kopierten b's; Gen-Loop erzeugt nur b < nb, die NICHT
+  kopiert wurden (statt bStart=onb). onb-Berechnung + old_bcx/old_bcz
+  entfernt (überflüssig). VAO-Stride + VBO-Upload nutzen GRASS_FLOATS
+  automatisch → keine main.c-Änderung.
+- **Verifiziert:** Unit-Test /tmp/test_overlap4.c (exakter Float-Vergleich,
+  3-Phasen-Szenario): Duplikate 331/983/63790 → 1 (nur noch vorbestehende
+  Hash-Kollision). Regressionstests test_edge_pop (0 Pops), test_death
+  (6 Szenarien OK), test_1m (1m ~140ms) alle OK. Binary-Größe unverändert
+  (72.248 B). VM-Pixeltest Hin-und-Her-Fahrt (/tmp/issueA2.sh vs
+  /tmp/issueA2_orig.sh): G-Kanal + Summe-ShaderFade identisch zum Original
+  (kein Regression). **Host-Test vom Nutzer ausstehend.**
+- **NEU Befund (vorbestehend, eigenständig):** Hash-Kollision in Zelle
+  (83,9): b=11 und b=12 liefern exakt dasselbe (bx,bz) (doppelte
+  c_hash12-Kollision). 1 Halm von 587k doppelt, im Original schon da,
+  visuell vernachlässigbar. Fix = Hash-Funktion ändern (betrifft alle
+  Halme) — optional, eigener Schritt.
+- **Lehre:** Der 1mm-Test (560 Duplikate) vermischte echte Overlaps mit
+  Raster-Effekten. Exakter Float-Vergleich (Bitmuster) trennt sie sauber:
+  echte Overlaps = exakt gleiche Floats (deterministisch aus (ix,iz,b)).
+  Vor der Fix-Theorie erst die Test-Präzision erhöhen.
+
+### Test-Infrastruktur (ergänzt, /tmp)
+- /tmp/test_overlap4.c: exakter Float-Vergleich (Bitmuster), 3-Phasen-
+  Szenario mit 3s- und 0.3s-Build-Abstand (Fade fertig vs. läuft).
+- /tmp/test_phase1.c: Duplikat-Check im reinen Generierungs-Buffer (Phase 1).
+- /tmp/test_dupdetail.c: b-Indizes + Zelle der duplizierten Position.
+- /tmp/grass_cpu_orig.c + /tmp/scene_orig.h: Original für Vorher/Nachher.
+- /tmp/issueA2.sh + /tmp/issueA2_orig.sh: VM-Pixeltest Hin-und-Her-Fahrt
+  (G-Kanal-Alpha + Summe-ShaderFade), mit neuem/Original-Binary.
 
 ## Session 2026-10-05, Runde 5 (Gras-Fade-out: VAO-Fix + Kanten-Pop-Fix)
 
@@ -383,7 +414,7 @@ Screenshot vom Host holen als am VM-Scan festzuhalten.
   mappt a-z auf A-Z). 16x8-Zellen im 256x128-Atlas.
 
 **Gras (grass_cpu.c + grass.vert/frag):**
-- `GRASS_FLOATS=10` (d[9] = Birth-Time), `GRASS_CAP=1500000`,
+- `GRASS_FLOATS=12` (d[9]=Birth, d[10]=Death, d[11]=b-Index), `GRASS_CAP=5000000`,
   `GSTEP=0.30m`, Zellen 0.3x0.3m, Tabelle 240x240 (CT=240).
 - nb-Formel: `32*dens*(0.4+0.6*h4)*grassDensityScale` (Cap 32) +
   stochastisches Runden (c_hash12(ix*0.917, iz*0.311)).
@@ -742,8 +773,8 @@ python3 -c "from PIL import Image; Image.open('/tmp/64kdemo_shot.ppm').save('/tm
   Dichte-Falloff `pow(1-smoothstep(8, grassMaxDist, dist), 1.0)` (LUT),
   Halme/Zelle `32*dens` (Cap 32) — Dichte ohne Clumping-Faktor
   (Clumping mischt nur Hoehe/Yaw/Lean, CLUMP 1.2m-Grid, 3x3-Suche),
-  GRASS_CAP 1.5M, GRASS_FLOATS 10
-  (pos3, hoehe, breite, phase, schattierung, yaw, lean, birth)
+  GRASS_CAP 5M, GRASS_FLOATS 12
+  (pos3, hoehe, breite, phase, schattierung, yaw, lean, birth, death, b)
   — hoehe/breite = BASIS-Werte, Distanz-Skalierung im Shader (grass.vert)
   — Generator im eigenen Thread ("finish then latest"), Zell-Kopieren
     macht 1m-Rebuilds ~340ms, VBO-Upload im Main-Thread
