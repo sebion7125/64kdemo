@@ -934,10 +934,13 @@ int main(int argc, char **argv) {
           if (ks == XK_c) { dbgGrassCat = !dbgGrassCat;
             printf("DEBUG Gras-Farbmodus: %s (gelb = laeuft aus, cyan = laeuft ein)\n",
                    dbgGrassCat ? "AN" : "AUS"); }
-          if (ks == XK_l) {   // Fade-Dauer strecken: VM laeuft mit 1-2 FPS, ein
-            // 2s-Fade ist dort zeitlich nicht aufloesbar. Mit 30s loest ein
-            // Screenshot pro Frame den Crossfade fein auf.
-            grassFadeDur = (grassFadeDur < 5.0f) ? 10.0f : ((grassFadeDur < 15.0f) ? 30.0f : 2.0f);
+          if (ks == XK_l) {   // Fade-Dauer strecken/stauchen: VM laeuft mit 1-2 FPS,
+            // ein 2s-Fade ist dort zeitlich nicht aufloesbar. CPU und Shader
+            // nutzen dieselbe Dauer.
+            static const float durs[] = { 2.0f, 1.0f, 10.0f, 30.0f };
+            static int durIdx = 0;
+            durIdx = (durIdx + 1) % (int)(sizeof durs / sizeof durs[0]);
+            grassFadeDur = durs[durIdx];
             printf("DEBUG Fade-Dauer: %.0fs\n", grassFadeDur); }
           if (ks == XK_h) {   // HUD zyklisch: Vollstats -> reduziert -> aus
             hudMode = (hudMode + 2) % 3;
@@ -1078,6 +1081,8 @@ int main(int argc, char **argv) {
 
     // --- Slider-Fade: Maus im Bereich -> einblenden (0.5s); 3s ohne
     //     Bereich -> ausblenden (1.5s). Beim Ziehen bleibt sichtbar.
+//     Mit gedruckter linker Taste (Kamera-Look) werden sie schneller
+//     ausgeblendet (0.5s) — beim Navigieren sind sie im Weg.
     //     (rawDt statt dt: UI-Fade laeuft in Echtzeit, nicht im dt-Clamp)
     {
       float fdt = (float)rawDt;
@@ -1089,14 +1094,18 @@ int main(int argc, char **argv) {
       float ay0 = winH - 100.0f * hsc;
       float ay1 = winH - 26.0f * hsc;
       int inArea = ptrInWin && ptrX >= ax0 && ptrX <= ax1 && ptrY >= ay0 && ay1 >= ptrY;
-      if (sliderDragging || inArea) {
+      // Mit gedruckter linker Taste wird die Kamera bewegt (Look) — dort storen
+      // die Slider nur, also sofort ausblenden. Beim Ziehen EINES SLIDERS bleiben
+      // sie naturlich sichtbar.
+      int navigating = mouseHeld && !sliderDragging;
+      if (!navigating && (sliderDragging || inArea)) {
         if (inArea) lastMouseInAreaT = tNow;
         if (sliderFade < 1.0f) {
           sliderFade += fdt * 2.0f;   // 0.5s zum Einblenden
           if (sliderFade > 1.0f) sliderFade = 1.0f;
         }
-      } else if (tNow - lastMouseInAreaT >= 3.0f) {
-        sliderFade -= fdt * (1.0f / 1.5f);   // 1.5s zum Ausblenden
+      } else if (navigating || tNow - lastMouseInAreaT >= 3.0f) {
+        sliderFade -= fdt * (navigating ? 2.0f : (1.0f / 1.5f));   // Look: 0.5s, sonst 1.5s
         if (sliderFade < 0.0f) sliderFade = 0.0f;
       }
     }
@@ -1383,7 +1392,7 @@ int main(int argc, char **argv) {
              grassFrozen ? " FRZ" : "", grassOnly ? " NUR-GRAS" : "",
              dbgGrassDepth ? " DW+" : " DW-", dbgGrassEdge ? " EDGE+" : " EDGE-");
     if (dbgGrassCat) strncat(hud2, " CAT", sizeof(hud2) - (int)strlen(hud2) - 1);
-    if (grassFadeDur > 2.5f) strncat(hud2, " FADE", sizeof(hud2) - (int)strlen(hud2) - 1);
+    if (grassFadeDur > 2.5f || grassFadeDur < 1.9f) strncat(hud2, " FADE", sizeof(hud2) - (int)strlen(hud2) - 1);
     snprintf(hud3, sizeof hud3, "POS %d %d %d%s%s",
              (int)camPos[0], (int)camPos[1], (int)camPos[2],
              nGrass >= GRASS_CAP ? " CAP" : "", grass_build_busy() ? " BUILD" : "");
