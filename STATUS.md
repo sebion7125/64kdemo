@@ -90,6 +90,30 @@ erst am Finish (Swap-Punkt) setzen (Platzhalter -1.0f).
   (VM-Pixeltest Hin-und-Her, G-Kanal).
 - **Nächster Schritt:** Nutzer-Host-Test (Hin-und-Her-Fahrt) → Sprung weg?
 
+**Freeze-Szenario (Freeze ON → Fahrt → Freeze OFF = POS-Build nach großem
+Kamerahop) separat verifiziert (Runde 6, VM + Unit-Tests):**
+- /tmp/test_freeze_pop.c (exakter Float-Vergleich): **0 Pops** bei 1/7/17/34/57 m
+  Kamerahop — jeder Halm mit Fade≈1 im neuen Buffer hat einen Halm mit Fade≈1
+  an EXAKT derselben Stelle im alten Buffer.
+- /tmp/test_gone.c: **0 Halme verschwinden ohne Fade** — alle 827192 voll
+  sichtbaren alten Halme sind im neuen Buffer wieder da (lebendig oder sterbend).
+- /tmp/test_visjump.c (summierte sichtbare Alpha lod·fade um die Kamera,
+  view-unabhängig): Übergang **wächst sanft über 2s** (+2/+5/+8/+10 % bei 20 m,
+  +3/+11/+18/+21 % bei 42 m) — kein Sprung in einem Frame.
+- VM (Summe-ShaderFade, b-Dump, /tmp/frz2.sh): 100,0 % → Swap → 87,7 % →
+  90,5 % → 91,9 % (sanft). Swap-Log: 959831 Halme, 132639 neu, 77775 sterben.
+- **WICHTIG: G-Kanal-Screenshots sind als Pop-Messung UNBRAUCHBAR.** Der Shader
+  skaliert die Halmgröße mit Kameradistanz (sizeScale = 1+1,8·(1−dens), bis
+  2,8×) — reine Kamerabewegung ändert die bedeckte Pixelmenge um +50 %.
+  Außerdem ist lod NICHT in der Alpha (vFade = f), sondern skaliert nur die
+  HalmHÖHE: ferne Halme sind flache, volle-Alpha-Streifen am Boden.
+- **Offene Frage an Nutzer:** Wo genau ist der Sprung sichtbar (Nahbereich /
+  Gras-Kante in der Ferne / flächig)? Kandidat ist die harte Gras-Kante:
+  Generierung schneidet bei dens<0,09 ab (Build-Radius ~65 m bei MD=80), die
+  Dichte fällt dort auf ~1–3 Halme/Zelle und dann abrupt auf 0. Springt das
+  Build-Zentrum (Freeze-Hop), wandert diese Kante und ein Band neu generierter
+  Halme fadet innerhalb 2 s ein.
+
 ### Issue B: Nach einer Strecke wird kein neues Gras mehr generiert, Halmzahl fällt nur — **FIXED + vom Nutzer bestätigt**
 - **Beobachtung (Nutzer):** nach Zurücklegen einer Strecke ein Modus,
   in dem plötzlich gar kein neues Gras mehr generiert wird und die
