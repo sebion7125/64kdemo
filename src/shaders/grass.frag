@@ -5,6 +5,7 @@ in vec3 vPos;
 in vec3 vCol;
 in float vT;
 in float vFade;   // 0..1 (Fade-in nach Build)
+in float vCat;    // DEBUG: 0 = eingespielt, 1 = neu (<5s), 2 = stirbt
 in float vSide;   // Schritt 2: Breitenposition (-0.5..0.5)
 in vec3 vR;       // Schritt 2: Breitenrichtung
 uniform vec3 uCamPos;
@@ -46,6 +47,18 @@ vec3 skyColor(vec3 rd){
   return col;
 }
 void main(){
+  // DEBUG-ZWEIG: flache Kategorie-Farbe OHNE Lighting/Fog/Tonemapping, damit
+  // eindeutig sichtbar ist, wer gerade ein- bzw. ausgeblendet wird.
+  //   GELB = zum Loeschen markiert (iDeath > 0)
+  //   CYAN = neu generiert, jünger als 5s
+  //   GRUEN = eingespielt
+  // (Nicht Rot/Blau/Gruen: im Nur-Gras-Modus ist der Hintergrund MAGENTA, und
+  //  Rot über Magenta gemischt bleibt Magenta, solange der Fade laeuft — der
+  //  Sterbende waere unsichtbar. Diese drei Farben bleiben auch halbtransparent
+  //  unterscheidbar.) Alpha bleibt der Fade, damit man das Ein-/Ausblenden sieht.
+  if (vCat > 1.5) { O = vec4(1.0, 0.85, 0.05, vFade); return; }
+  if (vCat > 0.5) { O = vec4(0.10, 0.55, 1.0, vFade); return; }
+  O = vec4(0.05, 0.72, 0.10, vFade); return;
   vec3 n = normalize(vNrm);
   // Abgerundete Normale (Schritt 2): ueber die Breite (vSide) kippt die
   // Normale zur Breitenrichtung vR (Halm wie leicht gewoelbtes Band), dazu

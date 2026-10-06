@@ -41,6 +41,12 @@ static int gix0 = 0, giz0 = 0, gnx = 0;
 static float bcx = 0, bcz = 0;
 static int outStepState = 0;   // OUT-Build: naechster Tabellen-Index
 static int hasOldBuild = 0;
+// DEBUG-Zweig: Fade-Dauer (CPU und Shader MUESSEN gleich sein, sonst werden
+// sterbende Halme aus dem Puffer geworfen, waehrend sie noch einblenden).
+// In der VM laeuft die Demo mit 1-2 FPS; ein 2s-Fade ist damit zeitlich nicht
+// aufloesbar. L-Taste streckt auf 10s / 30s, dann loest ein Shot pro Frame
+// den Crossfade fein auf.
+float grassFadeDur = 2.0f;
 // Build-Modi:
 //  0 = POS: Positions-Rebuild (Zell-Kopieren; neue Halme faden ein,
 //           ueberzaehlige - nb gesunken - faden aus)
@@ -85,11 +91,19 @@ static int offX0 = 0, offZ0 = 0;        // Tabellen-Origin des aktuellen Builds
 // Graskante“). 0.09 lag bei 66,7m mit lod=1.00 (voll sichtbar). 0.01 legt sie
 // auf ~75,8m mit lod=0.29 -> Kante liegt im gedaempften Bereich.
 #define GRASS_DENS_CUT 0.01f
-// Build-Radius = Dichte-Cutoff (wo dens auf GRASS_DENS_CUT faellt), NICHT
+// DEBUG-Zweig: Laufzeit-Schalter fuer die Kante (K-Taste). 0 = kein Abschneiden,
+// Feld endet weich bei grassMaxDist.
+static float gDensCut = GRASS_DENS_CUT;
+// Build-Radius = Dichte-Cutoff (wo dens auf gDensCut faellt), NICHT
 // grassMaxDist+20: auBerhalb generiert build_cell keine Halme, der alte
 // +20m-Margin hat nur Build-Zeit gekostet. Cutoff = Loesung von
-// dens(d) = GRASS_DENS_CUT (Bisektion, pro grassMaxDist gecacht).
+// dens(d) = gDensCut (Bisektion, pro grassMaxDist gecacht).
 static float gDCut = 0.0f, gDCutMD = -1.0f;
+void grassSetDensCut(float v){
+  if (v == gDensCut) return;
+  gDensCut = v;
+  gDCutMD = -1.0f;   // Bisektion-Cache entwerten
+}
 static float g_half(void){
   float md = grassMaxDist;
   if (md != gDCutMD) {
@@ -100,7 +114,7 @@ static float g_half(void){
       // Schwelle GRASS_DENS_CUT: Kante, an der die Generierung abschneidet.
       // Muss die SAME Schwelle sein wie der dens-Test im Kopierpfad und im
       // Generierungspfad, sonst entstehen Luecken/harte Kanten (s. oben).
-      if (dens >= GRASS_DENS_CUT) lo = mid; else hi = mid;
+      if (dens >= gDensCut) lo = mid; else hi = mid;
     }
     gDCut = (lo + hi) * 0.5f;
     gDCutMD = md;
@@ -240,7 +254,7 @@ static void build_cell(int ix, int iz){
     float dist = sqrtf(dx * dx + dz * dz);
     float dens = dens_at(dist);
     int nb = 0;
-    if (dens >= GRASS_DENS_CUT) {
+    if (dens >= gDensCut) {
       float nbf = 32.0f * dens * (0.4f + 0.6f * h4) * grassDensityScale;
       if (nbf > 32.0f) nbf = 32.0f;
       nb = (int)nbf;
@@ -255,7 +269,7 @@ static void build_cell(int ix, int iz){
       float death = src[10];
       int copyIt, nowDying;
       if (death > 0.0f) {
-        copyIt = (gWorldTime - death < 2.5f);   // Fade-out noch nicht zu Ende
+        copyIt = (gWorldTime - death < grassFadeDur * 1.25f);   // Fade-out noch nicht zu Ende
         nowDying = 0;                            // Death-Time behalten
       } else if (alive < nb) {
         copyIt = 1; nowDying = 0; alive++;
@@ -303,7 +317,7 @@ static void build_cell(int ix, int iz){
   //   - Pow 1.6: nimmt in der Ferne starker ab (nah bleibt dicht)
   //   - Kein Hard-Cutoff bei 0.05, sondern weicher Abbruch bei 0.01
   float dens = dens_at(dist);
-  if(dens < GRASS_DENS_CUT && !partial) return;   // Teil-Kopie: Zelle ist bestockt
+  if(dens < gDensCut && !partial) return;   // Teil-Kopie: Zelle ist bestockt
   float h = c_terrainH(px, pz);
   if(h < WATER_Y + 0.10f || h > 7.5f) return;  // kein Wasser, keine Gipfel
   if(fabsf(c_terrainH(px + 0.4f, pz) - h) > 0.25f ||
@@ -462,7 +476,7 @@ void grass_build_finish(void){
     if (d[10] == -1.0f) { d[10] = gWorldTime; nDying++; }   // neu sterben: erst ab Swap
   }
   if (nNew > 0 || nDying > 0)
-    printf("Gras-Swap t=%.2f: %d Halme, %d neu, %d sterben (je 2s)\n", gWorldTime, nGrassNew, nNew, nDying);
+    printf("Gras-Swap t=%.2f: %d Halme, %d neu, %d sterben (je %.0fs)\n", gWorldTime, nGrassNew, nNew, nDying, grassFadeDur);
   if (nGrassNew < 1) nGrassNew = 1;   // defensive: kein 0-Byte-Upload
   pthread_mutex_lock(&gMu);
   hasOldBuild = 1;
@@ -516,11 +530,11 @@ void grass_debug_dump(void){
     float death = d[10];
     float fi;
     float age = gWorldTime - d[9];
-    float t = age / 2.0f; if (t < 0) t = 0; if (t > 1) t = 1;
+    float t = age / grassFadeDur; if (t < 0) t = 0; if (t > 1) t = 1;
     fi = t * t * (3.0f - 2.0f * t);
     if (death <= 0.0f) { nAlive++; sumFade += fi; }
     else {
-      float da = (gWorldTime - death) / 2.0f; if (da < 0) da = 0; if (da > 1) da = 1;
+      float da = (gWorldTime - death) / grassFadeDur; if (da < 0) da = 0; if (da > 1) da = 1;
       float fo = 1.0f - (da * da * (3.0f - 2.0f * da));
       sumFade += fi * fo;
       if (gWorldTime - death < 2.0f) nFading++; else nFaded++;

@@ -373,6 +373,11 @@ static int fboW = 0, fboH = 0;
 static int useMSAA = 1;   // 1 = MSAA an (M-Taste zum Umschalten: 4x -> 8x -> off)
 static int msaaSamples = 4;  // 4 oder 8 (M-Taste zyklisch)
 static int grassFrozen = 0;   // 1 = Gras-Rebuild eingefroren (G-Taste): gleiche Halme, egal wo die Kamera hin
+// DEBUG-Zweig-Schalter:
+//   J = Depth-Write im Gras-Pass an/aus (Hypothese: Fehlordnung + Depth-Write
+//       verdeckt Halme, die am Swap schlagartig sichtbar werden)
+//   K = Dichte-Kante an/aus (CUT 0.01 vs. 0 = Feld endet weich bei grassMaxDist)
+static int dbgGrassDepth = 1, dbgGrassEdge = 1;
 static float gCX = 0, gCZ = 0;   // letztes Gras-Build-Zentrum (auch fuer R-Reset)
 static int grassOnly = 0;     // 1 = TEST: nur Gras zeichnen (V-Taste), kein Terrain/Baeume/Blattdach
 static int hudMode = 2;       // H-Taste: 2 = Vollstats (2 Zeilen), 1 = reduziert (1 Zeile), 0 = aus
@@ -838,6 +843,7 @@ int main(int argc, char **argv) {
   GLint locGTime   = p_glGetUniformLocation(progGrass, "uTime");
   GLint locGHeight = p_glGetUniformLocation(progGrass, "uHeightScale");
   GLint locGMaxDist = p_glGetUniformLocation(progGrass, "uMaxDist");
+  GLint locGFade = p_glGetUniformLocation(progGrass, "uFadeDur");
   GLint locCMVP    = p_glGetUniformLocation(progCrown, "uMVP");
   GLint locCCam    = p_glGetUniformLocation(progCrown, "uCamPos");
   GLint locCTgt    = p_glGetUniformLocation(progCrown, "uCamTgt");
@@ -914,6 +920,17 @@ int main(int argc, char **argv) {
             else { useMSAA = 1; msaaSamples = 4; fboW = 0; printf("MSAA: 4x\n"); }
           }
           if (ks == XK_g) { grassFrozen = !grassFrozen; printf("Gras-Rebuild: %s\n", grassFrozen ? "EINGEFROREN (gleiche Halme)" : "aktiv"); }
+          if (ks == XK_j) { dbgGrassDepth = !dbgGrassDepth;
+            printf("DEBUG Depth-Write Gras-Pass: %s\n", dbgGrassDepth ? "AN" : "AUS"); }
+          if (ks == XK_k) { dbgGrassEdge = !dbgGrassEdge;
+            grassSetDensCut(dbgGrassEdge ? 0.01f : 0.0f);
+            printf("DEBUG Dichte-Kante: %s (neuer Build noetig: G aus/ein oder 1m bewegen)\n",
+                   dbgGrassEdge ? "AN (CUT 0.01)" : "AUS (CUT 0)"); }
+          if (ks == XK_l) {   // Fade-Dauer strecken: VM laeuft mit 1-2 FPS, ein
+            // 2s-Fade ist dort zeitlich nicht aufloesbar. Mit 30s loest ein
+            // Screenshot pro Frame den Crossfade fein auf.
+            grassFadeDur = (grassFadeDur < 5.0f) ? 10.0f : ((grassFadeDur < 15.0f) ? 30.0f : 2.0f);
+            printf("DEBUG Fade-Dauer: %.0fs\n", grassFadeDur); }
           if (ks == XK_h) {   // HUD zyklisch: Vollstats -> reduziert -> aus
             hudMode = (hudMode + 2) % 3;
             printf("HUD: %s\n", hudMode == 2 ? "Vollstats (2 Zeilen)" : (hudMode == 1 ? "reduziert (1 Zeile)" : "aus"));
@@ -1188,7 +1205,7 @@ int main(int argc, char **argv) {
           grass_build_request(gCX, gCZ, 1);
           sliderPhase = 1;
           sliderDirty = 0;
-        } else if (sliderPhase == 2 && tNow - sliderPhaseT >= 2.0f) {
+        } else if (sliderPhase == 2 && tNow - sliderPhaseT >= grassFadeDur) {
           // OUT-Fade zu Ende -> IN-Build (neues Gras blendet ein), Zentrum
           //  = aktuelle Kamera.
           gCX = camPos[0]; gCZ = camPos[2];
@@ -1273,10 +1290,17 @@ int main(int argc, char **argv) {
     p_glUniform1f(locGTime, (float)tNow);
     p_glUniform1f(locGHeight, grassHeightScale);
     p_glUniform1f(locGMaxDist, grassMaxDist);
+    p_glUniform1f(locGFade, grassFadeDur);
     // Blending fuer Fade-in (neue Halme transparent beim Einblenden)
     p_glEnable(GL_BLEND);
     p_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     p_glBindVertexArray(vaoGrass);
+    // DEBUG-Zweig: Depth-Write abschaltbar (J). Mit Depth-Write verdeckt ein
+    // naeherer Halm jeden ferneren, der innerhalb des gleichen Chunks spaeter
+    // gezeichnet wird; die Chunk-Reihenfolge ist nur grob sortiert (~50% der
+    // Nachbarpaare innerhalb eines Chunks liegen falsch, bis 24m). Aendert sich
+    // am Swap die Sortierung, werden verdeckte Halme schlagartig sichtbar.
+    p_glDepthMask(dbgGrassDepth ? GL_TRUE : GL_FALSE);
     {
       int chunk = (nGrass + 31) / 32;   // 32 Chunks (der Fade-Crescent liegt
                                          // in den letzten 1-2 Chunks -> genuegend fein)
@@ -1285,6 +1309,7 @@ int main(int argc, char **argv) {
         p_glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 9, c, (GLuint)(off - c));
       }
     }
+    p_glDepthMask(GL_TRUE);
     p_glDisable(GL_BLEND);
 
     // Blattdach-Billboards: Alpha-Test (discard) -> entweder opak oder unsichtbar,
@@ -1344,9 +1369,11 @@ int main(int argc, char **argv) {
              (int)(fpsEMA + 0.5), winW, winH, sc, flyMode ? "FLY" : "ORB",
              useMSAA ? (msaaSamples == 8 ? "8x" : "4x") : "OFF",
              nTrees, nCrownVerts / 6, nGrass);
-    snprintf(hud2, sizeof hud2, "D %.1fx H %.1fx MD %d.%dm%s%s",
+    snprintf(hud2, sizeof hud2, "D %.1fx H %.1fx MD %d.%dm%s%s%s%s",
              grassDensityScale, grassHeightScale, (int)grassMaxDist, (int)(grassMaxDist * 10) % 10,
-             grassFrozen ? " FRZ" : "", grassOnly ? " NUR-GRAS" : "");
+             grassFrozen ? " FRZ" : "", grassOnly ? " NUR-GRAS" : "",
+             dbgGrassDepth ? " DW+" : " DW-", dbgGrassEdge ? " EDGE+" : " EDGE-");
+    if (grassFadeDur > 2.5f) strncat(hud2, " FADE", sizeof(hud2) - (int)strlen(hud2) - 1);
     snprintf(hud3, sizeof hud3, "POS %d %d %d%s%s",
              (int)camPos[0], (int)camPos[1], (int)camPos[2],
              nGrass >= GRASS_CAP ? " CAP" : "", grass_build_busy() ? " BUILD" : "");
