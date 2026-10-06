@@ -49,13 +49,25 @@ void trees_build(float tx, float tz);
 // ================= Gras (instanzierte Halme) =================
 //   grassInst: pos(3) hoehe(1) breite(1) phase(1) schattierung(1) yaw(1) lean(1) birth(1) death(1) b(1) = 12 floats
 //   hoehe/breite = BASIS-Werte; die Distanz-Skalierung passiert im Shader (grass.vert)
-//   birth = Birth-Time (2s Fade-in), death = Death-Time (2s Fade-out, 0 = lebt)
-//   b = b-Index (0..31, CPU-nur: Copy-Loop-Maske, Shader liest ihn nicht)
-#define GRASS_FLOATS 12
+//   grp = Index in die Fade-GRUPPEN-Tabelle (grassGrp). Birth- und Death-Zeit
+//   sind Fakten PRO BUILD, nicht pro Halm (grass_build_finish setzte frueher für
+//   alle Halme eines Builds dieselbe Zeit) -> die zwei Pro-Halm-Floats waren
+//   redundant. Ein Build erzeugt eine Birth-Gruppe; sterbende Halme bekommen
+//   eine Gruppe, die ihre bisherige Birth-Zeit uebernimmt und die Death-Zeit
+//   dieses Builds traegt. Der Halm speichert nur noch den Gruppen-Index.
+//   Folge: 12 -> 10 Floats (auch der fruehere b-Index d[11] entfaellt, die
+//   Zell-Blöcke sind jetzt in stabiler b-Reihenfolge -> Intervall statt Maske).
+#define GRASS_FLOATS 10
+#define GRASS_NGRP   512   // Fade-Gruppen (birth,death) — siehe grass_cpu.c.
+// Messung: bei Fade 1s sind max ~30 Gruppen referenziert, bei L=30s (Debug) ~250.
+// 512 = 4 KB Uniform. MUSS zu NGRP in src/shaders/grass.vert passen!
 #define GRASS_CAP    5000000  // 5M (war 1.5M): Dichte-Slider max 5.6x staubt bei MD=120 am CAP
 
 extern float *grassInst;   // aktuell sichtbar (Zweipuffer, zeigt auf den fertigen Build)
 extern int   nGrass;
+// Fade-Gruppen als flaches vec2-Array [birth0,death0, birth1,death1, ...];
+// death == 0 heisst "lebt". Main-Thread uploadet es pro Frame als uFadeGrp.
+extern float grassGrp[GRASS_NGRP * 2];
 extern float grassDensityScale;   // Dichte-Skala (0.2-8.0, Slider zur Laufzeit)
 extern float grassHeightScale;    // Halmhoehe-Skala (0.3-3.0, Slider zur Laufzeit)
 extern float grassMaxDist;        // max. Gras-Sichtweite (40-120m, Slider)

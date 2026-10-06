@@ -3,14 +3,20 @@ layout(location=0) in vec2 aBase;   // (t hoehe, w breite) Grundhalm
 layout(location=1) in vec3 iPos;    // Halm-Basis (Welt)
 layout(location=2) in vec4 iData;   // hoehe, breite, phase, schattierung
 layout(location=3) in vec2 iData2;  // yaw, lean
-layout(location=4) in float iBirth; // Birth-Time (fuer Fade-in)
-layout(location=5) in float iDeath; // Death-Time (0 = lebt, sonst 2s Fade-out)
+layout(location=4) in float iGrp;   // Fade-Gruppe (Index in uFadeGrp)
 uniform mat4 uMVP;
 uniform vec3 uCamPos;
 uniform float uTime;
 uniform float uHeightScale; // Halmhoehe-Skala (Slider)
 uniform float uMaxDist;     // max. Gras-Sichtweite (Slider)
 uniform float uFadeDur;     // Fade-Dauer (musz gleich grassFadeDur sein, L-Taste)
+// Fade-GRUPPEN: (birth, death) pro Gruppe, death == 0 heisst "lebt". Birth und
+// Death sind Fakten pro Build, nicht pro Halm — der Halm traegt beide Indizes
+// gepackt in EINEM Float: iGrp = birthGrp + deathGrp * NGRP (deathGrp 0 = lebt).
+// Ganzzahlig bis 2*9 Bit, also exakt in einem float darstellbar.
+// Groesse muss GRASS_NGRP (scene.h) entsprechen.
+#define NGRP 512   // MUSS GRASS_NGRP (scene.h) sein
+uniform vec2 uFadeGrp[NGRP];
 out vec3 vNrm;
 out vec3 vPos;
 out vec3 vCol;
@@ -85,21 +91,25 @@ void main(){
   vPos = p;
   vCol = vec3(sh, t, lod);
   vT = t;
-  // Per-Halm-Fade: ein (Birth-Time) und aus (Death-Time), je grassFadeDur
-  // (uFadeDur, Standard 1s), smoothstep.
-  // Vollstendig verblassene Halme cullen (Clip-Ebene x=2, wie der LOD-Cull).
-  float age = uTime - iBirth;
+  // Per-Halm-Fade: ein (Birth-Zeit der Gruppe) und aus (Death-Zeit der Gruppe),
+  // je grassFadeDur (uFadeDur, Standard 1s), smoothstep. Vollstaendig
+  // verblassene Halme cullen (Clip-Ebene x=2, wie der LOD-Cull).
+  int gi = int(iGrp + 0.5);
+  float birth = uFadeGrp[gi % NGRP].x;
+  int di = gi / NGRP;
+  float death = (di > 0) ? uFadeGrp[di].y : 0.0;
+  float age = uTime - birth;
   float f = clamp(age / uFadeDur, 0.0, 1.0);
   f = f * f * (3.0 - 2.0 * f);
-  if (iDeath > 0.0) {
-    float da = clamp((uTime - iDeath) / uFadeDur, 0.0, 1.0);
+  if (death > 0.0) {
+    float da = clamp((uTime - death) / uFadeDur, 0.0, 1.0);
     f *= 1.0 - (da * da * (3.0 - 2.0 * da));
   }
   if (f < 0.004) { gl_Position = vec4(2.0, 0.0, 0.0, 1.0); return; }
   // Kategorie-Codierung (C-Taste): GELB = laeuft aus, CYAN = laeuft ein,
   // 0 = KEIN Override (normale Grasfarbe). Ein Halm ist also nur waehrend des
   // laufenden Fades gefaerbt; ist der Fade durch, ist er normales Gras.
-  vCat = (iDeath > 0.0) ? 2.0 : ((age < uFadeDur) ? 1.0 : 0.0);
+  vCat = (death > 0.0) ? 2.0 : ((age < uFadeDur) ? 1.0 : 0.0);
   vFade = f;
   gl_Position = uMVP * vec4(p, 1.0);
 }

@@ -1,21 +1,20 @@
 # 64kDemo — Status
 
-Stand: 2026-10-06, Runde 8. **Issue A ist NICHT gelöst.** Zwei Fixes (Overlap,
-harte Kante) haben das Symptom nicht beseitigt. Ursache ist eingegrenzt:
-**das Dichteprofil hängt am Build-Zentrum, nicht an der Kamera** — bei 12 m
-Kamerahop ändert 86 % aller Zellen ihre Ziel-Halmzahl, das ganze Feld fadet
-um. Die Buffer-/Fade-Daten sind nachweislich sauber (kein Pop). Verbleibender
-Hauptverdacht: **Zeichenreihenfolge + Depth-Write** (nie abgeschaltet).
-Dazu ist auf Branch `dbg-gras-fade` ein Debug-Werkzeug gebaut (C/J/K/L), mit
-dem der Nutzer das auf dem Host trennen kann. **HOST-TEST ausstehend.**
-**Fade-Dauer Standard jetzt 1 s** (vorher 2 s). Slider-UI blendet bei gehaltener
+Stand: 2026-10-06, Runde 9. **Fade-GRUPPEN + Intervall-Markierung gebaut**
+(Nutzer-Idee): 12 -> 10 Floats/Halm, Puffer −16 %, POS-Build −11 %,
+Fade-Bilanz am Swap exakt 0,00 %, Idempotenz exakt (vorher Restchurn).
+**Issue A (sichtbarer Sprung) ist damit NICHT gelöst** — der Umbau ändert nicht,
+welche Halme existieren. Ursache bleibt eingegrenzt auf Dichte-Umverteilung
+(86 % der Zellen bei 12 m Hop) plus möglicherweise Rasterreihenfolge +
+Depth-Write. **Debug-Build-Host-Test ausstehend.**
+**Fade-Dauer Standard 1 s** (vorher 2 s). Slider-UI blendet bei gehaltener
 Maustaste aus.
 **Issue B FIXED + bestätigt. R-Reset FIXED + vom Nutzer bestätigt.**
 **Issue A Teil 1 (Death-Time a4ddeb9) FIXED + bestätigt.**
 Offen: Issue C (Gras-Inseln, seit Issue-B-Fix nicht mehr gesehen).
-Befund: vorbestehende Hash-Kollision (Zelle 83,9, b=11 vs b=12 → 1 Halm doppelt,
+Befund: vorbestehende Hash-Kollision (Zelle 83,9, b=11 vs b=12 → 2 Halme doppelt,
 im Original schon da, visuell vernachlässigbar).
-Details unten in „ISSUES“ und in „Session Runde 8“.
+Details unten in „ISSUES“, „Session Runde 9“ und „Session Runde 8“.
 
 ## ⚡ SOFORT NÄCHSTER SCHRITT (nächster Chat)
 
@@ -232,6 +231,65 @@ das pro Build klein und laut Nutzer nicht sichtbar; bei langem Freeze bleibt
 ein weicher, aber deutlicher Dichte-Aufbau ueber 2s. Wer das auch noch will:
 Dichte-Profil weltfest machen oder Build-Zentrum nach dem Freeze-AUS
 interpolieren (hoch prioritaer, noch nicht gemacht).
+
+## Session 2026-10-06, Runde 9 (Fade-GRUPPEN + Intervall-Markierung gebaut)
+
+Auf Nutzer-Idee hin umgesetzt: Birth-/Death-Zeit ist ein Fakt **pro Build**, nicht
+pro Halm, und die Halme einer Zelle sind eine ueber Builds stabile Teilmenge.
+Beides war im Code belegbar (`grass_build_finish` setzte fuer ALLE Halme eines
+Builds dieselbe Zeit), also waren die Pro-Halm-Floats redundant.
+
+### Was jetzt anders ist
+| vorher | jetzt |
+|---|---|
+| 12 Floats/Halm (birth, death, b-Index) | **10 Floats/Halm** (nur Gruppen-Indizes) |
+| `copiedMask` (uint32/Zelle) + `popcount` | entfaellt — alles Intervalle |
+| `alive < nb` (Pufferreihenfolge) vs. `nNew` nach b-Index | eine Reihenfolge, Widerspruch weg |
+| Zell-Block unsortiert | kanonisch **[lebend][sterbend]** |
+| Generierung scannt b < nb neu | setzt bei `cellNextB` fort (Intervall) |
+| nb im Kopierpfad am Zellzentrum, in der Generierung am Punkt px,pz | **eine** Formel, immer Zellzentrum |
+| Finish-Vollpass ueber alle Halme | entfaellt (O(Gruppen)) |
+| Death-Time als `-1`-Platzhalter + Swap-Sonderlogik | nicht mehr darstellbar (Gruppe entsteht am Swap) |
+
+Halm speichert beide Indizes gepackt in einem Float: `wert = birthGrp +
+deathGrp * GRASS_NGRP` (2*9 Bit, exakt in einem float). Zellentabelle hat jetzt
+`cellOff`, `cellCnt`, `cellAlive`, `cellNextB`.
+
+### Messergebnisse (alt -> neu)
+- **Build-Zeit 1m-Shift: 157 -> 139 ms (−11 %)**. Initial-Build gleich (939/937 ms).
+- **Puffer: 43,8 -> 36,6 MB (−16 %)**, VBO-Upload pro Build entsprechend.
+- **Fade-Bilanz am Swap: +0,1/+0,4/+1,5 % -> exakt 0,00 %** (Hop 1/4/12 m).
+- **Idempotenz: 10 POS-Builds am selben Zentrum = exakt 0 Aenderung, 0 sterbend**
+  (vorher 12–350 Halme Restchurn). Hin-und-zuruck-Fahrt (60 Builds): 853.522 ->
+  853.600, also auf 0,009 % zurueck beim Ausgangswert (vorher +516 = 0,06 %).
+- **Keine Duplikate**: 2 (die vorbestehende Hash-Kollision), wie vorher.
+- **Kein Pop**: 0 am Swap geborene Halme mit Fade > 0,02.
+- Jede bestockte Zelle hat exakt `alive == nb` (Histogramm 89557/0/0/0/0/0).
+- Halmzahl +0,5 % gegen den alten Code (Zellen fuellen sich jetzt auf exakt nb).
+
+### Zwei Fehler, die ich selbst eingebaut und gemessen habe
+1. **Kombinierte (birth,death)-Gruppe pro Halm** — haette pro (Birth-Gruppe x
+   Build) eine Gruppe gebraucht und waechst kombinatorisch: gemessen 24 neue
+   Gruppen pro Build, bei 30 s Fade ~2400 gleichzeitig live. Die Tabellen-groesse
+   skalierte mit dem Bedarf, nicht mit der Groesse (255/256, dann 511/512).
+   Fix: getrennte Indizes, pro Build genau EINE Death-Gruppe. Jetzt 15 Gruppen
+   bei 1 s Fade, 143/512 bei 30 s.
+2. **Python-Slice hat zu viel ersetzt** (g_half/dens_at/build_begin geloescht).
+   Fing der Build mit `dens_at undeclared`. Aus Backup wiederhergestellt und die
+   Aenderung gezielt mit Edit-Werkzeug gemacht.
+
+### Nicht verwechselt werden mit dem Symptom
+Das Halmwachstum entlang einer Fahrt (853k -> ~1,1M bei cx=90) ist **kein Leck**:
+Rueckfahrt zum Startpunkt liefert den Ausgangswert zurueck, und der alte Code
+zeigt dasselbe (849k -> 996k). Es ist Terrain-Variation entlang der Strecke.
+Der Umbau aendert nichts daran, WELCHE Halme existieren — er macht das System
+kleiner, schneller und robuster. Issue A (sichtbarer Sprung) bleibt offen.
+
+### Testdateien
+/tmp/test_grp.c (Duplikate, Pops, Bilanz, Gruppen), /tmp/test_grplive.c
+(referenzierte Gruppen 1s/30s), /tmp/test_there.c (hin/zurueck), /tmp/timing.c
+(alt vs. neu), /tmp/test_idem.c (Idempotenz), /tmp/oldver/ (alter Code zum
+Vergleich). Alter Stand auch in /tmp/backup_runde9/.
 
 ## Session 2026-10-06, Runde 8 (Issue A: Ursache eingegrenzt, Debug-Werkzeug gebaut)
 

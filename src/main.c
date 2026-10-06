@@ -110,6 +110,7 @@ static void (*p_glBlendFunc)(GLenum sfactor, GLenum dfactor);
 static void (*p_glEnable)(GLenum cap);
 static void (*p_glDisable)(GLenum cap);
 static void (*p_glUniform1f)(GLint location, GLfloat v0);
+static void (*p_glUniform2fv)(GLint location, GLsizei count, const GLfloat *value);
 static void (*p_glUniform2f)(GLint location, GLfloat v0, GLfloat v1);
 static void (*p_glUniform3f)(GLint location, GLfloat v0, GLfloat v1, GLfloat v2);
 static void (*p_glUniform4f)(GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3);
@@ -212,6 +213,7 @@ static void load_libs(void) {
   LOADGL2(glEnable);
   LOADGL2(glDisable);
   LOADGL2(glUniform1f);
+  LOADGL2(glUniform2fv);
   LOADGL2(glUniform2f);
   LOADGL2(glUniform3f);
   LOADGL2(glUniform4f);
@@ -521,9 +523,8 @@ static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: t
   p_glEnableVertexAttribArray(4);
   p_glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, GRASS_FLOATS * 4, (const void *)36);
   p_glVertexAttribDivisor(4, 1);
-  p_glEnableVertexAttribArray(5);
-  p_glVertexAttribPointer(5, 1, GL_FLOAT, GL_FALSE, GRASS_FLOATS * 4, (const void *)40);
-  p_glVertexAttribDivisor(5, 1);
+  // Attribut 5 (death-Time) ist weg: Fade-Zeiten stecken in der Gruppen-
+  // tabelle uFadeGrp, der Halm traegt nur noch den Gruppen-Index (Attribut 4).
 
   // Wireframe: aPos(3)
   p_glGenVertexArrays(1, &vaoWire);
@@ -848,6 +849,7 @@ int main(int argc, char **argv) {
   GLint locGHeight = p_glGetUniformLocation(progGrass, "uHeightScale");
   GLint locGMaxDist = p_glGetUniformLocation(progGrass, "uMaxDist");
   GLint locGFade = p_glGetUniformLocation(progGrass, "uFadeDur");
+  GLint locGrp = p_glGetUniformLocation(progGrass, "uFadeGrp");
   GLint locGCat = p_glGetUniformLocation(progGrass, "uDbgCat");
   GLint locCMVP    = p_glGetUniformLocation(progCrown, "uMVP");
   GLint locCCam    = p_glGetUniformLocation(progCrown, "uCamPos");
@@ -1308,6 +1310,9 @@ int main(int argc, char **argv) {
     p_glUniform1f(locGHeight, grassHeightScale);
     p_glUniform1f(locGMaxDist, grassMaxDist);
     p_glUniform1f(locGFade, grassFadeDur);
+    // Fade-Gruppen (birth,death) — 256*8 Byte, pro Frame. Aendert sich nur am
+    // Swap, aber der Upload ist 2 KB und damit gegen 34 MB Halmpuffer frei.
+    p_glUniform2fv(locGrp, GRASS_NGRP, grassGrp);
     p_glUniform1f(locGCat, dbgGrassCat ? 1.0f : 0.0f);
     // Blending fuer Fade-in (neue Halme transparent beim Einblenden)
     p_glEnable(GL_BLEND);
