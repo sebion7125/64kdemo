@@ -12,7 +12,9 @@ Runde 9: Fade-GRUPPEN + Intervall-Markierung (12 → 10 Floats/Halm, Puffer −1
 POS-Build −11 %, Fade-Bilanz exakt 0,00 %, Idempotenz exakt).
 **Fade-Dauer Standard 1 s.** Slider-UI blendet bei gehaltener Maustaste aus.
 **Issue B FIXED + bestätigt. R-Reset FIXED + vom Nutzer bestätigt.**
-Offen: Issue C (Gras-Inseln, seit Issue-B-Fix nicht mehr gesehen) und Budget.
+Offen: Wahrnehmungsfrage Fade, Aussehen (Dichte/Halmbreite/Farben),
+Baum-Schatten. **Issue C erledigt (99 %, nur 1x gesehen, seit Issue-B-Fix nie
+wieder).** Budget/Kompaktierung laut Nutzer zweitrangig.
 Befund: vorbestehende Hash-Kollision (Zelle 83,9, b=11 vs b=12 → 2 Halme doppelt,
 im Original schon da, visuell vernachlässigbar).
 Nächster Schritt: siehe „⚡ SOFORT NÄCHSTER SCHRITT“ unten.
@@ -28,9 +30,10 @@ bestätigt; Sortierung bringt nichts Sichtbares mehr. Alles Weitere hier:
    A2C-ohne-Blending im Gras-Pass. Die Debug-Schalter C/J/K/L/Y/I, der
    Farbmodus und die Debug-Dumps bleiben draußen. Binary aktuell 76.416 B
    (Debug-Zweig, über Budget) — nach dem Abspecken neu messen.
-2. **Issue C (Gras-Inseln)**: seit Issue-B-Fix nicht mehr vom Nutzer gesehen —
-   erst nachfragen, dann ggf. Halme-Höhen vs. `c_terrainH` an denselben
-   Positionen dumpen und die 0,85-Dämpfung des Raymarcher-SDF prüfen.
+2. **Issue C (Gras-Inseln)**: **erledigt (99 %)** — vom Nutzer nur ein einziges
+   Mal gesehen, seit dem Issue-B-Fix nicht mehr. Ohne Ursache geschlossen;
+   Kandidat (b) (Stale Halme aus Issue-B-Pinning) war vermutlich die Ursache
+   und ist fixed. Testplan bleibt in ISSUES stehen, falls es wieder auftritt.
 3. **Wahrnehmung**: sind 1 s Fade lang genug?
 4. **Dichte, Halmbreite, Farben, Baum-Schatten.**
 5. **Budget zurück unter 64 KB.** Der Gruppen-Umbau ist der Hauptgewinn
@@ -159,9 +162,12 @@ Kamerahop) separat verifiziert (Runde 6, VM + Unit-Tests):**
   ~16k neu. Pop-Unit-Test: 0 Pops. Build-Intervall ohne Regression.
 - **Nutzer-Host-Test: BESTÄTIGT (2026-10-05)** — "B ist behoben".
 
-### Issue C: Inseln, wo das Gras einer „abweichenden Insel“ folgt
-- **Beobachtung (Nutzer):** Inseln, wo die Gras-Geometrie nicht der
-  Landschaft folgt, sondern einer abweichenden Insel.
+### Issue C: Inseln, wo das Gras einer „abweichenden Insel“ folgt — **erledigt (99 %)**
+- **Status 2026-10-06:** Nutzer hat es **ein einziges Mal** gesehen und seit dem
+  Issue-B-Fix nicht mehr. Auf Nutzerentscheidung als erledigt geschlossen,
+  ohne Ursache. Der untenstehende Testplan bleibt stehen, falls es wieder
+  auftritt — Kandidat (b) war mit hoher Wahrscheinlichkeit die Ursache:
+  Stale Halme aus dem Issue-B-Pinning, und das ist fixed.
 - **Ausgeschlossen (geprüft):** CPU/GPU-Terrain-Port ist 1:1 identisch
   (hash12/vnoise/fbm/rfbm/terrainH zeilenweise verglichen, gleiche
   Konstanten/Reihenfolge) → kein Noise-Port-Fehler. c_terrainH ist reine
@@ -257,7 +263,7 @@ Abstufung. Sortierte Zeichenreihenfolge: Effekt 'mild bis unsichtbar'.
 aber separat gegenpruefen (in der VM nicht testbar).
 
 **Offene Punkte (grobe Reihenfolge):**
-- Issue C: Gras-Inseln (seit Issue-B-Fix nicht mehr gesehen — nachfragen, ob erledigt).
+- Issue C: Gras-Inseln — **erledigt (99 %)**, nur 1x gesehen, seit Issue-B-Fix nie wieder.
 - Wahrnehmung: sind 1 s Fade lang genug?
 - Dichte, Halmbreite, Farben, Baum-Schatten.
 - Budget: zurueck unter 64 KB. Der Gruppen-Umbau bringt -16 % Puffer und
