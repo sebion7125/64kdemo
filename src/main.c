@@ -383,6 +383,12 @@ static int dbgGrassDepth = 1, dbgGrassEdge = 1;
 //   C = Kategorie-Farbe als Albedo (nur waehrend ein Fade laeuft), normale
 //       Gras-Grafik bleibt sonst voll erhalten
 static int dbgGrassCat = 0;
+//   Y = Alpha-to-Coverage im Gras-Pass. Alpha wird dann in eine MSAA-Sample-
+//       Maske uebersetzt statt gemischt: ein halbtransparenter Halm schreibt
+//       Tiefe nur noch fuer die Samples, die er abdeckt. Loesst den Reveal-Pop
+//       (sterbender Halm verdeckt einen eingespielten dahinter) und macht die
+//       Rasterung nahezu unabhaengig von der Zeichenreihenfolge.
+static int dbgAlpha2Cov = 1;
 static float gCX = 0, gCZ = 0;   // letztes Gras-Build-Zentrum (auch fuer R-Reset)
 static int grassOnly = 0;     // 1 = TEST: nur Gras zeichnen (V-Taste), kein Terrain/Baeume/Blattdach
 static int hudMode = 2;       // H-Taste: 2 = Vollstats (2 Zeilen), 1 = reduziert (1 Zeile), 0 = aus
@@ -933,6 +939,9 @@ int main(int argc, char **argv) {
             grassSetDensCut(dbgGrassEdge ? 0.01f : 0.0f);
             printf("DEBUG Dichte-Kante: %s (neuer Build noetig: G aus/ein oder 1m bewegen)\n",
                    dbgGrassEdge ? "AN (CUT 0.01)" : "AUS (CUT 0)"); }
+          if (ks == XK_y) { dbgAlpha2Cov = !dbgAlpha2Cov;
+            printf("DEBUG Alpha-to-Coverage: %s (wirkt nur mit MSAA an)\n",
+                   dbgAlpha2Cov ? "AN" : "AUS"); }
           if (ks == XK_c) { dbgGrassCat = !dbgGrassCat;
             printf("DEBUG Gras-Farbmodus: %s (gelb = laeuft aus, cyan = laeuft ein)\n",
                    dbgGrassCat ? "AN" : "AUS"); }
@@ -1310,13 +1319,17 @@ int main(int argc, char **argv) {
     p_glUniform1f(locGHeight, grassHeightScale);
     p_glUniform1f(locGMaxDist, grassMaxDist);
     p_glUniform1f(locGFade, grassFadeDur);
-    // Fade-Gruppen (birth,death) — 256*8 Byte, pro Frame. Aendert sich nur am
-    // Swap, aber der Upload ist 2 KB und damit gegen 34 MB Halmpuffer frei.
+    // Fade-Gruppen (birth,death) — GRASS_NGRP*8 Byte, pro Frame. Aendert sich
+    // nur am Swap, der Upload ist 4 KB und damit gegen 37 MB Halmpuffer frei.
     p_glUniform2fv(locGrp, GRASS_NGRP, grassGrp);
     p_glUniform1f(locGCat, dbgGrassCat ? 1.0f : 0.0f);
-    // Blending fuer Fade-in (neue Halme transparent beim Einblenden)
+    // Blending fuer Fade-in (neue Halme transparent beim Einblenden).
+    // Mit Alpha-to-Coverage wird der Alpha zusaetzlich in eine Sample-Maske
+    // uebersetzt; beides zusammen ist okay (bei Alpha 1 bleibt volle Abdeckung).
     p_glEnable(GL_BLEND);
     p_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    if (dbgAlpha2Cov) p_glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+    else p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
     p_glBindVertexArray(vaoGrass);
     // DEBUG-Zweig: Depth-Write abschaltbar (J). Mit Depth-Write verdeckt ein
     // naeherer Halm jeden ferneren, der innerhalb des gleichen Chunks spaeter
@@ -1334,6 +1347,7 @@ int main(int argc, char **argv) {
     }
     p_glDepthMask(GL_TRUE);
     p_glDisable(GL_BLEND);
+    p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);   // nicht auf spaetere Passe durchschlagen
 
     // Blattdach-Billboards: Alpha-Test (discard) -> entweder opak oder unsichtbar,
     // deshalb Depth SCHREIBEN (damit naechste Mesh-Objekte dagegen testen koennen)
@@ -1397,6 +1411,7 @@ int main(int argc, char **argv) {
              grassFrozen ? " FRZ" : "", grassOnly ? " NUR-GRAS" : "",
              dbgGrassDepth ? " DW+" : " DW-", dbgGrassEdge ? " EDGE+" : " EDGE-");
     if (dbgGrassCat) strncat(hud2, " CAT", sizeof(hud2) - (int)strlen(hud2) - 1);
+    if (dbgAlpha2Cov) strncat(hud2, " A2C", sizeof(hud2) - (int)strlen(hud2) - 1);
     if (grassFadeDur != 1.0f) strncat(hud2, " FADE", sizeof(hud2) - (int)strlen(hud2) - 1);
     snprintf(hud3, sizeof hud3, "POS %d %d %d%s%s",
              (int)camPos[0], (int)camPos[1], (int)camPos[2],
