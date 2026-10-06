@@ -1323,14 +1323,23 @@ int main(int argc, char **argv) {
     // nur am Swap, der Upload ist 4 KB und damit gegen 37 MB Halmpuffer frei.
     p_glUniform2fv(locGrp, GRASS_NGRP, grassGrp);
     p_glUniform1f(locGCat, dbgGrassCat ? 1.0f : 0.0f);
-    // Blending fuer Fade-in (neue Halme transparent beim Einblenden).
-    // Mit Alpha-to-Coverage wird der Alpha zusaetzlich in eine Sample-Maske
-    // uebersetzt; beides zusammen ist okay (bei Alpha 1 bleibt volle Abdeckung).
-    p_glEnable(GL_BLEND);
-    p_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    if (dbgAlpha2Cov) p_glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
-    else p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+    // Transparenz des Grases: ZWEI sich ausschliessende Wege.
+    //  A) Alpha-to-Coverage: Alpha wird in eine MSAA-Sample-Maske uebersetzt.
+    //     Die Abdeckung stellt die Transparenz her -> KEIN Blending, sonst
+    //     wird doppelt gedmpft (Alpha 0,5 bei 4x = 2 abgedeckte Samples, und
+    //     auf denen wird nochmal mit 0,5 gemischt -> 0,25 statt 0,5).
+    //  B) Alpha-Blending (SRC_ALPHA): der alte Weg. Reihenfolge-abhangig, und
+    //     halbtransparente Halme schreiben Tiefe fuer ALLE Samples -> sie
+    //     verdecken eingespielte Halme dahinter (Reveal-Pop beim Cull).
     p_glBindVertexArray(vaoGrass);
+    if (dbgAlpha2Cov) {
+      p_glDisable(GL_BLEND);
+      p_glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+    } else {
+      p_glEnable(GL_BLEND);
+      p_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+      p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+    }
     // DEBUG-Zweig: Depth-Write abschaltbar (J). Mit Depth-Write verdeckt ein
     // naeherer Halm jeden ferneren, der innerhalb des gleichen Chunks spaeter
     // gezeichnet wird; die Chunk-Reihenfolge ist nur grob sortiert (~50% der
