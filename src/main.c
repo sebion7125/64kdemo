@@ -378,6 +378,9 @@ static int grassFrozen = 0;   // 1 = Gras-Rebuild eingefroren (G-Taste): gleiche
 //       verdeckt Halme, die am Swap schlagartig sichtbar werden)
 //   K = Dichte-Kante an/aus (CUT 0.01 vs. 0 = Feld endet weich bei grassMaxDist)
 static int dbgGrassDepth = 1, dbgGrassEdge = 1;
+//   C = Kategorie-Farbe als Albedo (nur waehrend ein Fade laeuft), normale
+//       Gras-Grafik bleibt sonst voll erhalten
+static int dbgGrassCat = 0;
 static float gCX = 0, gCZ = 0;   // letztes Gras-Build-Zentrum (auch fuer R-Reset)
 static int grassOnly = 0;     // 1 = TEST: nur Gras zeichnen (V-Taste), kein Terrain/Baeume/Blattdach
 static int hudMode = 2;       // H-Taste: 2 = Vollstats (2 Zeilen), 1 = reduziert (1 Zeile), 0 = aus
@@ -815,6 +818,7 @@ int main(int argc, char **argv) {
     if (p_XWarpPointer) p_XWarpPointer(disp, None, win, 0, 0, 0, 0, winW / 2, winH / 2);
   }
   printf("FLY: Maus=Schauen WASD=Fliegen Space/X=Hoch/Runter Shift=Turbo O=Orbit R=Reset 1/2/3=Skala T=Wire P=Shot G=GrasFrost V=NurGras M=MSAA H=HUD Q/Esc=Ende\n");
+  printf("DEBUG: C=Farbcodierung(gelb aus/cyan ein) J=DepthWrite K=DichteKante L=Fade-Dauer strecken\n");
 
   // ---------- GL-Setup ----------
   GLuint progScene = make_program(VS_SRC, FS_SRC, "scene");
@@ -844,6 +848,7 @@ int main(int argc, char **argv) {
   GLint locGHeight = p_glGetUniformLocation(progGrass, "uHeightScale");
   GLint locGMaxDist = p_glGetUniformLocation(progGrass, "uMaxDist");
   GLint locGFade = p_glGetUniformLocation(progGrass, "uFadeDur");
+  GLint locGCat = p_glGetUniformLocation(progGrass, "uDbgCat");
   GLint locCMVP    = p_glGetUniformLocation(progCrown, "uMVP");
   GLint locCCam    = p_glGetUniformLocation(progCrown, "uCamPos");
   GLint locCTgt    = p_glGetUniformLocation(progCrown, "uCamTgt");
@@ -926,6 +931,9 @@ int main(int argc, char **argv) {
             grassSetDensCut(dbgGrassEdge ? 0.01f : 0.0f);
             printf("DEBUG Dichte-Kante: %s (neuer Build noetig: G aus/ein oder 1m bewegen)\n",
                    dbgGrassEdge ? "AN (CUT 0.01)" : "AUS (CUT 0)"); }
+          if (ks == XK_c) { dbgGrassCat = !dbgGrassCat;
+            printf("DEBUG Gras-Farbmodus: %s (gelb = laeuft aus, cyan = laeuft ein)\n",
+                   dbgGrassCat ? "AN" : "AUS"); }
           if (ks == XK_l) {   // Fade-Dauer strecken: VM laeuft mit 1-2 FPS, ein
             // 2s-Fade ist dort zeitlich nicht aufloesbar. Mit 30s loest ein
             // Screenshot pro Frame den Crossfade fein auf.
@@ -1291,6 +1299,7 @@ int main(int argc, char **argv) {
     p_glUniform1f(locGHeight, grassHeightScale);
     p_glUniform1f(locGMaxDist, grassMaxDist);
     p_glUniform1f(locGFade, grassFadeDur);
+    p_glUniform1f(locGCat, dbgGrassCat ? 1.0f : 0.0f);
     // Blending fuer Fade-in (neue Halme transparent beim Einblenden)
     p_glEnable(GL_BLEND);
     p_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -1373,6 +1382,7 @@ int main(int argc, char **argv) {
              grassDensityScale, grassHeightScale, (int)grassMaxDist, (int)(grassMaxDist * 10) % 10,
              grassFrozen ? " FRZ" : "", grassOnly ? " NUR-GRAS" : "",
              dbgGrassDepth ? " DW+" : " DW-", dbgGrassEdge ? " EDGE+" : " EDGE-");
+    if (dbgGrassCat) strncat(hud2, " CAT", sizeof(hud2) - (int)strlen(hud2) - 1);
     if (grassFadeDur > 2.5f) strncat(hud2, " FADE", sizeof(hud2) - (int)strlen(hud2) - 1);
     snprintf(hud3, sizeof hud3, "POS %d %d %d%s%s",
              (int)camPos[0], (int)camPos[1], (int)camPos[2],

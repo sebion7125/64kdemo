@@ -10,13 +10,13 @@ uniform vec3 uCamPos;
 uniform float uTime;
 uniform float uHeightScale; // Halmhoehe-Skala (Slider)
 uniform float uMaxDist;     // max. Gras-Sichtweite (Slider)
-uniform float uFadeDur;     // DEBUG: Fade-Dauer (musz gleich grassFadeDur sein)
+uniform float uFadeDur;     // Fade-Dauer (musz gleich grassFadeDur sein, L-Taste)
 out vec3 vNrm;
 out vec3 vPos;
 out vec3 vCol;
 out float vT;
 out float vFade;
-out float vCat;  // DEBUG: 0 = eingespielt, 1 = neu (<5s), 2 = stirbt
+out float vCat;  // 0 = kein Override, 1 = Fade-in laeuft, 2 = Fade-out laeuft
 out float vSide;   // Schritt 2: Breitenposition (ww: -0.5..0.5)
 out vec3 vR;       // Schritt 2: Breitenrichtung (Halm-"rechts")
 // hash12/vnoise: identisch zu fragment.glsl (Consistency-Regel)
@@ -40,13 +40,13 @@ void main(){
   // gleiche Formel wie der Dichte-Falloff (grass_cpu.c): groesser in der
   // Ferne, damit die Halme die Flaechen abdecken. Jetzt kontinuierlich zur
   // aktuellen Kameradistanz (aendert sich sanft beim Bewegen).
-  // DEBUG-ZWEIG: Distanz-Groessenskalierung (sizeScale) und LOD-Höhendämpfung
-  // sind AUS, und es gibt keinen LOD-Cull. Damit ist jeder Halm im Puffer auch
-  // sichtbar, und kein Verschwinden/Erscheinen kann durch Kameradistanz oder
-  // einen Schwellwert vorgetäuscht werden.
-  float sizeScale = 1.0;
+  float dens = pow(1.0 - smoothstep(8.0, uMaxDist, d), 1.6);
+  float sizeScale = 1.0 + 1.8 * (1.0 - dens);
   float h = iData.x * uHeightScale * sizeScale, w = iData.y * sizeScale;
-  float lod = 1.0;
+  // LOD: Halme wachsen in der Distanz zurueck (Terrain-Grasfarbe uebernimmt).
+  // Dynamisch: Fade-out in den letzten 12m vor uMaxDist (Slider).
+  float lod = 1.0 - smoothstep(uMaxDist - 12.0, uMaxDist, d);
+  if(lod < 0.004){ gl_Position = vec4(2.0, 0.0, 0.0, 1.0); return; }
   float cy = cos(yaw), sy = sin(yaw);
   vec3 p = iPos;
   // Neigung: Spitze weicht in yaw-Richtung ab (t^2 = gekruemmter Halm).
@@ -94,12 +94,11 @@ void main(){
     float da = clamp((uTime - iDeath) / uFadeDur, 0.0, 1.0);
     f *= 1.0 - (da * da * (3.0 - 2.0 * da));
   }
-  // DEBUG-ZWEIG: auch das harte Cull bei f<0.004 ist raus. Voll ausgeblendete
-  // Halme werden mit Alpha 0 gezeichnet (unsichtbar), aber die Geometrie laeuft
-  // durch -> kein Schwellwert kann ein ploetzliches Erscheinen/Verschwinden
-  // erzeugen (weder geometrisch noch ueber den Depth-Write).
-  // Kategorie fuer die Farbcodierung (GELB = stirbt, CYAN = neu, GRUEN = eingespielt)
-  vCat = (iDeath > 0.0) ? 2.0 : ((age < uFadeDur * 2.5) ? 1.0 : 0.0);
+  if (f < 0.004) { gl_Position = vec4(2.0, 0.0, 0.0, 1.0); return; }
+  // Kategorie-Codierung (C-Taste): GELB = laeuft aus, CYAN = laeuft ein,
+  // 0 = KEIN Override (normale Grasfarbe). Ein Halm ist also nur waehrend des
+  // laufenden Fades gefaerbt; ist der Fade durch, ist er normales Gras.
+  vCat = (iDeath > 0.0) ? 2.0 : ((age < uFadeDur) ? 1.0 : 0.0);
   vFade = f;
   gl_Position = uMVP * vec4(p, 1.0);
 }
