@@ -91,6 +91,13 @@ void grass_build_finished_snapshot(float **buf, int *n);
 int  grass_build_busy(void);   // 1 = Request wartet oder Worker generiert
 void grass_debug_dump(void);   // DEBUG F12: Buffer-Zustand + erwartete Shader-Fade
 void grassSetDensCut(float v); // DEBUG-Zweig: Dichte-Abschnitt (0 = keine Kante)
+// Sortierte Zeichenreihenfolge (DEBUG-Vergleich, I-Taste): Zellen beim Build
+// fern->nah entlang der Blickrichtung ablaufen lassen, Puffer ist dann global
+// hinten->vorn sortiert. grassSortedOrderActive() sagt dem Render-Pass, dass er
+// von Index 0 aufwaerts zeichnen muss.
+void grassSetViewDir(float x, float z);
+void grassSetSortOrder(int on);
+int  grassSortedOrderActive(void);
 extern float grassFadeDur;     // DEBUG-Zweig: Fade-Dauer CPU+Shader (L-Taste)
 void grass_debug_set_point(float x, float z);   // DEBUG n: Region-Dump-Punkt
 void grass_debug_region_dump(int compare, int slot);   // DEBUG n/m: Halme um den Punkt

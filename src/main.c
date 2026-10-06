@@ -389,6 +389,10 @@ static int dbgGrassCat = 0;
 //       (sterbender Halm verdeckt einen eingespielten dahinter) und macht die
 //       Rasterung nahezu unabhaengig von der Zeichenreihenfolge.
 static int dbgAlpha2Cov = 1;
+//   I = Zellen beim Build fern->nah entlang der Blickrichtung anordnen, also
+//       echte Hinten-nach-Vorn-Zeichenreihenfolge (statt Diamond-Order um das
+//       Build-Zentrum). Zum Vergleich, ob sich Sortieren aufs AA-Rauschen lohnt.
+static int dbgSortOrder = 0;
 static float gCX = 0, gCZ = 0;   // letztes Gras-Build-Zentrum (auch fuer R-Reset)
 static int grassOnly = 0;     // 1 = TEST: nur Gras zeichnen (V-Taste), kein Terrain/Baeume/Blattdach
 static int hudMode = 2;       // H-Taste: 2 = Vollstats (2 Zeilen), 1 = reduziert (1 Zeile), 0 = aus
@@ -939,6 +943,10 @@ int main(int argc, char **argv) {
             grassSetDensCut(dbgGrassEdge ? 0.01f : 0.0f);
             printf("DEBUG Dichte-Kante: %s (neuer Build noetig: G aus/ein oder 1m bewegen)\n",
                    dbgGrassEdge ? "AN (CUT 0.01)" : "AUS (CUT 0)"); }
+          if (ks == XK_i) { dbgSortOrder = !dbgSortOrder;
+            grassSetSortOrder(dbgSortOrder);
+            printf("DEBUG Zeichenreihenfolge: %s (neuer Build noetig: G aus/ein oder 1m bewegen)\n",
+                   dbgSortOrder ? "hinten->vorn sortiert" : "Diamond-Order"); }
           if (ks == XK_y) { dbgAlpha2Cov = !dbgAlpha2Cov;
             printf("DEBUG Alpha-to-Coverage: %s (wirkt nur mit MSAA an)\n",
                    dbgAlpha2Cov ? "AN" : "AUS"); }
@@ -1198,6 +1206,12 @@ int main(int argc, char **argv) {
         builtT = 1;
         printf("Baeume um (%.0f,%.0f): %d Baeume, %d Vertices, %d Canopy-Quads\n", tCX, tCZ, nTrees, nTreeVerts, nCrownVerts / 6);
       }
+      // Blickrichtung (XZ-projiziert) fuer die sortierte Walk-Ordnung setzen —
+      // vor jedem Build, damit der Build die aktuelle Richtung benutzt.
+      { float vx = camTgt[0] - camPos[0], vz = camTgt[2] - camPos[2];
+        float vl = sqrtf(vx * vx + vz * vz);
+        if (vl < 1e-3f) { vx = 1.0f; vz = 0.0f; } else { vx /= vl; vz /= vl; }
+        grassSetViewDir(vx, vz); }
       if(!builtG){
         // Erster Build: synchron (Gras ab dem ersten Frame sichtbar).
         // Danach laeuft der Generator im eigenen Thread (grass_build_request).
@@ -1349,9 +1363,17 @@ int main(int argc, char **argv) {
     {
       int chunk = (nGrass + 31) / 32;   // 32 Chunks (der Fade-Crescent liegt
                                          // in den letzten 1-2 Chunks -> genuegend fein)
+      if (grassSortedOrderActive()) {
+        // Puffer ist fern->nah sortiert (Index 0 = fernste Zelle) -> von 0 aufwaerts
+        for (int off = 0; off < nGrass; off += chunk) {
+          int c = (nGrass - off) > chunk ? chunk : (nGrass - off);
+          p_glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 9, c, (GLuint)off);
+        }
+      } else {
       for (int off = nGrass; off > 0; off -= chunk) {
         int c = off > chunk ? chunk : off;
         p_glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 9, c, (GLuint)(off - c));
+      }
       }
     }
     p_glDepthMask(GL_TRUE);
@@ -1421,6 +1443,7 @@ int main(int argc, char **argv) {
              dbgGrassDepth ? " DW+" : " DW-", dbgGrassEdge ? " EDGE+" : " EDGE-");
     if (dbgGrassCat) strncat(hud2, " CAT", sizeof(hud2) - (int)strlen(hud2) - 1);
     if (dbgAlpha2Cov) strncat(hud2, " A2C", sizeof(hud2) - (int)strlen(hud2) - 1);
+    if (dbgSortOrder) strncat(hud2, " SORT", sizeof(hud2) - (int)strlen(hud2) - 1);
     if (grassFadeDur != 1.0f) strncat(hud2, " FADE", sizeof(hud2) - (int)strlen(hud2) - 1);
     snprintf(hud3, sizeof hud3, "POS %d %d %d%s%s",
              (int)camPos[0], (int)camPos[1], (int)camPos[2],

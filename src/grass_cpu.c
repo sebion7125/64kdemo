@@ -44,6 +44,7 @@ static float *buildBuf = gB;
 static int nGrassNew = 0;
 static int gnz = 0;
 static int dr = 0, drp = 0, dcx0 = 0, dcz0 = 0, dmaxR = 0;   // Diamond-Order-State
+
 static int gix0 = 0, giz0 = 0, gnx = 0;
 static float bcx = 0, bcz = 0;
 static int outStepState = 0;   // OUT-Build: naechster Tabellen-Index
@@ -193,6 +194,53 @@ static float dens_at(float dist){
   return densLut[i];
 }
 
+// Sortierte Walk-Ordnung (DEBUG-Vergleich, I-Taste): Zellen von FERN nach NAH
+// entlang der Blickrichtung. Der Puffer ist dann global hinten->vorn sortiert,
+// die Zell-Bloeecke bleiben aber zusammenhaengend (cellOff/cellCnt bleiben gueltig).
+// Kernaendpunkt: Sortieren nach Projektion auf eine FESTE Achse ist
+// translationsinvariant — eine Kameraverschiebung aendert den Schluessel aller
+// Zellen um dieselbe Konstante, die Reihenfolge bleibt also korrekt. Nur eine
+// Drehung zwischen zwei Builds (0,3..1s) verschlechtert sie leicht.
+static float gViewX = 1.0f, gViewZ = 0.0f;
+static int gSortedOrder = 0;
+#define NSLAB 512
+static int walkList[CT * CT], walkN = 0, walkPos = 0;
+static int slabCnt[NSLAB], slabStart[NSLAB + 1];
+void grassSetViewDir(float x, float z){ gViewX = x; gViewZ = z; }
+void grassSetSortOrder(int on){ gSortedOrder = on; }
+int  grassSortedOrderActive(void){ return gSortedOrder; }
+static float slabKey(int ix, int iz){
+  return ((float)ix - bcx / GSTEP) * gViewX * GSTEP + ((float)iz - bcz / GSTEP) * gViewZ * GSTEP;
+}
+static void build_walk_sorted(void){
+  float kmin = 1e30f, kmax = -1e30f;
+  for (int y = 0; y < gnz; y++)
+    for (int x = 0; x < gnx; x++){
+      float k = slabKey(gix0 + x, giz0 + y);
+      if (k < kmin) kmin = k;
+      if (k > kmax) kmax = k;
+    }
+  float span = kmax - kmin; if (span < 1e-3f) span = 1e-3f;
+  float inv = (float)(NSLAB - 1) / span;
+  for (int s = 0; s < NSLAB; s++) slabCnt[s] = 0;
+  for (int y = 0; y < gnz; y++)
+    for (int x = 0; x < gnx; x++)
+      slabCnt[(int)((slabKey(gix0 + x, giz0 + y) - kmin) * inv)]++;
+  // Rang 0 = fernstes Slab (grosses k), Rang NSLAB-1 = naechstes
+  slabStart[0] = 0;
+  for (int r = 0; r < NSLAB; r++) slabStart[r + 1] = slabStart[r] + slabCnt[NSLAB - 1 - r];
+  int cur[NSLAB];
+  for (int r = 0; r < NSLAB; r++) cur[r] = slabStart[r];
+  for (int y = 0; y < gnz; y++)
+    for (int x = 0; x < gnx; x++){
+      int s = (int)((slabKey(gix0 + x, giz0 + y) - kmin) * inv);
+      int r = NSLAB - 1 - s;
+      walkList[cur[r]++] = y * gnx + x;      // lokaler Index ins Walk-Quadrat
+    }
+  walkN = gnx * gnz;
+  walkPos = 0;
+}
+
 void grass_build_begin(float cx, float cz, int mode){
   // hasOldBuild wird erst in grass_build_finish gesetzt (erster Build =
   // alle Halme sofort sichtbar, kein Vergleich gegen das (0,0)-Zentrum).
@@ -276,7 +324,9 @@ void grass_build_begin(float cx, float cz, int mode){
   dmaxR = (dcx0 > gnx - 1 - dcx0 ? dcx0 : gnx - 1 - dcx0)
         + (dcz0 > gnz - 1 - dcz0 ? dcz0 : gnz - 1 - dcz0);
   dr = 0; drp = 0;
+  if (gSortedOrder) build_walk_sorted();
 }
+
 
 // Halm-Anzahl einer Zelle — EINE Formel, immer am ZELLZENTRUM.
 // Frueher rechnete der Kopierpfad am Zellzentrum, die Generierung am gestreuten
@@ -464,6 +514,18 @@ static int out_build_step(int maxCells);   // OUT-Build (Modus 1), s. unten
 int grass_build_step(int maxCells){
   // OUT-Build (Modus 1): alte Zell-Tabelle direkt durchgehen
   if (gBuildMode == 1) return out_build_step(maxCells);
+  // Sortierte Ordnung: Zellen fern->nah entlang der Blickrichtung. Der Puffer
+  // ist dann von vorn nach hinten sortiert, gezeichnet werden muss von Index 0
+  // aufwaerts (grassSortedOrderActive sagt main.c Bescheid).
+  if (gSortedOrder) {
+    for (int i = 0; i < maxCells; i++){
+      if (walkPos >= walkN) return 1;
+      int c = walkList[walkPos++];
+      build_cell(gix0 + (c % gnx), giz0 + (c / gnx));
+      if (nGrassNew >= GRASS_CAP) return 1;
+    }
+    return 0;
+  }
   // Diamond-Order (L1-Distanz): Ring dr um das Zentrum, 4*dr Zellen pro Ring
   // (4 Kanten zu je dr Schritten, im Uhrzeigersinn vom oberen Punkt).
   // Bei GRASS_CAP-Ueberlauf fehlen die weitesten Zellen.

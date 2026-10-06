@@ -1,20 +1,20 @@
 # 64kDemo — Status
 
-Stand: 2026-10-06, Runde 9. **Fade-GRUPPEN + Intervall-Markierung gebaut**
-(Nutzer-Idee): 12 -> 10 Floats/Halm, Puffer −16 %, POS-Build −11 %,
-Fade-Bilanz am Swap exakt 0,00 %, Idempotenz exakt (vorher Restchurn).
-**Issue A (sichtbarer Sprung) ist damit NICHT gelöst** — der Umbau ändert nicht,
-welche Halme existieren. Ursache bleibt eingegrenzt auf Dichte-Umverteilung
-(86 % der Zellen bei 12 m Hop) plus möglicherweise Rasterreihenfolge +
-Depth-Write. **Debug-Build-Host-Test ausstehend.**
-**Fade-Dauer Standard 1 s** (vorher 2 s). Slider-UI blendet bei gehaltener
-Maustaste aus.
+Stand: 2026-10-06, Runde 10. **Issue A: URSACHE GEFUNDEN und behoben** —
+halbtransparente, sterbende Halme schreiben Tiefe und verdecken eingespielte
+Halme dahinter; beim harten Cull werden die schlagartig sichtbar (gemessen:
+55,8 % der eingespielten Halme im Bild betreffen das). Fix: **Alpha-to-Coverage**
+(Y, standardmaessig AN, wirkt mit MSAA). Nutzer-Host-Test mit J hat das
+eindeutig gezeigt. **Sortierte Zeichenreihenfolge (I) ist gebaut und gemessen
+(Abweichung von ideal 31,77 m -> 0,12 m), viseller Nutzen noch offen.**
+Runde 9: Fade-GRUPPEN + Intervall-Markierung (12 -> 10 Floats/Halm, Puffer −16 %,
+POS-Build −11 %, Fade-Bilanz exakt 0,00 %, Idempotenz exakt).
+**Fade-Dauer Standard 1 s.** Slider-UI blendet bei gehaltener Maustaste aus.
 **Issue B FIXED + bestätigt. R-Reset FIXED + vom Nutzer bestätigt.**
-**Issue A Teil 1 (Death-Time a4ddeb9) FIXED + bestätigt.**
 Offen: Issue C (Gras-Inseln, seit Issue-B-Fix nicht mehr gesehen).
 Befund: vorbestehende Hash-Kollision (Zelle 83,9, b=11 vs b=12 → 2 Halme doppelt,
 im Original schon da, visuell vernachlässigbar).
-Details unten in „ISSUES“, „Session Runde 9“ und „Session Runde 8“.
+Details unten in „ISSUES“ und in „Session Runde 10/9/8“.
 
 ## ⚡ SOFORT NÄCHSTER SCHRITT (nächster Chat)
 
@@ -231,6 +231,62 @@ das pro Build klein und laut Nutzer nicht sichtbar; bei langem Freeze bleibt
 ein weicher, aber deutlicher Dichte-Aufbau ueber 2s. Wer das auch noch will:
 Dichte-Profil weltfest machen oder Build-Zentrum nach dem Freeze-AUS
 interpolieren (hoch prioritaer, noch nicht gemacht).
+
+## Session 2026-10-06, Runde 10 (URSACHE GEFUNDEN: Depth-Write halbtransparenter Halme)
+
+**Nutzer-Host-Test mit J (Depth-Write) hat die Ursache geklaert.** Mit `DW-`
+ist der Sprung weg, mit Depth-Write sichtbar. Mechanismus: ein sterbender Halm
+ist halbtransparent, **schreibt aber Tiefe fuer alle Samples** und verdeckt damit
+eingespielte Halme dahinter. Faellt er beim harten Cull (`f < 0.004`) weg, wird
+der verdeckte Halm **schlagartig** sichtbar — genau das beobachtete
+"ploppt als gruen instant auf".
+
+Gemessen (/tmp/test_zhide.c, 4-m-Rueckwaertshop, t = Swap + 0,95*Fade):
+```
+im Bild: 24214 sterbende, 176066 eingespielte Halme
+eingespielte Halme hinter einem naeheren sterbenden: 98278 = 55,8 %
+```
+Das erklaert alle frueheren Befunde: Buffer-Daten waren sauber (sie sind es),
+der Effekt ist an der Graskante am staerksten (dort sitzen die sterbenden),
+er kommt erst NACH dem Ausblenden (der Cull ist der Ausloeser), und der
+Dichte-Slider ist sauber (dort sterben alle gleichzeitig, dahinter liegt nichts
+Eingespieltes).
+
+**Fix: Alpha-to-Coverage (Y, standardmaessig AN).** Alpha wird in eine
+MSAA-Sample-Maske uebersetzt; ein Halm schreibt Tiefe nur noch fuer abgedeckte
+Samples. Bei Alpha ~0,05 deckt er bei 8x kein Sample ab -> verdeckt nichts.
+Wirkt nur mit MSAA (Standard 4x, M-Taste 4x/8x/aus).
+
+Wichtige Details, beide vom Nutzer korrigiert:
+- A2C **plus** SRC_ALPHA-Blending daempft doppelt (Alpha 0,5 bei 4x -> 0,25).
+  Deshalb: A2C an -> Blending aus, A2C aus -> Blending an.
+- Die "5 Alpha-Stufen bei 4x" sind pro Sample gemeint und **nicht sichtbar**:
+  die Sample-Auswahl ist gedithert und variiert mit der Fensterposition, nach
+  dem MSAA-Resolve ergibt das eine kontinuierliche Dichte. Der sqrt(alpha)-
+  Trick zur Linearisierung ist nach Nutzerbefund unnoetig.
+
+### Sortierte Zeichenreihenfolge (I-Taste, zum Vergleich)
+Zellen laufen beim Build fern->nah entlang der Blickrichtung vom Puffer
+(512 Slabs, Counting-Sort). Zell-Bloeecke bleiben zusammenhaengend,
+cellOff/cellCnt bleiben gueltig. Kernpunkt: Sortieren nach Projektion auf eine
+FESTE Achse ist translationsinvariant — Kamerabewegung aendert die Reihenfolge
+ueberhaupt nicht, nur Drehung zwischen zwei Builds (0,3..1 s) verwischt sie leicht.
+
+Gemessen (/tmp/test_order3.c, 5 Hops a 4m):
+| | Diamond-Order | sortiert |
+|---|---|---|
+| mittl. Abweichung von idealer Reihenfolge | **31,77 m** | **0,12 m** |
+| Chunk-Verletzungen (Blick +x) | 11/31 | 0/31 |
+| Chunk-Verletzungen (Blick diagonal) | 16/31 | 0/31 |
+
+Die ~50 % "falschen Nachbarpaare" bleiben in beiden Faellen: innerhalb eines
+0,3-m-Slabs ist die Reihenfolge egal (Tiefenunterschied < Slab-Breite). Dieses
+Mass war vorher irrefuehrend — aussagekraeftig ist die Abweichung von der
+idealen Ordnung.
+
+**Debug-Schalter gesamt:** C Farbmodus, J Depth-Write, K Dichte-Kante,
+L Fade-Dauer (1/2/10/30 s), Y Alpha-to-Coverage, I sortierte Reihenfolge,
+G Freeze, V Nur-Gras, M MSAA, B Dump, P Screenshot.
 
 ## Session 2026-10-06, Runde 9 (Fade-GRUPPEN + Intervall-Markierung gebaut)
 
