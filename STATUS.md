@@ -1,28 +1,41 @@
 # 64kDemo — Status
 
-Stand: 2026-10-06, Runde 6. **Issue A Teil 3 (harte Gras-Kante = Ursache des
-„ploetzlich erscheinenden Grases an der Graskante“) FIXED — Cutoff 0.09 → 0.01,
-Kante von 66,7m/lod=1.00 auf ~78m/lod=0.11 verschoben. HOST-TEST ausstehend.**
-**Issue A Teil 2 (Overlap-Bug im Copy/Gen-Pfad) FIXED (Unit-Test: 331/983/63790
-Duplikate → 1), VM-Test ohne Regression, committet.**
+Stand: 2026-10-06, Runde 8. **Issue A ist NICHT gelöst.** Zwei Fixes (Overlap,
+harte Kante) haben das Symptom nicht beseitigt. Ursache ist eingegrenzt:
+**das Dichteprofil hängt am Build-Zentrum, nicht an der Kamera** — bei 12 m
+Kamerahop ändert 86 % aller Zellen ihre Ziel-Halmzahl, das ganze Feld fadet
+um. Die Buffer-/Fade-Daten sind nachweislich sauber (kein Pop). Verbleibender
+Hauptverdacht: **Zeichenreihenfolge + Depth-Write** (nie abgeschaltet).
+Dazu ist auf Branch `dbg-gras-fade` ein Debug-Werkzeug gebaut (C/J/K/L), mit
+dem der Nutzer das auf dem Host trennen kann. **HOST-TEST ausstehend.**
+**Fade-Dauer Standard jetzt 1 s** (vorher 2 s). Slider-UI blendet bei gehaltener
+Maustaste aus.
 **Issue B FIXED + bestätigt. R-Reset FIXED + vom Nutzer bestätigt.**
 **Issue A Teil 1 (Death-Time a4ddeb9) FIXED + bestätigt.**
 Offen: Issue C (Gras-Inseln, seit Issue-B-Fix nicht mehr gesehen).
-NEU Befund: vorbestehende Hash-Kollision (Zelle 83,9, b=11 vs b=12 → 1
-Halm doppelt, im Original schon da, visuell vernachlässigbar).
-Details unten in „ISSUES“.
+Befund: vorbestehende Hash-Kollision (Zelle 83,9, b=11 vs b=12 → 1 Halm doppelt,
+im Original schon da, visuell vernachlässigbar).
+Details unten in „ISSUES“ und in „Session Runde 8“.
 
 ## ⚡ SOFORT NÄCHSTER SCHRITT (nächster Chat)
 
-**Issue A Teil 3 (harte Gras-Kante) ist FIXED, aber NOCH NICHT vom Nutzer auf
-dem Host bestätigt.** Nächster Schritt: **Nutzer-Host-Test** — Freeze +
-Rückwärtsfahrt + Freeze-AUS: ist das ploetzliche Gras an der Graskante weg?
-Code-Zustand: grass_cpu.c mit copiedMask-Fix (b-Index pro Halm d[11],
-GRASS_FLOATS 12) + `GRASS_DENS_CUT = 0.01f` (vorher hartkodiert 0.09f an
-zwei Stellen).
-Kosten des Kanten-Fix: Build-Zeit +10..22% (1m-Shift 141→172 ms, Initial-
-Build 863→952 ms), Halme +2.7% (828129→850340). Binary groesse unveraendert
-(72248 B).
+**Issue A: Ursache eingegrenzt, aber nicht behoben.** Der Kanten-Fix (666de2c)
+hat das Symptom laut Nutzer NICHT beseitigt. Nächster Schritt ist der
+**Nutzer-Host-TEST mit dem Debug-Build** (`/media/sf_Quarantine/64kDemo/64kdemo_dbg`,
+Branch `dbg-gras-fade`):
+
+1. **C** (Farbcodierung) an, **L** einmal → Fade 2 s (beobachtbar).
+2. **G** Freeze → rückwärts fahren → **G** Freeze aus. Gelb = läuft aus,
+   Cyan = läuft ein, danach normales Gras.
+3. Derselbe Ablauf einmal mit **J** umgeschaltet (Depth-Write aus).
+   - Sprung mit `DW-` **weg** → Ursache ist Zeichenreihenfolge + Depth-Write.
+     Fix: Gras ohne Depth-Write, oder echtes Sortieren statt 32-Chunks-Näherung.
+   - Sprung **bleibt** → die Farben zeigen, WELCHE Halme WO erscheinen.
+4. **K** schaltet zusätzlich die Dichte-Kante ganz ab (CUT 0).
+
+Code-Zustand `main`: copiedMask-Fix (d[11], GRASS_FLOATS 12) +
+`GRASS_DENS_CUT = 0.01f`. Kosten des Kanten-Fix: Build +10..22 %
+(1 m-Shift 141→172 ms), Halme +2,7 %, Binary unverändert 72248 B.
 
 Danach:
 1. **Issue C (Inseln) in der VM suchen**: Halme-Höhen vs. c_terrainH an
@@ -50,7 +63,7 @@ Baum-Schatten.
   Frozen: 10s fahren + R: 827192 Halme, 0 neu, 532 sterben (alles
   kopiert, 100% sichtbar).
 
-### Issue A: „Neue Halme ploppen auf“ — **Teil 1+2+3 FIXED, Host-Test ausstehend**
+### Issue A: „Neue Halme ploppen auf“ — **NICHT gelöst** (Teil 1 gefixt, Teil 2+3 halfen nicht)
 
 **Teil 1 — FIXED (committet a4ddeb9, VM-verifiziert):** Death-Time wurde
 während des Builds gesetzt → sterbende Halme waren beim Swap schon
@@ -219,6 +232,119 @@ das pro Build klein und laut Nutzer nicht sichtbar; bei langem Freeze bleibt
 ein weicher, aber deutlicher Dichte-Aufbau ueber 2s. Wer das auch noch will:
 Dichte-Profil weltfest machen oder Build-Zentrum nach dem Freeze-AUS
 interpolieren (hoch prioritaer, noch nicht gemacht).
+
+## Session 2026-10-06, Runde 8 (Issue A: Ursache eingegrenzt, Debug-Werkzeug gebaut)
+
+### Kernbefund: das Dichteprofil hängt am BUILD-ZENTRUM, nicht an der Kamera
+`nb = 32·dens_at(dist)` mit `dens_at` = Distanz zum Build-Zentrum. Jedes Mal,
+wenn das Zentrum hüpft, ändert sich die Ziel-Halmzahl **in jeder Zelle** — nicht
+nur an einer Kante. Es ist eine ganze Treppe von Dichtestufen (Nutzer:
+„das sind lauter Dichtekanten"), und die wandert als Ganzes.
+
+Gemessen (/tmp/test_nbshift.c, lebende Halme pro Zelle, eingeschwommen):
+
+| Hop | Zellen geändert | mittl. \|Δnb\| | max Δ |
+|---|---|---|---|
+| 1 m | 20,7 % | 1,11 | +3 |
+| 4 m | 59,0 % | 1,56 | +6 |
+| 12 m | **86,0 %** | 3,08 | +14 |
+
+Das erklärt die Nutzerbeobachtung exakt: kleiner Hop → nur an der Kante sichtbar
+(Steigung des Dichte-Falloffs dort am größten), großer Hop → fast überall.
+
+### Die Buffer- und Fade-Daten sind sauber — kein Pop in den Zahlen
+- /tmp/test_freeze_pop.c: **0** Halme erscheinen mit vollem Alpha ohne Vorgänger
+  an derselben Stelle (Hops 1/7/17/34/57 m, exakter Float-Vergleich).
+- /tmp/test_gone.c: **0** voll sichtbare alte Halme verschwinden ohne Fade —
+  alle 849562 sind im neuen Buffer wieder da (lebendig oder sterbend).
+- /tmp/test_noop.c: ein zweiter POS-Build am SELBEN Zentrum ist nahezu ein
+  No-Op: 12–350 Halme (≈0,03 %) oszillieren noch.
+- /tmp/test_bilanz.c (summierte sichtbare Alpha, zeitlich aufgelöst, OHNE Grafik):
+  Hop 1 m **+0,1 %**, 4 m **+0,4 %**, 12 m **+1,5 %** — der Crossfade ist global
+  balanciert. Räumlicher Saldo bei 12 m: nah **+23218**, mittel +10541, fern **−20618**.
+
+### Kleiner echter Defekt (nicht behoben): Asymmetrie Copy- vs. Gen-Auswahl
+Der Kopierloop entscheidet „bleibt am Leben" über die **Pufferreihenfolge**
+(`else if (alive < nb)`), der Generierloop zählt aber über den **b-Index**
+(`nNew = nb - popcount(copiedMask & want)`). Sobald die lebenden Halme einer
+Zelle nicht exakt b = {0…nb−1} belegen, zählt nNew zu viele → Zelle wächst über
+nb → im nächsten Build werden Überzählige getötet → Oszillieren. Korrekt wäre
+`nNew = nb - alive`. Magnitude klein (0,03 %), **nicht** das Nutzersymptom.
+
+### Zeichenreihenfolge: nur grob sortiert, und Depth-Write ist NIE aus
+Zeichnet wird in 32 Chunks vom Puffer-ENDE nach vorn (main.c), Pufferordnung =
+Diamond-Order um das Build-Zentrum.
+Gemessen (/tmp/test_order2.c, Chunk-Mitteldistanz zur Kamera):
+- 0 m Drift: **0/31** Verstöße (9,7 → 67,3 m monoton) — Ordnung gut.
+- 20 m Drift: 1/31. 40 m Drift: **9/31**, Nahhälfte praktisch unsortiert.
+- **Innerhalb** eines Chunks (26549 Instanzen): ~50 % der Nachbarpaare falsch,
+  Größenordnung bis **24 m**.
+`glDepthMask` wird in main.c **nirgends** auf `GL_FALSE` gesetzt — jeder Halm
+schreibt Tiefe, auch mit Alpha ≈ 0 (und der Vertex-Shader cullt hart bei
+`f < 0.004`). Ein näherer Halm, der innerhalb eines Chunks vor einem ferneren
+gezeichnet wird, cullt den ferneren komplett; am Swap ändert sich die Sortierung
+→ verdeckte Halme werden schlagartig sichtbar. **Hauptverdacht, unbestätigt.**
+
+### Ausgeschlossen: Build-Rate begrenzen („kein Build während eines Crossfades")
+Bei 13 m/s bzw. 34 m/s Kamera (main.c:1108) ergäbe ein Build alle 2 s Hops von
+26 m bzw. 68 m. Gemessen (/tmp/test_buildrate_order.c): Zellen geändert
+**94,1 % / 95,6 %**, mittl. \|Δnb\| 5,47 / 8,79, max +26 / +45. Zusätzlich läge
+das Feldzentrum 26–68 m hinter der Kamera → Gras würde **vor** der Kamera
+verschwinden. Idee verworfen.
+
+### Debug-Werkzeug (Branch `dbg-gras-fade`)
+- **C** — Kategorie als **Albedo** (gelb = läuft aus, cyan = läuft ein), und zwar
+  nur **während** ein Fade läuft; ist er durch, normales Gras. Beleuchtung,
+  Transluzenz, Specular, Fog, Tonemapping und Alpha-Blending bleiben unverändert.
+- **J** — Depth-Write im Gras-Pass an/aus (A/B-Test der Reihenfolge-Hypothese).
+- **K** — Dichte-Kante an/aus (`grassSetDensCut`, CUT 0.01 vs. 0 = kein Abschneiden).
+- **L** — Fade-Dauer 1/2/10/30 s; `grassFadeDur` ist eine Größe für CPU **und**
+  Shader (uFadeDur), sonst werden sterbende Halme aus dem Puffer geworfen,
+  während sie noch einblenden.
+- **Fade-Dauer Standard 1 s** (vorher 2 s). Slider-OUT→IN-Wartezeit nutzt jetzt
+  ebenfalls `grassFadeDur` statt fest 2 s.
+- **Slider-UI** blendet aus, solange die linke Maustaste gehalten wird (außer beim
+  Ziehen eines Sliders); Ausblendrate beim Look 0,5 s. Zustandsmaschine isoliert
+  getestet (/tmp/test_sliderfade.c): Look → 0, Drag → bleibt 1.
+
+### Messfallen — alle bezahlt, bitte nicht nochmal
+- **G-Kanal-Screenshots sind als Pop-Messung unbrauchbar:** `sizeScale =
+  1+1,8·(1−dens)` skaliert die Halmgröße mit Kameradistanz; reine Kamerabewegung
+  ändert die bedeckte Pixelmenge um +50 %.
+- **`lod` ist NICHT in der Alpha** (`vFade = f`), es skaliert nur die Halm**höhe**.
+  Ferne Halme sind flache Streifen mit voller Alpha.
+- **Rot ist im Nur-Gras-Modus unsichtbar:** Hintergrund ist Magenta, Rot über
+  Magenta gemischt bleibt Magenta. Deshalb gelb/cyan.
+- **VM läuft mit 1–2 FPS:** ein 2-s-Fade ist dort zeitlich nicht auflösbar, und
+  Screenshot-Auslösung über eine Log-Pipeline verfehlt den Zeitpunkt systematisch.
+  Abhilfe: Fade auf 10–30 s strecken (L) **oder** Bilanz auf der CPU rechnen.
+- **Synthetische Mausklicks** (`xdotool mousedown`) erreichen das Demo-Fenster
+  nicht → UI-Änderungen sind in der VM nicht pixelprüfbar.
+- **Nachbarpaar-Vergleich der Instanzreihenfolge ist reines Rauschen** (Nachbarn
+  liegen in derselben Zelle, Distanzunterschied cm) → auf Chunk-Ebene messen.
+
+### Architektur-Vorschläge (vom Nutzer angestoßen, noch nicht umgesetzt)
+1. **Zellen sortiert nach gültigem b speichern → Intervall-Markierung** statt
+   copiedMask. Vorbedingung ist erfüllt: alle Verwerfungen (Zellhöhe, Steilhang,
+   Gras-Flecken, Wasser pro Halm) sind deterministisch in (Zelle, b) bei
+   statischem Terrain → die Folge gültiger b ist über Builds stabil, und „die
+   ersten nb Halme der Zelle" ist eine stabile, flächig streuende Teilmenge.
+   Entfernt copiedMask, das alive-Zählen und `d[11]` (3,4 MB nur dafür).
+2. **Fade-Gruppen statt per-Halm-Timer:** Uniform-Array mit (birth, death) pro
+   Build, pro Halm nur ein Gruppen-Index. 11→9 Floats, die Finish-Schleife über
+   850k Halme entfällt. Grenze: sterbende Halme dürfen nicht wiederauferstehen
+   (Alpha-Sprung) → Regel: nicht erzeugen, solange die Position belegt ist.
+3. **Persistenter Buffer mit In-Place-Zell-Updates + glBufferSubData** statt
+   Doppelbuffer-Vollkopie. Aktuell: 12 Floats = 48 Byte/Halm, 850k Halme =
+   **40,8 MB Kopie + 40,8 MB Upload pro Build**; nötig wäre nur die Sichel.
+4. **Dichte-Begrenzung pro Build:** `nb_used = clamp(nb_ziel, A−1, A+1)` → ein
+   großer Hop verteilt sich auf ~14 Builds à 1 Halm/Zelle. Braucht Settle-Loop.
+   (Build-Sperre während Fade ist dagegen falsch, siehe oben.)
+
+### Commits dieser Runde
+- `main`: 666de2c (Kanten-Fix CUT 0.09→0.01) — **vom Nutzer nicht bestätigt, Sprung bleibt**
+- `dbg-gras-fade`: 32fd4f4 (Debug-Zweig), 555fadc (Farbmodus als Schalter, normale
+  Grafik zurück), dd30782 (L-Zyklus mit 1 s, Slider bei Maushalt aus), + Fade-Standard 1 s
 
 ## Session 2026-10-06, Runde 6 (Issue A Teil 2: Overlap-Bug FIXED)
 

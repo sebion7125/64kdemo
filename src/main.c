@@ -937,8 +937,8 @@ int main(int argc, char **argv) {
           if (ks == XK_l) {   // Fade-Dauer strecken/stauchen: VM laeuft mit 1-2 FPS,
             // ein 2s-Fade ist dort zeitlich nicht aufloesbar. CPU und Shader
             // nutzen dieselbe Dauer.
-            static const float durs[] = { 2.0f, 1.0f, 10.0f, 30.0f };
-            static int durIdx = 0;
+            static const float durs[] = { 1.0f, 2.0f, 10.0f, 30.0f };
+            static int durIdx = 0;   // Standard = durs[0] = 1s
             durIdx = (durIdx + 1) % (int)(sizeof durs / sizeof durs[0]);
             grassFadeDur = durs[durIdx];
             printf("DEBUG Fade-Dauer: %.0fs\n", grassFadeDur); }
@@ -1392,7 +1392,7 @@ int main(int argc, char **argv) {
              grassFrozen ? " FRZ" : "", grassOnly ? " NUR-GRAS" : "",
              dbgGrassDepth ? " DW+" : " DW-", dbgGrassEdge ? " EDGE+" : " EDGE-");
     if (dbgGrassCat) strncat(hud2, " CAT", sizeof(hud2) - (int)strlen(hud2) - 1);
-    if (grassFadeDur > 2.5f || grassFadeDur < 1.9f) strncat(hud2, " FADE", sizeof(hud2) - (int)strlen(hud2) - 1);
+    if (grassFadeDur != 1.0f) strncat(hud2, " FADE", sizeof(hud2) - (int)strlen(hud2) - 1);
     snprintf(hud3, sizeof hud3, "POS %d %d %d%s%s",
              (int)camPos[0], (int)camPos[1], (int)camPos[2],
              nGrass >= GRASS_CAP ? " CAP" : "", grass_build_busy() ? " BUILD" : "");

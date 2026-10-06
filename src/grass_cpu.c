@@ -21,7 +21,8 @@
 // Halm-Daten (GRASS_FLOATS=12): pos(3) hoehe breite phase schattierung yaw lean birth death b
 //   yaw  = Rotation der Halm-Ebene um Y (sichtbar aus allen Richtungen)
 //   lean = Neigung der Spitze in yaw-Richtung (sichtbar von oben)
-//   birth = Birth-Time (2s Fade-in), death = Death-Time (2s Fade-out, 0 = lebt)
+//   birth = Birth-Time (Fade-in), death = Death-Time (Fade-out, 0 = lebt);
+//   Fade-Dauer = grassFadeDur (Standard 1s), CPU und Shader nutzen dieselbe.
 #include "scene.h"
 #include <math.h>
 #include <stdio.h>
@@ -41,12 +42,11 @@ static int gix0 = 0, giz0 = 0, gnx = 0;
 static float bcx = 0, bcz = 0;
 static int outStepState = 0;   // OUT-Build: naechster Tabellen-Index
 static int hasOldBuild = 0;
-// DEBUG-Zweig: Fade-Dauer (CPU und Shader MUESSEN gleich sein, sonst werden
-// sterbende Halme aus dem Puffer geworfen, waehrend sie noch einblenden).
-// In der VM laeuft die Demo mit 1-2 FPS; ein 2s-Fade ist damit zeitlich nicht
-// aufloesbar. L-Taste streckt auf 10s / 30s, dann loest ein Shot pro Frame
-// den Crossfade fein auf.
-float grassFadeDur = 2.0f;
+// Fade-Dauer (CPU und Shader MUESSEN gleich sein, sonst werden sterbende
+// Halme aus dem Puffer geworfen, waehrend sie noch einblenden).
+// Standard 1s (Nutzer-Wunsch). L-Taste schaltet auf 2s / 10s / 30s: die VM
+// laeuft mit 1-2 FPS, ein kurzer Fade ist dort zeitlich nicht aufloesbar.
+float grassFadeDur = 1.0f;
 // Build-Modi:
 //  0 = POS: Positions-Rebuild (Zell-Kopieren; neue Halme faden ein,
 //           ueberzaehlige - nb gesunken - faden aus)
@@ -233,10 +233,10 @@ static void build_cell(int ix, int iz){
   // NICHT von der Kameradistanz) -> Halme koennen kopiert statt regeneriert
   // werden. Pro Halm (d[10] = Death-Time, 0 = lebt):
   //   - lebt und nb reicht noch  -> kopieren (Birth-Time bleibt, Fade weiter)
-  //   - lebt, aber nb gesunken   -> kopieren + sterben (d[10]=jetzt, 2s aus)
-  //   - stirbt schon             -> kopieren, bis der 2s-Fade zu Ende ist
+  //   - lebt, aber nb gesunken   -> kopieren + sterben (d[10]=jetzt, fadet aus)
+  //   - stirbt schon             -> kopieren, bis der Fade zu Ende ist
   //   - stirbt, Fade zu Ende     -> weg
-  // Neue Halme: alle b < nb, die nicht kopiert wurden, blenden 2s ein.
+  // Neue Halme: alle b < nb, die nicht kopiert wurden, blenden ein.
   // Nur bei POS-Builds (Modus 0); IN (Modus 2) generiert alles neu.
   int oldIdx = -1;
   uint32_t copiedMask = 0;  // b-Indizes der kopierten Halme (Gen-Loop: nur der Rest)

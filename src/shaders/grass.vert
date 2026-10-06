@@ -85,7 +85,8 @@ void main(){
   vPos = p;
   vCol = vec3(sh, t, lod);
   vT = t;
-  // Per-Halm-Fade: ein (Birth-Time) und aus (Death-Time), je 2s, smoothstep.
+  // Per-Halm-Fade: ein (Birth-Time) und aus (Death-Time), je grassFadeDur
+  // (uFadeDur, Standard 1s), smoothstep.
   // Vollstendig verblassene Halme cullen (Clip-Ebene x=2, wie der LOD-Cull).
   float age = uTime - iBirth;
   float f = clamp(age / uFadeDur, 0.0, 1.0);
