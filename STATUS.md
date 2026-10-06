@@ -1,8 +1,10 @@
 # 64kDemo — Status
 
-Stand: 2026-10-06, Runde 6. **Issue A Teil 2 (Overlap-Bug im Copy/Gen-Pfad)
-FIXED (Unit-Test: 331/983/63790 Duplikate → 1), VM-Test ohne Regression,
-committet — HOST-TEST vom Nutzer ausstehend.**
+Stand: 2026-10-06, Runde 6. **Issue A Teil 3 (harte Gras-Kante = Ursache des
+„ploetzlich erscheinenden Grases an der Graskante“) FIXED — Cutoff 0.09 → 0.01,
+Kante von 66,7m/lod=1.00 auf ~78m/lod=0.11 verschoben. HOST-TEST ausstehend.**
+**Issue A Teil 2 (Overlap-Bug im Copy/Gen-Pfad) FIXED (Unit-Test: 331/983/63790
+Duplikate → 1), VM-Test ohne Regression, committet.**
 **Issue B FIXED + bestätigt. R-Reset FIXED + vom Nutzer bestätigt.**
 **Issue A Teil 1 (Death-Time a4ddeb9) FIXED + bestätigt.**
 Offen: Issue C (Gras-Inseln, seit Issue-B-Fix nicht mehr gesehen).
@@ -12,11 +14,15 @@ Details unten in „ISSUES“.
 
 ## ⚡ SOFORT NÄCHSTER SCHRITT (nächster Chat)
 
-**Issue A Teil 2 (Overlap-Bug) ist FIXED + committet, aber NOCH NICHT vom
-Nutzer auf dem Host bestätigt.** Nächster Schritt: **Nutzer-Host-Test**
-(Hin-und-Her-Fahrt, Dichte-Wechsel) → ist der Sprung (neu generiertes
-Gras überall) weg? Code-Zustand: grass_cpu.c mit copiedMask-Fix (b-Index
-pro Halm d[11], GRASS_FLOATS 12).
+**Issue A Teil 3 (harte Gras-Kante) ist FIXED, aber NOCH NICHT vom Nutzer auf
+dem Host bestätigt.** Nächster Schritt: **Nutzer-Host-Test** — Freeze +
+Rückwärtsfahrt + Freeze-AUS: ist das ploetzliche Gras an der Graskante weg?
+Code-Zustand: grass_cpu.c mit copiedMask-Fix (b-Index pro Halm d[11],
+GRASS_FLOATS 12) + `GRASS_DENS_CUT = 0.01f` (vorher hartkodiert 0.09f an
+zwei Stellen).
+Kosten des Kanten-Fix: Build-Zeit +10..22% (1m-Shift 141→172 ms, Initial-
+Build 863→952 ms), Halme +2.7% (828129→850340). Binary groesse unveraendert
+(72248 B).
 
 Danach:
 1. **Issue C (Inseln) in der VM suchen**: Halme-Höhen vs. c_terrainH an
@@ -44,7 +50,7 @@ Baum-Schatten.
   Frozen: 10s fahren + R: 827192 Halme, 0 neu, 532 sterben (alles
   kopiert, 100% sichtbar).
 
-### Issue A: „Neue Halme ploppen auf“ — **FIXED (VM-verifiziert), Host-Test ausstehend**
+### Issue A: „Neue Halme ploppen auf“ — **Teil 1+2+3 FIXED, Host-Test ausstehend**
 
 **Teil 1 — FIXED (committet a4ddeb9, VM-verifiziert):** Death-Time wurde
 während des Builds gesetzt → sterbende Halme waren beim Swap schon
@@ -162,6 +168,57 @@ Kamerahop) separat verifiziert (Runde 6, VM + Unit-Tests):**
   schwer wahrzunehmen (2s-Fade vs. 26m in 2s bei 13 m/s; nur ~1,3% der
   Halme sterben pro 1m, verteilt). Nach Issue-A/B-Fix neu bewerten;
   evtl. Death-Fade 2s → 3–4s als Tuning-Knopf.
+
+## Session 2026-10-06, Runde 7 (Issue A Teil 3: harte Gras-Kante)
+
+### WURZEL GEFUNDEN: harte Dichte-Kante liegt VOLLHALB des Shader-LOD-Fades
+Nutzer-Eingrenzung: der Sprung ist bei kleiner Rueckwaertsfahrt (~4m) **nur in
+der Naehe der Graskante**, bei langer Fahrt fast ueberall; Ausloeser ist das
+Fade-out nach Freeze-AUS; die Laenge aendert nur die Staerke.
+
+Messung (/tmp/test_edgeband.c, radiale Histogramme relativ zur Kamera, Hop 4m):
+- Neu generierte (fade-in) Halme haeuufen sich bei **55–70m** (6065/6381/3436
+  pro 5m-Ring), waehrend im Nahbereich 5–15m nur 80–619 entstehen.
+- Dort ist die Shader-Hoehe **lod = 1,00** (volle Halmhoehe), d.h. die Kante ist
+  ungedaempft sichtbar.
+- Grund: `g_half()` und der Generierungs-Fruehabbruch schnitten beide bei
+  **dens < 0.09** ab. Die CPU-Dichte faellt zwar glatt auf 0 bei grassMaxDist,
+  aber der Abschnitt kommt frueher: Kante bei **66,7m** mit 2,02 Halmen/Zelle,
+  dann abrupt 0. Der Shader-LOD-Fade laeuft aber erst **grassMaxDist-12 ..
+  grassMaxDist = 68..80m** — die Kante liegt also INNERHALB des ungedaempften
+  Bereichs. Wandert das Build-Zentrum, wandert die Kante und ein Δ-breites Band
+  vollhoher Halme fadet ein = wahrgenommener Sprung.
+- WICHTIG: die Halme werden **ordnungsgemaess eingeblendet** (Geburtszeit =
+  Swap-Zeit, 2s). Das Einblenden selbst ist das Sichtbare, weil es an der
+  ungedaempften Kante passiert.
+
+### FIXED: `GRASS_DENS_CUT = 0.01f` (vorher hartkodiert 0.09f an zwei Stellen)
+`src/grass_cpu.c`: benannte Konstante eingefuehrt und an allen drei
+Dichte-Schwellen benutzt (Bisektion `g_half()`, Kopierpfad `dens >= ...`,
+Generierungsabbruch `dens < ... && !partial`). Damit liegt die Kante bei
+**~75,8m mit lod = 0,29** (Abschnitt bei 0.01) statt 66,7m mit lod = 1,00.
+Vorher/Nachher (Dichte des statischen Feldes, Halme/m²):
+- vorher: 13,0 (60–65m) → 4,3 (65–70m) → 0,15 (70–75m) → 0   (harter Schnitt bei lod≈0,7–0,9)
+- nachher: 14,0 → 8,1 → 2,9 → 0,16 → 0                      (harter Schnitt bei lod≈0,11)
+Der harte Schnitt ist damit ~9x weniger sichtbar und das Feld faellt ueber
+65–80m weich durch den LOD-Fade aus.
+
+### Kosten (gemessen, git-stash-Vergleich)
+- Initialer Build 863 → 952 ms (+10%), 1m-Shift 141 → 172 ms (+22%),
+  Gross-Shift 301 → 351 ms (+17%)
+- Halme 828129 → 850340 (+2,7%); Binary-groesse unveraendert 72248 B
+- Regressionen: test_edge_pop 0 POPTEN, test_death OK, test_freeze_pop 0 Pops
+  (1/7/17/34/57m), test_gone 0 ohne Fade, VM: Summe-ShaderFade 100 → 87,9 →
+  90,5 → 91,4% (sanft)
+
+### Nicht behoben (bewusst)
+Die Dichte-Profile haengen am Build-Zentrum, nicht an der Kamera. Bei einem
+GROSSEN Zentrumshop aendert sich die Dichte auch im Mittelfeld (4–6k neue
+Halme pro 5m-Ring bei 4m Hop, lod=1,0). Bei normaler Fahrt (1m-Schritte) ist
+das pro Build klein und laut Nutzer nicht sichtbar; bei langem Freeze bleibt
+ein weicher, aber deutlicher Dichte-Aufbau ueber 2s. Wer das auch noch will:
+Dichte-Profil weltfest machen oder Build-Zentrum nach dem Freeze-AUS
+interpolieren (hoch prioritaer, noch nicht gemacht).
 
 ## Session 2026-10-06, Runde 6 (Issue A Teil 2: Overlap-Bug FIXED)
 

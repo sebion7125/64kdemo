@@ -75,10 +75,20 @@ static int offX0 = 0, offZ0 = 0;        // Tabellen-Origin des aktuellen Builds
 
 #define GSTEP 0.30f
 #define CLUMP 1.2f   // Bueschel-Grid (Schritt 4): naechster Mittelpunkt in 3x3-Zellen
-// Build-Radius = Dichte-Cutoff (wo dens auf 0.01 faellt), NICHT
-// grassMaxDist+20: auBerhalb generiert build_cell keine Halme (dens < 0.01),
-// der alte +20m-Margin hat nur Build-Zeit gekostet. Cutoff = Loesung von
-// dens(d) = 0.01 (Bisektion, pro grassMaxDist gecacht).
+// Dichte-Abschneidschwelle der Generierung (= Build-Radius, Bisektion).
+// WICHTIG: die CPU-Dichte faellt glatt auf 0 bei grassMaxDist; diese Schwelle
+// schneidet frueher ab und erzeugt damit eine HARTE Kante (Halmzahl springt
+// von 32*dens*0.7 auf 0). Liegt die Kante innerhalb des Shader-LOD-Fadebereichs
+// (grassMaxDist-12 .. grassMaxDist), ist sie VOLLSICHTBAR: beim Build-Zentrums-
+// hop (Freeze-AUS, Rueckwaertsfahrt) wandert sie und ein Band neuer Halme
+// fadet voll sichtbar ein (Nutzer: „ploetzlich erscheinende Halme an der
+// Graskante“). 0.09 lag bei 66,7m mit lod=1.00 (voll sichtbar). 0.01 legt sie
+// auf ~75,8m mit lod=0.29 -> Kante liegt im gedaempften Bereich.
+#define GRASS_DENS_CUT 0.01f
+// Build-Radius = Dichte-Cutoff (wo dens auf GRASS_DENS_CUT faellt), NICHT
+// grassMaxDist+20: auBerhalb generiert build_cell keine Halme, der alte
+// +20m-Margin hat nur Build-Zeit gekostet. Cutoff = Loesung von
+// dens(d) = GRASS_DENS_CUT (Bisektion, pro grassMaxDist gecacht).
 static float gDCut = 0.0f, gDCutMD = -1.0f;
 static float g_half(void){
   float md = grassMaxDist;
@@ -87,10 +97,10 @@ static float g_half(void){
     for (int i = 0; i < 30; i++) {
       float mid = (lo + hi) * 0.5f;
       float dens = powf(1.0f - c_smoothstep(8.0f, md, mid), 1.0f);
-      // Schwelle 0.09: Kante wo die mittlere Halmzahl ~2 ist (32*dens*0.7).
-      // (Frueher 0.01: die 1m-Crescent-Zone beim Positions-Shift hatte
-      // dens < 0.01 -> 0 Halme/Zelle -> nichts zum Einblenden (Fade tot).)
-      if (dens >= 0.09f) lo = mid; else hi = mid;
+      // Schwelle GRASS_DENS_CUT: Kante, an der die Generierung abschneidet.
+      // Muss die SAME Schwelle sein wie der dens-Test im Kopierpfad und im
+      // Generierungspfad, sonst entstehen Luecken/harte Kanten (s. oben).
+      if (dens >= GRASS_DENS_CUT) lo = mid; else hi = mid;
     }
     gDCut = (lo + hi) * 0.5f;
     gDCutMD = md;
@@ -230,7 +240,7 @@ static void build_cell(int ix, int iz){
     float dist = sqrtf(dx * dx + dz * dz);
     float dens = dens_at(dist);
     int nb = 0;
-    if (dens >= 0.01f) {
+    if (dens >= GRASS_DENS_CUT) {
       float nbf = 32.0f * dens * (0.4f + 0.6f * h4) * grassDensityScale;
       if (nbf > 32.0f) nbf = 32.0f;
       nb = (int)nbf;
@@ -293,7 +303,7 @@ static void build_cell(int ix, int iz){
   //   - Pow 1.6: nimmt in der Ferne starker ab (nah bleibt dicht)
   //   - Kein Hard-Cutoff bei 0.05, sondern weicher Abbruch bei 0.01
   float dens = dens_at(dist);
-  if(dens < 0.09f && !partial) return;   // Teil-Kopie: Zelle ist bestockt
+  if(dens < GRASS_DENS_CUT && !partial) return;   // Teil-Kopie: Zelle ist bestockt
   float h = c_terrainH(px, pz);
   if(h < WATER_Y + 0.10f || h > 7.5f) return;  // kein Wasser, keine Gipfel
   if(fabsf(c_terrainH(px + 0.4f, pz) - h) > 0.25f ||
