@@ -306,30 +306,59 @@ static void gen_tree(float bx, float by, float bz, float s, float seed){
 }
 
 // ---------- Platzierung (identisch zum alten SDF-System) ----------
-void trees_build(float tx, float tz){
-  nTreeVerts = 0; nCrownVerts = 0; nWireVerts = 0; nTrees = 0;
-  const float G = 9.0f;
-  const int RANGE = 20;   // Zellen-Radius um das Kameraziel (~180m, passt zur
-                          // groesseren Sichtweite: march bis 400m)
-  int ix0 = (int)floorf((tx - RANGE * G) / G);
-  int ix1 = (int)floorf((tx + RANGE * G) / G);
-  int iz0 = (int)floorf((tz - RANGE * G) / G);
-  int iz1 = (int)floorf((tz + RANGE * G) / G);
+// Eine Zelle der Groesse G=9 m: liefert 1, wenn dort ein Baum steht, und setzt
+// tp (Basispunkt) + s (Groesse). trees_build() und tree_find_nearest() nutzen
+// dieselbe Funktion, damit der Debug-Sprung (Taste B) zu einem Baum gehoert, den
+// es wirklich gibt.
+#define TREE_G 9.0f
+static int tree_cell(int ix, int iz, float *tp, float *s){
+  float rx, ry;
+  c_hash22(ix * 0.37f + 7.31f, iz * 0.37f + 3.17f, &rx, &ry);
+  if(rx < 0.30f) return 0;                       // 70% der Zellen frei
+  float px = (ix + 0.5f + (rx - 0.5f) * 0.9f) * TREE_G;
+  float pz = (iz + 0.5f + (ry - 0.5f) * 0.9f) * TREE_G;
+  float th = c_terrainH(px, pz);
+  if(th < 0.4f || th > 6.5f) return 0;           // nur auf Wiesen
+  float e = 0.6f;
+  float dx = c_terrainH(px + e, pz) - th;
+  float dz = c_terrainH(px, pz + e) - th;
+  if(sqrtf(dx * dx + dz * dz) > 0.5f) return 0;  // keine steilen Stellen
+  tp[0] = px; tp[1] = th - 0.6f; tp[2] = pz;
+  *s = 1.7f + ry * 1.0f;                         // Größe 1.7..2.7
+  return 1;
+}
+
+// Naechsten Baum zu (x,z) finden — Debug (Taste B). Gleiche Zellen wie oben.
+int tree_find_nearest(float x, float z, float *out, float *sizeOut){
+  const int RANGE = 20;
+  int ix0 = (int)floorf((x - RANGE * TREE_G) / TREE_G);
+  int ix1 = (int)floorf((x + RANGE * TREE_G) / TREE_G);
+  int iz0 = (int)floorf((z - RANGE * TREE_G) / TREE_G);
+  int iz1 = (int)floorf((z + RANGE * TREE_G) / TREE_G);
+  float bd = 1e30f;
   for(int iz = iz0; iz <= iz1; iz++)
   for(int ix = ix0; ix <= ix1; ix++){
-    float rx, ry;
-    c_hash22(ix * 0.37f + 7.31f, iz * 0.37f + 3.17f, &rx, &ry);
-    if(rx < 0.30f) continue;                       // 70% der Zellen frei
-    float tp_x = (ix + 0.5f + (rx - 0.5f) * 0.9f) * G;
-    float tp_z = (iz + 0.5f + (ry - 0.5f) * 0.9f) * G;
-    float th = c_terrainH(tp_x, tp_z);
-    if(th < 0.4f || th > 6.5f) continue;           // nur auf Wiesen
-    float e = 0.6f;
-    float dx = c_terrainH(tp_x + e, tp_z) - th;
-    float dz = c_terrainH(tp_x, tp_z + e) - th;
-    if(sqrtf(dx * dx + dz * dz) > 0.5f) continue;  // keine steilen Stellen
-    float s = 1.7f + ry * 1.0f;                    // Größe 1.7..2.7
-    gen_tree(tp_x, th - 0.6f, tp_z, s, tp_x * 12.9898f + tp_z * 78.233f);
+    float tp[3], s;
+    if(!tree_cell(ix, iz, tp, &s)) continue;
+    float dx = tp[0] - x, dz = tp[2] - z, d = dx * dx + dz * dz;
+    if(d < bd){ bd = d; out[0] = tp[0]; out[1] = tp[1]; out[2] = tp[2]; if(sizeOut) *sizeOut = s; }
+  }
+  return bd < 1e29f;
+}
+
+void trees_build(float tx, float tz){
+  nTreeVerts = 0; nCrownVerts = 0; nWireVerts = 0; nTrees = 0;
+  const int RANGE = 20;   // Zellen-Radius um das Kameraziel (~180m, passt zur
+                          // groesseren Sichtweite: march bis 400m)
+  int ix0 = (int)floorf((tx - RANGE * TREE_G) / TREE_G);
+  int ix1 = (int)floorf((tx + RANGE * TREE_G) / TREE_G);
+  int iz0 = (int)floorf((tz - RANGE * TREE_G) / TREE_G);
+  int iz1 = (int)floorf((tz + RANGE * TREE_G) / TREE_G);
+  for(int iz = iz0; iz <= iz1; iz++)
+  for(int ix = ix0; ix <= ix1; ix++){
+    float tp[3], s;
+    if(!tree_cell(ix, iz, tp, &s)) continue;
+    gen_tree(tp[0], tp[1], tp[2], s, tp[0] * 12.9898f + tp[2] * 78.233f);
     nTrees++;
   }
 }

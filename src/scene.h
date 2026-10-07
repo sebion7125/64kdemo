@@ -46,6 +46,8 @@ extern int   nTreeVerts, nCrownVerts, nWireVerts, nTrees;
 
 // Baut die Baum-Geometrie um (tx,tz) (Zellen-Grid wie der alte SDF-Platzierer).
 void trees_build(float tx, float tz);
+// Naechsten Baum zu (x,z) — Debug (Taste F11). Liefert 1, wenn einer gefunden wurde.
+int  tree_find_nearest(float x, float z, float *out, float *sizeOut);
 
 // ================= Gras (instanzierte Halme) =================
 //   grassInst: pos(3) hoehe(1) breite(1) phase(1) schattierung(1) yaw(1) lean(1) birth(1) death(1) b(1) = 12 floats

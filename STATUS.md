@@ -1,11 +1,11 @@
 # 64kDemo — Status
 
-Stand: 2026-10-07, Runde 14. **Pflanzen-Vielfalt GEBAUT** (5 Arten in Regionen,
-botanisch zugeordnet). Kennzahlen: 640.972 Halme bei grassMaxDist=110, POS-Build 1 m
-194 ms, Initial-Build 1420 ms, VM-fps 1,86 (vor der Aufgabe 2,26), Binary 84.632 Byte.
+Stand: 2026-10-07, Runde 16. **Baum-Nahte zu** und **prozedurale Rinde drin**
+(beides nachgemessen). Kennzahlen: 640.972 Halme bei grassMaxDist=110, POS-Build 1 m
+194 ms, Initial-Build 1420 ms, VM-fps 1,63, Binary 92.856 Byte.
 **Fade-Dauer Standard 1 s. Issue A/B/C und R-Reset erledigt.**
-Jetzt: Baum-Optik (Nähte/Rinde/Blattwerk), Schatten, Himmel/Tageszeiten. Budget ist
-laut Nutzer zweitrangig.
+Jetzt: echtes Blattwerk nah + Kronen-Textur fern, Blätter im Wind, Schatten,
+Himmel/Tageszeiten. Budget ist laut Nutzer zweitrangig.
 
 ## TODO-Liste (Nutzer-Aufträge 2026-10-07, der Reihe nach abarbeiten)
 
@@ -17,7 +17,7 @@ laut Nutzer zweitrangig.
 | 2 | Nebel weniger milchig, Sichtweite größer | ✅ Runde 13 |
 | 3 | Pflanzen-Vielfalt (Höhen, Sorten, Blumen, Schilf, Regionen) | ✅ Runde 14 (Ausbaustoffen, siehe unten) |
 | 4 | Baum-Stämme: offene Nähte zu | ✅ Runde 15 (Gelenk-Lücke 11 mm → 0 mm, gemessen) |
-| 5 | Baum-Stämme: prozedurale Rinden-Textur | ⬜ |
+| 5 | Baum-Stämme: prozedurale Rinden-Textur | ✅ Runde 16 (Detail-Energie 0,05 → 2,11) |
 | 6 | Echtes Blattwerk nah + Krone fern als Textur auf Quads | ⬜ |
 | 7 | Blätter im Wind | ⬜ |
 | 8 | Schattenwurf | ⬜ |
@@ -395,6 +395,50 @@ aber separat gegenpruefen (in der VM nicht testbar).
   CPU-Tests und Host-Augen zaehlen.
 - `xdotool mousedown` erreicht das Demo-Fenster in der VM nicht -> Maus-UI nicht
   automatisierbar.
+
+## Session 2026-10-07, Runde 16 (TODO 5: prozedurale Rinde)
+
+**Ursache der flachen Rinde (gemessen, nicht geraten):** `tree.frag` benutzte
+`atan(vPos.x, vPos.z)` als Umfangs-Koordinate. Das ist der Winkel zum **Weltursprung**,
+nicht zum Stamm. Ueber die Oberflaeche eines duennen Stamms in 30 m Entfernung aendert
+sich dieser Welt-Winkel um ~0,01 rad — das Rauschen war damit praktisch konstant.
+Nachgemessen mit exakter Baum-Pixelmaske: Farb-Streuung 2,7, Detail-Energie 0,05 —
+also **keine** Struktur.
+
+**Neu: Oberflaechen-Koordinaten aus der Normalen.** `u = atan(n.z, n.x)` (die Rinde
+zeigt nach aussen, der Azimut der Normalen IST die Umfangsposition am Stamm) und
+`v = vPos.y`. Dazu:
+- `barkH(u,v)`: 3 Oktaven Rauschen mit Frequenzen u·7/17/37 und v·3/8/18 — Riefen sind
+  1…3 cm breit und in die Laenge gestreckt (Umfangs-Frequenz hoeher als vertikale),
+  plus **ridged noise** (`1-|2n-1|`) fuer tiefe Risse statt weicher Huegel.
+- **Bump-Mapping**: endliche Differenzen von barkH entlang der beiden Flaechen-
+  Tangenten (t1 = Umfang, t2 = "hoch"), storen die Normale -> Riefen werden bei
+  seitlichem Licht sichtbar (auch ohne Geometrie).
+- Verwitterungs-Flecken (fbm ueber u,v), zwei Rindentoenen (hell/dunkel) je nach
+  Hoehe der Rinden-Oberflaeche.
+- **Moos am Stammfuss**: `vCol.a` traegt den sway-Wert (0,05 Fuss … 0,30 Stammkopf …
+  1,0 Astspitze) — damit gibt es eine relative Hoehe im Stamm **ohne** ein neues
+  Puffer-Feld. Duenne Aeste (relH > 0,3) bekommen ausserdem weichere, kontrastaermere
+  Rinde.
+
+**Messung (Vorher/Nachher, identischer Frame):** neue Debug-Haaken, weil synthetische
+X-Tasten in der VM nicht zuverlaessig ankommen:
+- `DEMO_TREE=1` — Kamera beim Start direkt vor den naechsten Baum (`tree_jump()`,
+  Taste `'` dasselbe)
+- `DEMO_TREEMASK=1` — Baum-Mesh in reinem Rot = **exakte Maske** (Taste `;`)
+- `DEMO_SHOT=<sek>` — automatischer Screenshot nach n Sekunden
+- `DEMO_FREEZE=<sek>` — Shader-Zeit (Wind) einfrieren. Noetig, weil der Baum-Sway die
+  Meshes zwischen zwei Laeufen um ~10 Pixel verschiebt; erst damit liegen Maske und
+  Bild Pixel fuer Pixel uebereinander (Ueberschneidung 108.809 / 108.809).
+Ergebnis ueber alle 52.250 Baum-Pixel mit vollem 7×7-Umfeld:
+**Farb-Streuung 2,7 → 9,2**, **Detail-Energie |lum − Blur7×7| 0,05 → 2,11** (Faktor 42).
+
+**Kosten:** Baum-Nahschuss (12 % Bildschirm) 2,74 → 2,58 fps; Standard-Ansicht
+unveraendert 1,63 (Baeume sind dort nur 0,16 % der Pixel).
+
+**Nebenbei:** die Zell-Platzierung in `trees_cpu.c` steckt jetzt in `tree_cell()` und
+wird von `trees_build()` **und** dem neuen `tree_find_nearest()` gleich benutzt — der
+Debug-Sprung landet also garantiert bei einem Baum, den es wirklich gibt.
 
 ## Session 2026-10-07, Runde 15 (TODO 4: offene Nähte in den Baum-Röhren)
 

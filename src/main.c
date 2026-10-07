@@ -386,7 +386,20 @@ static int grassFrozen = 0;   // 1 = Gras-Rebuild eingefroren (G-Taste): gleiche
 static int dbgGrassDepth = 1, dbgGrassEdge = 1;
 //   C = Kategorie-Farbe als Albedo (nur waehrend ein Fade laeuft), normale
 //       Gras-Grafik bleibt sonst voll erhalten
-static int dbgGrassCat = 0;
+static int dbgGrassCat = 0;    // DEBUG C: 0 aus, 1 Fade-Farben, 2 Arten-Farben
+static int dbgTreeMask = 0;    // DEBUG (; bzw. DEMO_TREEMASK): Baum-Mesh als Maske
+// DEBUG-Umgebungsvariablen — deterministische Screenshots OHNE X-Tasten (die
+// Zustellung synthetischer Tasten ist in der VM unzuverlaessig):
+//   DEMO_TREE=1       Kamera beim Start direkt vor den naechsten Baum
+//   DEMO_TREEMASK=1   Baum-Mesh in reinem Rot (Maske fuer Rinden-Messungen)
+//   DEMO_SHOT=12.5    Screenshot automatisch nach 12,5 s Laufzeit
+static int envTreeJump = 0;
+static float envShotAt = -1.0f;
+//   DEMO_FREEZE=3.5  Shader-Zeit (Wind) auf 3,5 s einfrieren -> Screenshots sind
+//                      zwischen Laeufen Pixel fuer Pixel vergleichbar (noetig fuer
+//                      Maschen-Abgleich: der Baum-Sway verschiebt die Meshes sonst
+//                      um zehn Pixel)
+static float envFreeze = -1.0f;
 //   Y = Alpha-to-Coverage im Gras-Pass. Alpha wird dann in eine MSAA-Sample-
 //       Maske uebersetzt statt gemischt: ein halbtransparenter Halm schreibt
 //       Tiefe nur noch fuer die Samples, die er abdeckt. Loesst den Reveal-Pop
@@ -877,6 +890,25 @@ static void draw_sliders(float posD, float posH, float posM, int w, int h, int l
   }
 }
 
+// Kamera direkt vor den naechsten Baum (Debug: Rinde / Blattwerk pruefen)
+static void tree_jump(void){
+  float tp[3], ts = 2.0f;
+  if (!tree_find_nearest(flyPos[0], flyPos[2], tp, &ts)){
+    printf("DEBUG: kein Baum in der Nahe\n"); return;
+  }
+  float dx = flyPos[0] - tp[0], dz = flyPos[2] - tp[2];
+  float l = sqrtf(dx * dx + dz * dz);
+  if(l < 0.1f){ dx = 1.0f; dz = 0.0f; l = 1.0f; }
+  float dist = 2.4f + ts * 0.25f;
+  flyPos[0] = tp[0] + dx / l * dist;
+  flyPos[1] = tp[1] + 2.40f;
+  flyPos[2] = tp[2] + dz / l * dist;
+  flyYaw = atan2f(tp[0] - flyPos[0], tp[2] - flyPos[2]);
+  flyPitch = -0.22f;
+  printf("DEBUG Baum-Sprung: (%.1f, %.1f, %.1f) Groesse %.2f, Abstand %.2f m\n",
+         tp[0], tp[1], tp[2], ts, dist);
+}
+
 int main(int argc, char **argv) {
   setvbuf(stdout, 0, _IONBF, 0);
   int winW = 1280, winH = 720;
@@ -1002,6 +1034,7 @@ int main(int argc, char **argv) {
   GLint locTMVP    = p_glGetUniformLocation(progTMesh, "uMVP");
   GLint locTCam    = p_glGetUniformLocation(progTMesh, "uCamPos");
   GLint locTTime   = p_glGetUniformLocation(progTMesh, "uTime");
+  GLint locTMask   = p_glGetUniformLocation(progTMesh, "uTreeMask");
   GLint locGMVP    = p_glGetUniformLocation(progGrass, "uMVP");
   GLint locGCam    = p_glGetUniformLocation(progGrass, "uCamPos");
   GLint locGTime   = p_glGetUniformLocation(progGrass, "uTime");
@@ -1077,9 +1110,15 @@ int main(int argc, char **argv) {
 
   build_font();
   build_tree_lines();   // VAOs + Grundformen
+  envTreeJump = getenv("DEMO_TREE") ? 1 : 0;
+  if (getenv("DEMO_TREEMASK")) dbgTreeMask = 1;
+  { const char *es = getenv("DEMO_SHOT"); if (es) envShotAt = (float)atof(es); }
+  { const char *ef = getenv("DEMO_FREEZE"); if (ef) envFreeze = (float)atof(ef); }
+  if (envTreeJump) tree_jump();
 
   // ---------- Hauptloop ----------
   double tPrev = now_sec();
+  double loopT0 = tPrev;
   double fpsEMA = 60.0;
   int running = 1;
   int shotDone = 0;
@@ -1169,6 +1208,9 @@ int main(int argc, char **argv) {
           }
           if (ks == XK_v) { grassOnly = !grassOnly; printf("TEST: nur Gras zeichnen: %s\n", grassOnly ? "AN" : "aus"); }
           if (ks == XK_b) grass_debug_dump();
+          if (ks == XK_semicolon){ dbgTreeMask = !dbgTreeMask;
+            printf("DEBUG Baum-Maske (Rinde): %s\n", dbgTreeMask ? "AN (reines Rot)" : "aus"); }
+          if (ks == XK_apostrophe) tree_jump();
           if (ks == XK_n) {   // DEBUG: 3 Punkte: 45m vor, je 20m links/rechts/gerade
             float cnp = cosf(flyPitch);
             float fxn = cnp * sinf(flyYaw), fz2 = cnp * cosf(flyYaw);
@@ -1511,7 +1553,7 @@ int main(int argc, char **argv) {
       p_glUseProgram(progScene);
       p_glBindVertexArray(vaoTri);
       p_glUniform2f(locRes, (float)fboW, (float)fboH);
-      p_glUniform1f(locTime, (float)tNow);
+      p_glUniform1f(locTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
       p_glUniform3f(locCamPos, camPos[0], camPos[1], camPos[2]);
       p_glUniform3f(locCamTgt, camTgt[0], camTgt[1], camTgt[2]);
       p_glActiveTexture(GL_TEXTURE0);
@@ -1534,7 +1576,8 @@ int main(int argc, char **argv) {
       p_glUseProgram(progTMesh);
       p_glUniformMatrix4fv(locTMVP, 1, GL_FALSE, mvp);
       p_glUniform3f(locTCam, camPos[0], camPos[1], camPos[2]);
-      p_glUniform1f(locTTime, (float)tNow);
+      p_glUniform1f(locTTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
+      p_glUniform1f(locTMask, (float)dbgTreeMask);
       p_glBindVertexArray(vaoTree);
       p_glDrawArrays(GL_TRIANGLES, 0, nTreeVerts);
     }
@@ -1546,7 +1589,7 @@ int main(int argc, char **argv) {
     p_glUseProgram(progGrass);
     p_glUniformMatrix4fv(locGMVP, 1, GL_FALSE, mvp);
     p_glUniform3f(locGCam, camPos[0], camPos[1], camPos[2]);
-    p_glUniform1f(locGTime, (float)tNow);
+    p_glUniform1f(locGTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
     p_glUniform1f(locGHeight, grassHeightScale);
     p_glUniform1f(locGMaxDist, grassMaxDist);
     p_glUniform1f(locGFade, grassFadeDur);
@@ -1740,6 +1783,14 @@ int main(int argc, char **argv) {
     // Automatischer Screenshot des vollen Frames (inkl. Wireframe-Overlay) nach dem
     // ersten Frame (Test/Verifikation)
     if (!shotDone) { shotDone = 1; save_screenshot_ppm("/tmp/64kdemo_shot.ppm", winW, winH); }
+    // DEBUG: geplanter Screenshot (DEMO_SHOT=<Sekunden>) — deterministisch, ohne
+    // X-Tasten (synthetische Tasten kommen in der VM nicht immer an).
+    if (envShotAt >= 0.0f && now_sec() - loopT0 >= (double)envShotAt){
+      double el = now_sec() - loopT0;
+      envShotAt = -1.0f;
+      save_screenshot_ppm("/tmp/64kdemo_shot.ppm", winW, winH);
+      printf("DEBUG Auto-Screenshot nach %.1f s\n", el);
+    }
 
     p_glXSwapBuffers(disp, win);
   }
