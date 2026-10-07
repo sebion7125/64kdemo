@@ -133,7 +133,7 @@ void main(){
   // verschiedenen Arten gehoert.
   float sp = species(iPos.x, iPos.z, iPos.y, vReg);
   float spH = 1.0, spW = 1.0, bendPow = 2.0, bendK = 1.0;
-  float reedBase = 0.0, reedOff = 0.0, culmH = 0.0, reedHMul = 1.0, reedSheath = 0.0;
+  float reedBase = 0.0, reedOff = 0.0, culmH = 0.0, reedHMul = 1.0;
   vReedRole = 0.0;
   vThick = 0.0;
   if(sp > 0.5 && sp < 1.5){ spH = 1.75; spW = 1.35; lean *= 0.85; }   // Hochgras
@@ -175,7 +175,7 @@ void main(){
       float tr = hash12(vec2(iPos.x * 1.77 + 3.3, iPos.z * 2.91));
       float ti = floor(tr * 4.0);                    // 0..3 = Etage
       reedBase = 0.34 + 0.17 * ti + (th - 0.5) * 0.05;  // 0.34/0.51/0.68/0.85 Culm-Hoehe
-      reedOff  = (th - 0.5) * 0.05;                // knapp neben der Halmachse
+      reedOff  = (th - 0.5) * (0.16 + 0.10 * ti);   // seitlich neben dem Culm
     }
   }
   // Blickwinkel-Duennung. Ein senkrechter Halm wird NICHT foerziert, eine
@@ -201,9 +201,6 @@ void main(){
   // 'sizeLod' ist nur die Groessenkurve: 1.0 vorn bis 2.8 in der Ferne.
   float sizeLod = pow(1.0 - smoothstep(8.0, uMaxDist, d), 1.6);
   float sizeScale = 1.0 + 1.8 * (1.0 - sizeLod);
-  // Schilf ist eine Pflanze, keine Deckflaeche: es wird mit der Distanz NICHT
-  // hochskaliert (sonst stehen in 80 m ploetzlich 6-Meter-Rohre).
-  if(sp > 3.5) sizeScale = 1.0;
   // Schilf skaliert NICHT mit dem Gras-Hoehenslider (eigene Skala uReedH).
   float hscale = (sp > 3.5) ? uReedH : uHeightScale;
   float h = iData.x * hscale * sizeScale * spH, w = iData.y * sizeScale * spW;
@@ -224,19 +221,9 @@ void main(){
   p.z += sy * lo;
   p.y += t * h * lod * (1.0 - 0.3 * lean);
   if(vReedRole > 1.5){
-    // Blattscheide: das Quad laeuft erst als schmaler Streifen am Halm hoch
-    // (echte Halme: die Blatthuelle umfasst den Staengel), erst darueber boegt
-    // sich die Spreite nach aussen und ueberhaengt. Damit haengt jedes Blatt
-    // an einem Halm und schwebt nicht in der Luft.
-    float sheath = reedBase * culmH;
-    float hTot = sheath + h;
-    float ts = (hTot > 1e-4) ? sheath / hTot : 0.0;
-    float s = clamp((t - ts) / max(1.0 - ts, 1e-3), 0.0, 1.0);
-    p.y += hTot * lod * t * (1.0 - 0.30 * s * lean);
-    float lat = lean * pow(s, 1.45) * hTot * bendK;
-    p.x += cy * (lat + reedOff);
-    p.z += sy * (lat + reedOff);
-    reedSheath = ts;
+    p.y += reedBase * culmH * lod;      // Blatt sitzt am oberen Culm, nicht am Boden
+    p.x += cy * reedOff;
+    p.z += sy * reedOff;
   }
   // Wind: Basis-Brise (zwei Frequenzen) + wandernde Boen.
   // Boen = Noise-Feld im mitbewegten Koordinatensystem (Muster driftet in
@@ -257,19 +244,15 @@ void main(){
   // Breite: zulaeufig zur Spitze, Ebene um yaw rotiert
   float taper = (1.0 - t) * (1.0 - t) * 0.5 + 0.06;
   if(vReedRole > 1.5){
-    // Scheide (t < reedSheath) halmeartig schmal, Spreite mit echtem Grasblatt-
-    // profil: schmale Basis, Maximum bei ~1/3, spitz auslaufend.
-    float sb = clamp((t - reedSheath) / max(1.0 - reedSheath, 1e-3), 0.0, 1.0);
-    float blade = sin(3.14159 * pow(sb, 0.62)) * 1.45;
-    taper = max(taper * 0.30, mix(0.55, blade, smoothstep(reedSheath, reedSheath + 0.05, t)));
+    // Schilf-Blatt hat NICHT die Trichterform des Grashalms (unten am breitesten),
+    // sondern schmale Basis, Maximum bei ~1/3, dann spitz auslaufend.
+    taper = max(taper * 0.30, sin(3.14159 * pow(t, 0.62)) * 1.45);
   } else if(vReedRole < 1.5){
     // Culm ist ein Zylinder, kein Trichter. Die Grastrichter-Form (unten am
     // breitesten, zur Spitze auf 0.06 auslaufend) macht den Halm zu einem kaum
     // sichtbaren Dreieck — deshalb hier fast konstante Breite, Auslaufen erst
     // ganz oben.
-    // Naeherungsweise Zylinder: bis kurz unter die Spitze praktisch gleiche
-    // Breite (Nutzer: "nach oben so gut wie nicht schmaler").
-    taper = max(taper, 1.00 - 0.30 * smoothstep(0.88, 1.0, t));
+    taper = max(taper, 0.95 - 0.85 * smoothstep(0.72, 1.0, t));
   }
   // Bluetenstand / Schilf-Kolben: am oberen Ende wird der Halm wieder breiter
   // (Lavendel-Aehre, Gaensebluemchen-Koerbchen, Schilf-Kolben).
