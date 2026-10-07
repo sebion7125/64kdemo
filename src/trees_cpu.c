@@ -17,6 +17,8 @@
 #endif
 #include <string.h>
 
+int   treeOneShot = 0;
+int   treeForceTier = -1;
 float treeVerts[TREE_VERT_CAP * TREE_FLOATS];
 float crownVerts[CROWN_CAP * CROWN_FLOATS];
 float leafInst[LEAF_CAP * LEAF_FLOATS];
@@ -280,7 +282,8 @@ static void gen_tree(float bx, float by, float bz, float s, float seed, int tier
   float elB   = 0.40f + TH(4) * 0.40f;          // Ast-Elevation
   float bendB = 0.18f + TH(5) * 0.50f;          // Astbiegung
   int   shape = (int)(TH(6) * 4.99f);           // Kronenform
-  int   nTwig = 6 + (int)(TH(7) * 11.0f);       // Zweige pro Ast (nur tier 3)
+  int   nTwig = 9 + (int)(TH(7) * 11.0f);       // 9..19 Zweige pro Ast (vorher 6..16)
+  int   nFine = 2 + (int)(TH(407) * 3.0f);       // 2..4 Feinaeste pro Zweig
   float hue   = 0.20f + TH(8) * 0.20f;          // Blattfarbe individuell
   float lsat  = 0.45f + TH(9) * 0.45f;
   float lval  = 0.30f + TH(10) * 0.30f;
@@ -348,7 +351,8 @@ static void gen_tree(float bx, float by, float bz, float s, float seed, int tier
     float sr = kr[k0] + (kr[k0+1] - kr[k0]) * frc;
     float az  = az0 + i * GOLD + (TH(30 + i) - 0.5f) * 0.7f;
     float el  = elB + (TH(35 + i) - 0.5f) * 0.5f - (shape == 3 ? 0.30f * fr : 0.0f);
-    float len = (0.45f + 0.55f * TH(40 + i)) * crownProf(shape, fr) * hf;
+    float len = (0.60f + 0.65f * TH(40 + i)) * crownProf(shape, fr) * hf;  // groessere
+                                                // Krone (Nutzer: zu klein)
     float dx = cosf(el) * cosf(az), dy = sinf(el), dz = cosf(el) * sinf(az);
     float s0x = sx + dx * sr, s0y = y0, s0z = sz + dz * sr;
     float bend = bendB + TH(50 + i) * 0.35f - (shape == 3 ? 0.55f : 0.0f);
@@ -420,17 +424,50 @@ static void gen_tree(float bx, float by, float bz, float s, float seed, int tier
           emit_tube(&tw[0], &tw[1], 4, 1.0f, 1.0f, 0.40f * bTone, 0.32f * bTone, 0.20f * bTone, 0.9f, 0.0f);
         }
         float cr2 = s * (0.105f + 0.070f * hf) * (0.80f + 0.55f * TH(230 + jj));
-        // Zwei Buschel pro Zweig (knapp ueber halber Laenge + Spitze): nur an der
-        // Spitze entstehen getrennte Kugeln mit Luecken dazwischen, der Raum
-        // zwischen Asten bleibt leer.
-        int per = tier >= 3 ? 200 : 80;
-        leaf_cluster(bx + s * (px + d3x * len3 * 0.55f),
-                     by + s * (py + d3y * len3 * 0.55f),
-                     bz + s * (pz + d3z * len3 * 0.55f),
-                     cr2 * 0.85f, per, lsize, lasp, tiltB, seed,
+        int per = tier >= 3 ? 120 : 55;
+        leaf_cluster(bx + s * (px + d3x * len3 * 0.60f),
+                     by + s * (py + d3y * len3 * 0.60f),
+                     bz + s * (pz + d3z * len3 * 0.60f),
+                     cr2 * 0.80f, per, lsize, lasp, tiltB, seed,
                      3000 + jj * 1000, lcr, lcgg, lcb);
         leaf_cluster(tipx, tipy, tipz, cr2, per + per / 2,
                      lsize, lasp, tiltB, seed, 3500 + jj * 1000, lcr, lcgg, lcb);
+        // ---------- Feinaeste: der Zweig gabelt sich 2..4 mal ----------
+        // Genau diese Stufe fehlt: ohne sie stehen auf jedem Ast nur wenige
+        // Zweige mit je einer Buschelkugel ("Cheerleader"). Die Feinaeste fuellen
+        // das Kronenvolumen und tragen eigene, kleinere Buschel.
+        for(int f = 0; f < nFine; f++){
+          int ff = jj * 8 + f;
+          float tf = 0.40f + 0.58f * (f + 0.5f) / (float)nFine;   // Ansatz am Zweig
+          float ax = px + d3x * len3 * tf, ay = py + d3y * len3 * tf, az2 = pz + d3z * len3 * tf;
+          float faz = az0 + ff * GOLD + (TH(600 + ff) - 0.5f) * 1.30f;
+          float fae = el3 - 0.15f + TH(620 + ff) * 0.55f - (shape == 3 ? 0.35f : 0.0f);
+          float fdx = cosf(fae) * cosf(faz), fdy = sinf(fae), fdz = cosf(fae) * sinf(faz);
+          float rl2 = sqrtf(ax * ax + az2 * az2); if(rl2 < 1e-4f) rl2 = 1e-4f;
+          fdx = fdx * 0.55f + (ax / rl2) * 0.45f;      // vom Stamm weg
+          fdz = fdz * 0.55f + (az2 / rl2) * 0.45f;
+          fdy = fdy * 0.75f + 0.25f;                   // leichte Aufwaertskante
+          float fl = sqrtf(fdx * fdx + fdy * fdy + fdz * fdz); if(fl < 1e-6f) fl = 1e-6f;
+          fdx /= fl; fdy /= fl; fdz /= fl;
+          float fen = len3 * (0.38f + 0.34f * TH(640 + ff));
+          float ftx = bx + s * (ax + fdx * fen), fty = by + s * (ay + fdy * fen),
+                ftz = bz + s * (az2 + fdz * fen);
+          if(tier >= 3){
+            Ring fw[2];
+            memset(fw, 0, sizeof fw);
+            fw[0].p[0] = bx + s * ax; fw[0].p[1] = by + s * ay; fw[0].p[2] = bz + s * az2;
+            fw[0].r = s * 0.006f * hf;
+            fw[1].p[0] = ftx; fw[1].p[1] = fty; fw[1].p[2] = ftz;
+            fw[1].r = s * 0.003f * hf;
+            ring_basis(&fw[0], fdx, fdy, fdz);
+            ring_transport(&fw[1], &fw[0], fdx, fdy, fdz, fdx, fdy, fdz);
+            emit_tube(&fw[0], &fw[1], 3, 1.0f, 1.0f, 0.42f * bTone, 0.34f * bTone, 0.21f * bTone, 0.9f, 0.0f);
+          }
+          leaf_cluster(ftx, fty, ftz,
+                       cr2 * (0.55f + 0.25f * TH(660 + ff)),
+                       tier >= 3 ? 60 : 30,
+                       lsize, lasp, tiltB, seed, 7000 + ff * 977, lcr, lcgg, lcb);
+        }
       }
       // Buschel auf der Astspitze — die groessten, sie bilden den Kronensaum
       leaf_cluster(bx + s * t0x, by + s * t0y, bz + s * t0z,
@@ -595,11 +632,15 @@ void trees_build(float tx, float tz){
   for(int i = 0; i < nc; i++)
     for(int j = i + 1; j < nc; j++)
       if(cand[j].d2 < cand[i].d2){ TreeCand t = cand[i]; cand[i] = cand[j]; cand[j] = t; }
+  // DEMO_ONETREE: nur der naechste Baum (Liste ist gerade nach Entfernung
+  // sortiert), damit ein einzelner Baum in Ruhe betrachtet werden kann.
+  if(treeOneShot && nc > 1) nc = 1;
   for(int i = 0; i < nc; i++){
     // Detail-Stufe nach Entfernung zum Kameraziel: sehr nahe Baeume bekommen
     // Zweige + vollstaendige Blaetter (bis ~100.000), mittlere nur Blaetter an
     // den Aesten, ferne nur die Atlas-Quads.
-    int tier = cand[i].d2 < 121.0f ? 3 : (cand[i].d2 < 784.0f ? 2 : 0);
+    int tier = treeForceTier >= 0 ? treeForceTier
+           : (cand[i].d2 < 121.0f ? 3 : (cand[i].d2 < 784.0f ? 2 : 0));
     gen_tree(cand[i].p[0], cand[i].p[1], cand[i].p[2], cand[i].s,
              cand[i].p[0] * 12.9898f + cand[i].p[2] * 78.233f, tier);
     nTrees++;

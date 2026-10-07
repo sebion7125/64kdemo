@@ -1151,6 +1151,8 @@ static void tree_jump(void){
   // Groessenfaktor des Baums), also je nach Baum 3..12 m ueber der Basis.
   float crownY = tp[1] + ts * 1.5f * hf * 1.15f;
   float dist = 1.6f + ts * hf * 0.75f;
+  // DEMO_TREEDIST=<m>: Abstand erzwungen (Ganzbaum-Ansicht fuer Messungen)
+  { const char *ed = getenv("DEMO_TREEDIST"); if (ed) dist = (float)atof(ed); }
   flyPos[0] = tp[0] + dx / l * dist;
   flyPos[1] = crownY - ts * hf * 0.35f;
   flyPos[2] = tp[2] + dz / l * dist;
@@ -1384,6 +1386,12 @@ int main(int argc, char **argv) {
   // DEMO_GRASSMD=<m>  : max. Gras-Sichtweite (statt Slider)
   // DEMO_GRASSTEX="<far0> <far1>" : Uebergabe an die Einfangtextur, "0" = Textur aus
   { const char *eg = getenv("DEMO_GRASSMD"); if (eg) grassMaxDist = (float)atof(eg); }
+  // DEMO_ONETREE: ein einzelner Baum vor der Kamera, kein Gras — damit Baum-
+  // Arbeit (Feinast, Blattbuschel, LOD-Stufen) schnell und vergleichbar testbar
+  // ist. DEMO_TIER=0|2|3 erzwingt die Detailstufe dieses Baums.
+  { const char *eo = getenv("DEMO_ONETREE");
+    if (eo && atoi(eo)) { treeOneShot = 1; envTreeJump = 1; grassMaxDist = 0.5f; } }
+  { const char *et = getenv("DEMO_TIER"); if (et) treeForceTier = atoi(et); }
   { const char *eh = getenv("DEMO_REEDH"); if (eh) reedH = (float)atof(eh); }
   { const char *er = getenv("DEMO_REED");
     if (er) { reedDens = 1.0f; reedWide = 1.0f;
