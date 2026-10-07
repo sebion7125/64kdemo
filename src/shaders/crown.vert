@@ -55,8 +55,19 @@ void main(){
   p.z += cos(uTime * 1.3 + ph * 1.7) * amp * 0.7;
   p.y += sin(uTime * 2.2 + ph) * amp * 0.35;
   float d = length(aCenter - uCamPos);
-  // Blattdach ist in allen Distanzen sichtbar; nur am Horizont ausblenden
-  vFade = 1.0 - smoothstep(150.0, 185.0, d);
+  // Uebergabe an die echten Einzelblaetter: leaf.vert duennt seine Blaetter
+  // zwischen 20 und 28 m statistisch aus — die Billboards fuellen exakt
+  // komplementaer auf und sind unterhalb von 20 m AUS (Nutzer: "Billboards der
+  // Baumkrone duerfen nicht mehr genutzt werden, wenn die Kamera direkt davor
+  // ist. Das sieht immer unecht aus.").
+  float near = smoothstep(20.0, 28.0, d);
+  // Build-Rand: Baeume werden bis RANGE=20 Zellen a 9 m gebaut (180 m halbe
+  // Kantenlaenge, Ecken ~255 m). Bis 2026-10-07 endete das Blattdach bei 185 m,
+  // die Staemme gingen aber bis ~255 m -> kahle Stummel in der Ferne.
+  float far = 1.0 - smoothstep(190.0, 250.0, d);
+  vFade = near * far;
+  // Im Schatten-Wurf ist uCamPos das Sonnenauge (63 m weg) -> dort immer 1.
+  if(uLightFace < 0.5 && vFade < 0.002){ gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vUV = aOff * 2.0;
   vPos = p;
   vSeed = aData.z;

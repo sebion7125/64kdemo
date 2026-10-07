@@ -93,9 +93,14 @@ void main(){
   //     macht statt einer harten Linie.
   float band = max(foot * 1.6, 1e-5);
   float e = min(min(cell.x, 1.0 - cell.x), min(cell.y, 1.0 - cell.y));
-  float a = tx.a * smoothstep(0.0, band, e);
+  // Der Fade muss auf die ALPHA, nicht auf die Schwelle: der alte Test
+  // `a < thr * vFade` macht die Schwelle bei vFade = 0 exakt NULL -> gar kein
+  // Discard mehr. 15,3 % aller Kronen-Quads liegen aber bei d >= 185 m und haben
+  // vFade = 0 (gemessen, /tmp/crowndist.c): deren transparenten Atlas-Bereiche
+  // (rgb = 0) wurden als dunkles Quadrat gemalt = der Nutzerbefund "schwarz".
+  float a = tx.a * smoothstep(0.0, band, e) * vFade;
   float thr = 0.5 + (hash12(gl_FragCoord.xy + vTile * 37.0) - 0.5) * 0.75;
-  if(a < thr * vFade) discard;
+  if(a < thr) discard;
   // Beleuchtung: die Kachel enthaelt Albedo, nicht Licht. Eine Kugel-Andeutung
   // ueber die Quad-Ebene gibt der Krone Volumen (ferne Kronen sind zu klein fuer
   // echte Normale aus der Textur).
