@@ -83,7 +83,7 @@ float species(float x, float z, float y, out vec4 reg){
   float dh = y - WATER_Y;
   // Schilf deutlich lichter als vorher: es stand in dichten Teppichen
   // (Nutzer: "zu dicht"). 0.45 laesst Uferbu schel statt Riegel.
-  float wReed  = reedW(x, z, y) * 0.30 * uReedDens;
+  float wReed  = reedW(x, z, y) * 0.46 * uReedDens;   // wieder dichter (Nutzer)
   float wTall = 0.0, wLav = 0.0, wDaisy = 0.0, wPoppy = 0.0, wLupine = 0.0;
   if(dh >= 0.15){
     float nA = rgf(vec2(x * 0.011, z * 0.011));
@@ -156,16 +156,21 @@ void main(){
     vReedRole = rr < 0.30 ? 1.0 : 2.0;
     if(vReedRole < 1.5){
       spH = 4.00;                              // Culm-Hoehe: 0.9-2.6 m
-      spW = 0.42 * uReedWide;                  // 1.1-2.0 cm (echt 5-10 mm)
+      spW = 0.95 * uReedWide;   // echt 5-10 mm, aber dann praktisch unsichtbar
+                                                 // duenn (Nutzer: Halm nicht sichtbar)
       lean = 0.12; bendPow = 2.60; bendK = 0.70;  // fast gerade, nur leichte Biegung
       vThick = 1.0;                            // jeder Culm traegt einen Kolben
     } else {
-      spH = 0.75 + 0.35 * th;                  // Blattlaenge: 0.17-0.70 m
-      spW = (1.30 + 0.50 * th) * uReedWide;    // 3.4-7.7 cm: breiter als ein Grashalm
+      spH = 0.50 + 0.22 * th;                  // Blattlaenge: 0.11-0.46 m (kuerzer)
+      spW = (1.90 + 0.70 * th) * uReedWide;    // 4.9-12.4 cm: breiter, nicht laenger
       lean = 0.90 + 0.45 * th;                 // steht ab und ueberhaengt
       bendPow = 0.80; bendK = 1.55;            // Kruemmung schwerpunktmaessig oben
-      reedBase = 0.45 + 0.35 * th;             // Ansatz: oberes Halmdrittel
-      reedOff  = (th - 0.5) * 0.20;            // seitlich neben dem Culm
+      // Blaetter sitzen an Knoten: TIERS discrete Etagen ueber den Culm verteilt
+      // (echte Halme: Blatthuelle in zwei Reihen entlang des Halmstaengs).
+      float tr = hash12(vec2(iPos.x * 1.77 + 3.3, iPos.z * 2.91));
+      float ti = floor(tr * 4.0);                    // 0..3 = Etage
+      reedBase = 0.34 + 0.17 * ti + (th - 0.5) * 0.05;  // 0.34/0.51/0.68/0.85 Culm-Hoehe
+      reedOff  = (th - 0.5) * (0.16 + 0.10 * ti);   // seitlich neben dem Culm
     }
   }
   // Blickwinkel-Duennung. Ein senkrechter Halm wird NICHT foerziert, eine
@@ -234,7 +239,7 @@ void main(){
   if(vReedRole > 1.5){
     // Schilf-Blatt hat NICHT die Trichterform des Grashalms (unten am breitesten),
     // sondern schmale Basis, Maximum bei ~1/3, dann spitz auslaufend.
-    taper = max(taper * 0.30, sin(3.14159 * pow(t, 0.62)) * 1.25);
+    taper = max(taper * 0.30, sin(3.14159 * pow(t, 0.62)) * 1.45);
   }
   // Bluetenstand / Schilf-Kolben: am oberen Ende wird der Halm wieder breiter
   // (Lavendel-Aehre, Gaensebluemchen-Koerbchen, Schilf-Kolben).

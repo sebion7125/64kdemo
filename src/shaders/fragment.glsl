@@ -185,7 +185,7 @@ vec3 terrainColor(vec3 p, vec3 n, float h, vec3 rd){
   grass = mix(grass, grass * vec3(0.86, 0.94, 0.78), wTall * 0.55);
   grass = mix(grass, vec3(0.34, 0.36, 0.50), wLav * 0.30);
   grass = mix(grass, vec3(0.30, 0.44, 0.18), wDaisy * 0.35);
-  grass = mix(grass, vec3(0.44, 0.46, 0.24), wReed * 0.65);
+  grass = mix(grass, vec3(0.26, 0.38, 0.15), wReed * 0.65);
   // Blumen
   vec2 fc = floor(p.xz * 1.3);
   float fl = hash12(fc);
