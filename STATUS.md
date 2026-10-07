@@ -1,43 +1,63 @@
 # 64kDemo — Status
 
-Stand: 2026-10-06, Runde 10. **Issue A GELÖST.** Ursache: halbtransparente,
-sterbende Halme schreiben Tiefe und verdecken eingespielte Halme dahinter;
-beim harten Cull werden die schlagartig sichtbar (gemessen: 55,8 % der
-eingespielten Halme im Bild betrifft das). Fix: **Alpha-to-Coverage** im
-Gras-Pass (Standard AN, wirkt mit MSAA). Vom Nutzer auf dem Host bestätigt.
-Sortierte Zeichenreihenfolge ist gebaut und gemessen (Abweichung von ideal
-31,77 m → 0,12 m), aber der Effekt ist „mild bis unsichtbar“ — **A2C genügt,
-Sortierung kommt nicht in main.**
-Runde 9: Fade-GRUPPEN + Intervall-Markierung (12 → 10 Floats/Halm, Puffer −16 %,
-POS-Build −11 %, Fade-Bilanz exakt 0,00 %, Idempotenz exakt).
-**Fade-Dauer Standard 1 s.** Slider-UI blendet bei gehaltener Maustaste aus.
-**Issue B FIXED + bestätigt. R-Reset FIXED + vom Nutzer bestätigt.**
-Offen: Wahrnehmungsfrage Fade, Aussehen (Dichte/Halmbreite/Farben),
-Baum-Schatten. **Issue C erledigt (99 %, nur 1x gesehen, seit Issue-B-Fix nie
-wieder).** Budget/Kompaktierung laut Nutzer zweitrangig.
-Befund: vorbestehende Hash-Kollision (Zelle 83,9, b=11 vs b=12 → 2 Halme doppelt,
-im Original schon da, visuell vernachlässigbar).
-Nächster Schritt: siehe „⚡ SOFORT NÄCHSTER SCHRITT“ unten.
+Stand: 2026-10-07, Runde 11. **Issue A GELÖST** (Alpha-to-Coverage, vom Nutzer
+auf dem Host bestätigt). Danach Dichte-/Entfernungsverhalten umgebaut und die
+**ferne Gras-Textur** gebaut (Engine fängt ein echtes Grasstück schräg ein).
+**BUG OFFEN: diese Textur wird im Bild SCHWARZ — Fehler noch nicht gefunden.**
+Kennzahlen jetzt: 551.268 Halme bei grassMaxDist=110 (0,65× von früher),
+POS-Build 1 m 186 ms, Initial-Build 920 ms, Binary 80.536 Byte.
+**Fade-Dauer Standard 1 s. Issue A/B/C und R-Reset erledigt.**
+Aussehen (Dichte/Halmbreite/Farben), Baum-Schatten und Budget sind offen;
+Budget ist laut Nutzer zweitrangig.
 
 ## ⚡ SOFORT NÄCHSTER SCHRITT (nächster Chat)
 
-**Issue A ist abgeschlossen.** A2C ist der Fix, vom Nutzer auf dem Host
-bestätigt; Sortierung bringt nichts Sichtbares mehr. Alles Weitere hier:
+**BUG: die ferne Gras-Textur erscheint schwarz.** Der Einfang selbst ist geprüft
+und in Ordnung: FBO komplett, **48 % Bildabdeckung**, 12.704 Farbwerte,
+Streifenstruktur — nachzusehen in `/tmp/64kdemo_grasstex.ppm` (Taste P).
+Der Fehler steckt im **Sampling oder Mapping** in `fragment.glsl`.
 
-1. **Fix nach `main` bringen** (Branch `dbg-gras-fade`, 8 Commits vor `main`
-   = `666de2c`). Nur die Sachteile: Fade-Gruppen + Intervall-Markierung
-   (`grass_cpu.c`, `scene.h`, `grass.vert`, `uFadeGrp`-Upload) und
-   A2C-ohne-Blending im Gras-Pass. Die Debug-Schalter C/J/K/L/Y/I, der
-   Farbmodus und die Debug-Dumps bleiben draußen. Binary aktuell 76.416 B
-   (Debug-Zweig, über Budget) — nach dem Abspecken neu messen.
-2. **Issue C (Gras-Inseln)**: **erledigt (99 %)** — vom Nutzer nur ein einziges
-   Mal gesehen, seit dem Issue-B-Fix nicht mehr. Ohne Ursache geschlossen;
-   Kandidat (b) (Stale Halme aus Issue-B-Pinning) war vermutlich die Ursache
-   und ist fixed. Testplan bleibt in ISSUES stehen, falls es wieder auftritt.
-3. **Wahrnehmung**: sind 1 s Fade lang genug?
-4. **Dichte, Halmbreite, Farben, Baum-Schatten.**
-5. **Budget zurück unter 64 KB.** Der Gruppen-Umbau ist der Hauptgewinn
-   (−16 % Puffer, −17 % Upload, −11 % Build-Zeit).
+**Diagnose-Reihenfolge — jede Stufe ist eine Zeile Code und trennt was:**
+1. **Shader-Quelle prüfen:** `grep uGrassTex src/shaders_gen.c` — der generierte
+   Shader enthält die neuen Uniforms nur, wenn make die .glsl neu übersetzt hat.
+2. **Uniform-Orte ausgeben:** `printf("%d %d %d %d\n", locGTex, locGBox,
+   locGTexAmt, locGFar0)` — `-1` heißt Name vertippt oder vom Compiler entfernt.
+3. **Textur direkt ausgeben:** in `terrainColor` temporär
+   `return vec4(texture(uGrassTex, uv).rgb, 1.0);` (uv wie unten).
+   Schwarz = Sampling kaputt, Grasfarbe = Mapping/Blend kaputt.
+4. **Mips ausschließen:** `textureLod(uGrassTex, uv, 0.0)` — wenn das farbig
+   ist, sind die generierten Mipmaps kaputt.
+5. **UV ausschließen:** temporär `vec2 uv = vec2(0.5);` — feste Farbe =
+   Mapping falsch, Inhalt richtig.
+6. **Gewicht ausschließen:** temporär `grassTexW = 1.0;` — prüft, ob
+   `smoothstep(uGrassFar0, uGrassFar1, d) * uGrassTexAmt` überhaupt > 0 wird.
+
+**Verdächtige Stellen, in dieser Reihenfolge:**
+- **UV-Mapping** in `fragment.glsl`:
+  `vec2 uv = vec2(uGrassBox.x - p.z, p.x - uGrassBox.y) / uGrassSide;`
+  mit `capBox[0] = pz + CAP_M/2` (Welt-Z an u=0, weil Bild-x = **−Z**) und
+  `capBox[1] = x0`. Die Achsen sind gegenüber dem ersten Versuch getauscht und
+  eine ist negiert — sehr wahrscheinlich sitzt der Fehler genau hier.
+- **Textureinheit:** `p_glActiveTexture(GL_TEXTURE0)` + Bind nur im Szene-Pass.
+  Prüfen, ob spätere Pässe (HUD, Crown, Gras) Einheit 0 überschreiben.
+- **FBO-/ReadBuffer-Zustand:** `save_grass_tex_ppm()` und die Einrichtung
+  binden FBO 0 und lassen `p_glReadBuffer(GL_COLOR_ATTACHMENT0)` als Zustand stehen.
+
+**Danach, Punkt 2:** Übergabeband (25..45 m) und Blickwinkel-Dünnung (U)
+schneiden sich gerade gegenseitig — wenn die Halme bei 45 m ausdünnen, muss die
+Textur längst voll da sein. Erst den Bug fixen, dann das Band gemeinsam abstimmen.
+
+**Weitere offene Punkte:**
+1. **Fix nach `main` bringen** (Branch `dbg-gras-fade`, jetzt 12 Commits vor
+   `main` = `666de2c`). Nur die Sachteile: Fade-Gruppen + Intervall-Markierung,
+   A2C-ohne-Blending, neues Dichteprofil, Winkeldünnung, Ferntextur.
+   Debug-Schalter C/J/K/L/Y/I/U/Z, Farbmodus und Debug-Dumps bleiben draußen.
+2. **Wahrnehmung:** sind 1 s Fade lang genug? (Nutzer: ja, 1 s ist gut)
+3. **Aussehen:** noch satteres Grün, Grasarten/Blumen (Lavendel, Gänseblümchen)
+   in verschiedenen Regionen, Schilf in Wassernähe, unterschiedliche
+   Grashöhen nach Bereich. **Noch nicht angefangen.**
+4. **Baum-Schatten.**
+5. **Budget** zurück unter 64 KB (laut Nutzer zweitrangig).
 6. Optional: vorbestehende Hash-Kollision (Zelle 83,9, b=11 vs b=12) fixen —
    2 Halme von ~850k, im Original schon vorhanden.
 
@@ -290,6 +310,115 @@ aber separat gegenpruefen (in der VM nicht testbar).
   CPU-Tests und Host-Augen zaehlen.
 - `xdotool mousedown` erreicht das Demo-Fenster in der VM nicht -> Maus-UI nicht
   automatisierbar.
+
+## Session 2026-10-07, Runde 11 (Dichte-Neubau, Winkeldünnung, ferne Gras-Textur)
+
+### `1884fb0` — neues Dichteprofil
+`dens(r) = (Sockel + Boost) · Ausschnitt`
+- **Sockel** `1/(1+(r/R1)^p)`, R1=27, p=3 (`DENS_P`). Der 1/r²-artige Schwanz ist
+  der Grund, warum Reichweite fast nichts kostet:
+  `N = π·n0·R1²·ln(1+(R/R1)²)` — **logarithmisch** in R.
+- **Boost** `3/(1+(r/2)⁴)` = 4× im engsten Nahfeld, bei 4 m praktisch weg
+  (r=1: 3,8× · r=2: 2,5× · r=3: 1,5× · r=5: 1,04×), kostet nur **0,6 %** des
+  Halmebudgets. Genau so vom Nutzer gefordert.
+- **Ausschnitt** `(1−smoothstep(md−12, md, r))` — `DENS_EDGEW` **muss** das selbe
+  12-m-Band sein wie die LOD-Dämpfung in `grass.vert`. Mein erster Versuch
+  `(1−smoothstep(0.6·md, md, r))` legte die Generierungskante auf 99 m, die
+  LOD-Dämpfung begann bei 98 m -> Kante bei **lod ≈ 1,0**, also genau die harte,
+  voll sichtbare Graskante, die Runde 7 behoben hatte. Durch Messen gefunden.
+- `nb`-Cap 32 -> `GRASS_NBMAX 128` (uint8_t-Zellen möglich bis 255).
+- **`CT` 700 -> 1000**: das Build-Quadrat ist 2·g_half breit; bei md=110 sind das
+  717 Zellen, 700 hätten das Feld bei 105 m abgeschnitten.
+- `grassMaxDist` 80 -> 110, Slider 40..150.
+- Radial (Halme pro Band, md=110 gegen md=80 alt): 1–2 m 250→787, 10–20 m
+  116983→100429, 40–60 m 221558→83531, 60–80 m 143243→60176, 80–100 m 0→45886,
+  100–110 m 0→4533. Gesamt 849562 -> 551268.
+- Kosten: Initial-Build 933 -> 920 ms, POS-Build 1 m 157 -> 186 ms
+  (p=2 hatte 225 ms). Mehr Zellen im Walk-Quadrat (445² -> 717²).
+
+### `9a9cfba` — drei Dinge
+1. **Blickwinkel-Dünnung (U, standardmäßig AN) — der fehlende Faktor.**
+   Ein senkrechter Halm wird **nicht** foerziert, eine Wiese schon (Faktor sin θ).
+   `Coverage = n·h·w / sin θ` -> konstante Pixeldichte verlangt `n ∝ sin θ`.
+   Gemessen ohne Modulation:
+   `Blick −2°: Coverage 9,40 / Halme pro Pixel 0,310` · `−10°: 8,11 / 0,221`
+   · `−89°: 4,89 / 0,001`. Mit `n *= (sin θ / 0,35)^0,7`:
+   **Coverage 5,19 / 5,18 / 5,13 / 4,51 / 4,89** — über alle Blickwinkel flach,
+   senkrechter Blick bleibt zu 100 % erhalten. Umgesetzt im Vertex-Shader: der
+   Schwellwert ist pro Halm stabil aus `iPos.xz` gehasht, weicher Übergang plus
+   Cull darunter -> beim Drehen dünnen vorhandene Halme aus, es ploppen keine
+   nach, und es ist **kein Rebuild** nötig.
+2. **Treppen-Fix:** `dens_at` benutzte `(int)(dist*2.0f)` ohne Interpolation ->
+   die Dichte war eine **Treppe mit 0,5-m-Stufen** (konzentrische Ringe). Jetzt
+   linear interpoliert. (Frage des Nutzers, Antwort war: ja, es lief in Stufen.)
+3. Sockel p=3. Wichtig zum Nachjustieren: **bei gleichem Budget** (R1 jeweils
+   neu gelöst) bringt p=2→4 nur **8 %** weniger Halme in der Shimmer-Zone; mit
+   **festem** R1 sinkt die Gesamtzahl von 0,97× auf 0,65×.
+
+### AA-Diagnose: meine eigene Hypothese war falsch
+Kein Sub-Pixel-Undersampling (0,03 Halme pro Pixel bei 40 m — Halme sind viel
+größer als ein Pixel), sondern **Halmbreite**:
+`w_px` = 8,2 (5 m) / 4,1 (10 m) / 2,3 (20 m) / 1,82 (30 m) / 1,67 (40 m) /
+1,53 (60 m) / 1,36 (80 m) / 1,04 (110 m). Ab ~25 m ist jeder Halm eine
+1–2-px-Rippe, deren MSAA-Abdeckung beim Kameramarsch flackert. Das ist das
+Rauschen, das der Nutzer sieht.
+
+### `17dcb49` — ferne Gras-Textur (Z-Taste, standardmäßig AN)
+Idee vom Nutzer: die Engine fängt ein echtes Grasstück ein und nutzt es als
+Oberfläche für entferntes Terrain. Kostet Laufzeit, **keine Datei-Bytes**.
+- `main.c grass_capture()`: Ortho-Kamera, 1024×1024 RGBA8 + Depth, 16 m Feld,
+  zeichnet alle Halme als **ALBEDO** (`uAlbedoOnly`: ohne Beleuchtung, Fog,
+  Tonemap — das Terrain beleuchtet sie normal, sonst würden sie doppelt
+  angewandt). Hintergrund = Terrain-Grasfarbe genau dort, damit die Lücken
+  zwischen den Halmen zum Untergrund passen. Sucht einen grasigen Punkt
+  (Wasser/Steilhang raus) in einer Spirale um die Kamera.
+- **Regionengitter 48 m** -> pro Region neu eingefangen (`capRegion`).
+- `fragment.glsl`: Tiling über Welt-XZ, hängt sich in die bestehende Gras-Maske
+  (Fels/Sand/Schnee raus), Crossfade über `uGrassFar0..Far1`. Das prozedurale
+  „Gras-Detail (Top-Down-Sicht)“ wird im selben Band mit `(1−grassTexW)`
+  zurückgenommen, damit sich beides nicht überlagert.
+- `uFarFade` im Gras-Shader = **dasselbe Band**, damit die Halme genau dort
+  ausdünnen, wo die Textur übernimmt.
+- **P schreibt zusätzlich `/tmp/64kdemo_grasstex.ppm`** — damit ist der Einfang
+  ohne Bildurteil prüfbar. Das war der entscheidende Test.
+
+### Zwei Erkenntnisse beim Messen, beide gegen meine Annahme
+1. **Senkrechte Ortho-Aufnahme ist unbrauchbar:** nur **7,3 %** Bildabdeckung bei
+   145 Halmen/m², weil von oben fast nur die Spitzen sichtbar sind (Struktur im
+   Dump = Punkte, kein Streifenmuster). Fix: **schräge** Aufnahme (`capElev` 22°,
+   auf Nutzeranstoß) -> **48 %** Abdeckung, 12.704 Farbwerte, Streifenstruktur.
+   Der echte Blickwinkel auf fernen Grund ist winzig (2 m Kamerahöhe, 40 m
+   Distanz = 3°); eine stark foerzierte Aufnahme wäre aber ein 16×1,4 m-Schmalband
+   und kachelt sichtbar. 22° ist der Kompromiss; `capElev` ist eine Variable.
+   Ein Scher-Hack (Höhe in die Bildebene falten) war gebaut und ist wieder raus —
+   die schräge Kamera erledigt das physikalisch richtig.
+2. **Depth-Renderbuffer:** mit `glRenderbufferStorageMultisample(target, 1, …)`
+   blieb der FBO bei `0x8d56` (`GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT`). Mit dem
+   regulären `glRenderbufferStorage` ist er komplett.
+
+### Stummschaltbare Parameter
+| wo | Wert | Wirkung |
+|---|---|---|
+| `capElev` (main.c) | 22° | Aufnahmewinkel der Ferntextur |
+| `CAP_M` / `CAP_TEX` / `REGION_M` | 16 m / 1024 / 48 m | Feldgröße, Auflösung, Region |
+| `grassTexFar0/Far1` | 25 / 45 m | Übergabe Geometrie -> Textur |
+| `DENS_R1 / DENS_RB / DENS_P / DENS_EDGEW` | 27 / 2 / 3 / 12 | Dichteprofil |
+| `grassAngS0 / grassAngQ` | 0,35 / 0,7 | Blickwinkel-Dünnung |
+| `grassMaxDist` | 110 (Slider 40..150) | Sichtweite |
+
+### Tasten (Debug-Zweig)
+C Farbmodus · J Depth-Write · K Dichte-Kante · L Fade-Dauer · Y Alpha-to-Coverage ·
+I sortierte Reihenfolge · U Blickwinkel-Dünnung · Z ferne Gras-Textur ·
+G Freeze · V Nur-Gras · M MSAA · B Dump · P Screenshot **+ Gras-Textur-PPM**
+HUD: `DW± EDGE± CAT A2C SORT WINK TEX FRZ NUR-GRAS FADE`
+
+### Regression (nach jedem Schritt gelaufen, alle grün)
+0 Pops, Fade-Bilanz am Swap exakt 0,00 %, Idempotenz exakt (10 Builds am selben
+Zentrum = 0 Änderung), Hin-und-zurück 0,005 %, 15/512 Gruppen, 1 Duplikat
+(vorbestehende Hash-Kollision). Tests: `/tmp/test_grp.c`, `test_idem.c`,
+`test_there.c`, `test_densprof.c` (Radialprofil + Build-Zeit), `test_zhide.c`
+(Issue-A-Beweis), `timing.c` (alt/neu), `/tmp/densdesign*.py`, `/tmp/aa2.py`,
+`/tmp/winkel.py` (Rechnungen).
 
 ## Session 2026-10-06, Runde 10 (URSACHE GEFUNDEN: Depth-Write halbtransparenter Halme)
 
