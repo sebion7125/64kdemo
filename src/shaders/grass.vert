@@ -82,7 +82,7 @@ float species(float x, float z, float y, out vec4 reg){
   float dh = y - WATER_Y;
   // Schilf deutlich lichter als vorher: es stand in dichten Teppichen
   // (Nutzer: "zu dicht"). 0.45 laesst Uferbu schel statt Riegel.
-  float wReed  = reedW(x, z, y) * 0.45 * uReedDens;
+  float wReed  = reedW(x, z, y) * 0.30 * uReedDens;
   float wTall = 0.0, wLav = 0.0, wDaisy = 0.0, wPoppy = 0.0, wLupine = 0.0;
   if(dh >= 0.15){
     float nA = rgf(vec2(x * 0.011, z * 0.011));
@@ -142,9 +142,9 @@ void main(){
     // verlagert die Krueimmung nach oben), und vereinzelt stehen dicke Halme mit
     // grossem Kolben.
     float th = hash12(vec2(iPos.x * 3.11, iPos.z * 5.17));
-    vThick = th > 0.90 ? 1.0 : 0.0;
+    vThick = th > 0.72 ? 1.0 : 0.0;          // mehr dicke Halme (vorher 0.90)
     spH = 3.10 + 1.10 * vThick;
-    spW = (1.05 + 1.15 * vThick) * uReedWide;
+    spW = (1.55 + 1.45 * vThick) * uReedWide;   // dicker (vorher 1.05 + 1.15)
     lean *= 1.30;
     bendPow = 1.55; bendK = 1.30;
   }
