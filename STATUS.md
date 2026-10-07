@@ -1,9 +1,38 @@
 # 64kDemo — Status
 
-Stand: 2026-10-07, Runde 23. Schattenwurf repariert (TODO 20 teilweise), ferne
-Kronen-Quads repariert (15/16), Krone volumetrisch (18), Gras weiter (17). Kennzahlen:
-Binary 117.480 Byte (Budget laut Nutzer zweitrangig), VM-fps ~1,1-1,7 bei 640x360
-(llvmpipe), Shadow-Map 2048², 18,3 % gefüllt, 13,7 cm/Texel.
+Stand: 2026-10-08, Runde 24. **Baumgenerator ist jetzt ein Port von EZ-Tree**
+(`github.com/dgreenheck/ez-tree`, MIT) — umschaltbar mit `DEMO_TREEGEN=alt|ez`
+(Standard `ez`). Schattenwurf repariert (TODO 20 teilweise), ferne Kronen-Quads
+repariert (15/16), Gras weiter (17), Schilf auf bestem Stand zurückgedreht (19).
+Kennzahlen: Binary 129 888 Byte (Budget laut Nutzer zweitrangig), Baum-Vertices
+ganze Szene **496 104** (Cap `TREE_VERT_CAP 700000`), 14 538 Canopy-Quads,
+Shadow-Map 2048², 13,7 cm/Texel.
+**Wichtigste Funde der Runde 24:**
+1. Unser LOD (`tier = d2<121 ? 3 : d2<784 ? 2 : 0`) stammt aus der
+   Ursprungscodebasis, **nicht** von EZ-Tree. Es warf ganze Ast-Level weg und
+   schaltete auf eine andere Repräsentation (Atlas-Quads) → Sprung der
+   Aststruktur, ferne Bäume = nackter Stamm mit hellgrünen Quads. EZ-Tree ändert
+   an der Stufe **nur die Vernetzung**: `sectionStride`, `segmentFactor`,
+   `leafStride`, `leafScale` (bewusst unter √2) + Hysterese 0,05, nie die
+   Struktur (`tree.js:88-121`). Seit `971873e` machen wir das genauso.
+2. **Hängende Zweige** waren ein eigener Port-Fehler: Kinder/Laub wurden auf den
+   durch Gnarliness *gebogenen* Abschnittspfad gesetzt, die sichtbare Röhre ist
+   die *Sehne* zwischen den keep-Ringen. Ansatzpunkte liegen jetzt auf den
+   vernetzten Ringen (Makro `EZSEG`).
+3. Referenzbilder analysiert: `fbrqdET` = Foto-Rinde, `ZVAOUSU` = **Normalmap**
+   (nicht Bumpmap, Mittelfarbe (119,125,247)), `cYMdcNC` = **Blattrebe** (mehrere
+   Blätter an einem Stengel, 68,8 % der Zeilen schneiden ≥3 Segmente). EZ-Tree
+   **liefert Texturen mit** (11 Rinden-Sets Color/NormalGL/Roughness + Blatt-
+   Texturen, Git-LFS); quicktree/Sapling nicht (nur Datei-Properties). Referenz-
+   bilder im Share: `/media/sf_Quarantine/64kDemo/referenz/`.
+**Als nächstes (offen, Nutzer-Feedback Runde 24):** Atlas-Quads zeigen anderen
+Inhalt als unsere Einzelblätter → TODO 22 (Buschel-/Reben-Textur pro Blattfarbe)
+ist der nächste Schritt; dann TODO 23 (Billboard im gröbsten LOD), 24
+(Alpha-Blend-Überblendung), 25 (Schatten vom ganzen Baum, mit der neuen
+Geometrie), 26 (eigener Schilf-Pass, Plan unten). Rinden-Ausbau wie in den
+Referenzen (Foto-Color + Normalmap + Roughness, Tone Mapping mit Exposure) ist
+vorgemerkt.
+Test-Hygiene: Timeout <=120 s, nach jedem Test `pkill -9 -x 64kdemo`.
 **Wichtigster Fund der Runde 23:** `DEMO_FREEZE` blendete das **gesamte Gras** aus.
 `gWorldTime` (Birth-Zeit der Halme) lief in echter Laufzeit (~14 000 s), die Shader
 bekamen `uTime = 3.5` -> `gf = smoothstep(0, uFadeDur, uTime - gbirth) = 0` ->
@@ -51,7 +80,7 @@ Screenshot unsichtbar (siehe oben).
 | 19 | **Schilf: Halme zu dünn, teils zu dicht gewachsen** (Nutzer, Runde 22) | 🔶 Runde 23b — Nutzer sah sich Schilf an: „dünner gerader Halm, lange breite Blätter“. Recherche (Wikipedia *Phragmites australis*): Culm **1,5-4 m, nur 5-10 mm** dick; Blätter **18-60 cm lang, 1-3 cm breit**, oben am Halm; Kolben **15-50 cm**. Umbau: zwei Rollen pro Instanz (`vReedRole` 1=Culm 2=Blatt), Blatt-Ansatz erhöht am Culm (`p.y += reedBase*culmH`), Blatt-Taper (schmale Basis, Maximum bei 1/3), Kolben nur am Culm. Messung: Culm+Blatt-Silhouette 6,92 % (vorher 6,97 %), oberste Bildzeile 81→**74**, breitester zusammenhängender Run **104→36 px**, Runs 447→321. **Nutzer-Runde 23c:** Blätter breiter aber kürzer, Halm sichtbar (war zu dünn), dichter, Grün dunkler/satter, **und Blätter in Etagen am Halm**. Umsetzung: Culm `spW 0,42→0,95` (2,5–4,6 cm), Blatt `spH 0,75+0,35·th → 0,50+0,22·th` (kürzer), `spW 1,30+0,50 → 1,90+0,70` (breiter), `wReed 0,30→0,46`, Blatt-Ansatz quantisiert auf **4 Knoten-Etagen** (`ti = floor(tr*4)`, 0,34/0,51/0,68/0,85 der Culm-Höhe), Farben dunkler/gesättigter (Blatt `0,26/0,38/0,22 → 0,11/0,30/0,09`, Culm `0,30/0,40/0,22 → 0,16/0,33/0,12`, Boden-Tint `0,44/0,46/0,24 → 0,26/0,38/0,15`).Messung: Schilffläche 6,92 %→**17,87 %**, Run-Median 3→**4 px**, auf gemeinsamen Schilfpixeln Farbe (138,159,125)→**(124,156,110)**, Sättigung 35,8→**47,0**. **Nutzer-Runde 23d:** Grün noch dunkler/satter, Halm **nach wie vor unsichtbar**, Halmausrichtung ~vertikal mit ±10° Streuung, Pflanzenhöhe variabler, **Schilfhöhe darf nicht mit dem Gras-Slider skalieren** (eigene Einstellung, Menü später). Umsetzung: Culm-Breitenprofil von Trichter auf **Zylinder** umgebaut (`taper = max(taper, 0.95-0.85·smoothstep(0.72,1,t))` — der Gras-Trichter lief zur Spitze auf 0,06 aus, der Halm war ein unsichtbares Dreieck), `spW 0,95→1,30`, Neigung `lean = 0.02+0,20·th` (≈1–12°), pflanzenweise Höhen-Multiplikator `reedHMul = 0.55+1,05·hh` auf Culm *und* Blätter, neuer Uniform **`uReedH`** (Schilf-Höhe unabhängig von `uHeightScale`, Hook `DEMO_REEDH=`), Farben weiter dunkler/gesättigt (Blatt `0,04/0,20/0,03`, Culm `0,07/0,24/0,06`, Boden-Tint `0,12/0,28/0,09`). Messung: Run-Median 4→**5 px**, breitester Run 92→**165 px**, Sättigung 47,5→**57,4**, Farbe (128,162,115)→**(118,158,101)**; `uReedH` wirkt: 0,6 → Silhouetten-Oberkante Zeile 114, 1,6 → Zeile 0 |
 | 20 | Schattenwurf: Map funktioniert rechnerisch, aber **im Bild nicht sichtbar** (Nutzer, Runde 22) | 🔶 Runde 23 (`063daad`: Blatt-Wurf lief nie ein, PCF filterte Tiefen statt Vergleiche. 22,30 % Bildänderung an/aus. **Nutzer: immer noch nur Stumpf-Schatten, mäßig aufgelöst**) |
 | 21 | **Feinast-Gerüst**: zu wenige feine Äste, Krone zu klein („Cheerleader“) (Nutzer, Runde 23) | 🔶 Runde 23f — **neue Messbank: `DEMO_ONETREE=1`** (ein Baum, kein Gras) + **`DEMO_TIER=0|2|3`** (Detailstufe erzwingen) + **`DEMO_TREEDIST=<m>`** (Ganzbaum-Abstand). Damit 10–16 fps statt 1,3. Umsetzung in `trees_cpu.c`: vierte Stufe **Feinaeste** (2–4 pro Zweig, eigene Röhren 3 Segmente + eigener kleiner Buschel), Zweige pro Ast `6..16 → 9..19`, Astlänge `0,45+0,55·TH → 0,60+0,65·TH` (Krone größer), Blätter neu verteilt (Zweig-Buschel 200→120/55, Spitze 300→180/82, je Feinast 60/30). Messung (ein Baum, `DEMO_TIER=3`, 12 m Abstand): Gerüst-BBox **187→253 px** (+35 %), Gerüst-Run-Median **24,0→11,0 px** (viel feiner), Gerüst-Runs 647→862, Kronen-BBox **274→317 px**, Blattmaske 12,48 %→**14,78 %**, Baum-Vertices 2100→7716, Blätter 29 580→41 460. Ganze Szene: Vertices 580 746→586 362, Blätter 233 510→**323 027**, fps 0,77→0,74 (llvmpipe). **Optik prüft der Nutzer** |
-| 27 | **EZ-Tree-Port**: Baumgenerator nach `github.com/dgreenheck/ez-tree` (MIT) 1:1 nachgebaut (Nutzerwunsch Runde 24) | 🔶 Runde 24 — neuer Generator in `trees_cpu.c` (`ez_grow`), umschaltbar mit **`DEMO_TREEGEN=alt|ez`** (Standard: ez). Portiert: Abschnitts-Ast, Gnarliness mit `1/sqrt(Radius)`, Wachstums-Kraft `strength/radius` um `cross(Astachse,up)`, Twist, geschichtete Kinder + vertauschte Radial-Slots, Radius immer aus dem Elternast, `taper` pro Level aus ihren Presets, `closeTip`. Presets: oak/ash/aspen/pine aus `*_medium.json`. **Zwei eigene Fehler gefunden und behoben:** (a) `force/radius` und `1/sqrt(radius)` sind einheitenabhängig — nach unserem `unit`-Scaling wirkten sie 10× zu stark, Krone fiel auf 26 px zusammen; Radien werden jetzt in Preset-Einheiten gerechnet. (b) `taper` war geraten (0,35) statt ihrer Werte (Eiche 0,73/0,42/0,69/0,75) — deshalb endete der Stamm dick und "abgesägt"; zusätzlich hatte ich eine da-Vinci-Flächenabrechnung erfunden, die den Stamm auf 2 cm einbrechen ließ. Die ist wieder raus, Regel ist 1:1. Messbank erweitert: **`DEMO_EZPRESET=0..3`**, **`DEMO_EZSPREAD=`**, Welt-BBox + Stammradien im Log. Messung gleicher Baum: alt 4,26×6,71 m / ez 4,54×6,90 m; alt 6,44×11,87 / ez 8,16×9,94; alt 8,48×9,10 / ez 6,97×9,36. Ganze Szene: **586 362 → 65 646 Vertices**, fps 2,48 → 22,33 (Gras aus). **Offen: fern sieht man nur Stamm + Atlas-Quads (tier 0 hat keine Aeste), Laubzahl stark reduziert — Optik prüft der Nutzer** |
+| 27 | **EZ-Tree-Port**: Baumgenerator nach `github.com/dgreenheck/ez-tree` (MIT) 1:1 nachgebaut (Nutzerwunsch Runde 24) | 🔶 Runde 24 — neuer Generator in `trees_cpu.c` (`ez_grow`), umschaltbar mit **`DEMO_TREEGEN=alt|ez`** (Standard: ez). Portiert: Abschnitts-Ast, Gnarliness mit `1/sqrt(Radius)`, Wachstums-Kraft `strength/radius` um `cross(Astachse,up)`, Twist, geschichtete Kinder + vertauschte Radial-Slots, Radius immer aus dem Elternast, `taper` pro Level aus ihren Presets, `closeTip`. Presets: oak/ash/aspen/pine aus `*_medium.json`. **Zwei eigene Fehler gefunden und behoben:** (a) `force/radius` und `1/sqrt(radius)` sind einheitenabhängig — nach unserem `unit`-Scaling wirkten sie 10× zu stark, Krone fiel auf 26 px zusammen; Radien werden jetzt in Preset-Einheiten gerechnet. (b) `taper` war geraten (0,35) statt ihrer Werte (Eiche 0,73/0,42/0,69/0,75) — deshalb endete der Stamm dick und "abgesägt"; zusätzlich hatte ich eine da-Vinci-Flächenabrechnung erfunden, die den Stamm auf 2 cm einbrechen ließ. Die ist wieder raus, Regel ist 1:1. Messbank erweitert: **`DEMO_EZPRESET=0..3`**, **`DEMO_EZSPREAD=`**, Welt-BBox + Stammradien im Log. Messung gleicher Baum: alt 4,26×6,71 m / ez 4,54×6,90 m; alt 6,44×11,87 / ez 8,16×9,94; alt 8,48×9,10 / ez 6,97×9,36. Ganze Szene: **586 362 → 65 646 Vertices**, fps 2,48 → 22,33 (Gras aus). **Runde 24b: LOD auf ihre Semantik umgestellt + hängende Zweige behoben (`971873e`)** — Struktur in allen Stufen gleich, nur `sectionStride` (1/3/6), `segmentFactor` (1/0,75/0,4), `leafStride` (1/2), `leafScale` (1/1,25/1,3); Kinderzahl fern 85 %/60 % (wegen 646 Bäumen). Selber Baum über die Stufen: tier 3 = 4008 Vertices / 8,24×13,52×8,85 m, tier 2 = 1080 / 7,55×12,86×7,63 m, tier 0 = 306 / 5,91×9,60×7,76 m. Ganze Szene **496 104 Vertices**, 14 538 Canopy-Quads. **Offen: Atlas-Quads zeigen anderen Inhalt als die Einzelblätter (TODO 22) — Übergang nah→fern bleibt inhaltlich sichtbar. Optik prüft der Nutzer** |
 | 22 | **Buschel-Textur pro Blattfarbe** fürs mittlere LOD (statt Atlas-Fremdoptik) (Nutzer, Runde 23) | ⬜ |
 | 23 | **Ganzer Baum als Billboard im gröbsten LOD** — sonst ferne Äste ohne Blätter (Nutzer, Runde 23) | ⬜ |
 | 24 | **LOD-Überblendung krisselig** → sauberer Alpha-Blend (Nutzer, Runde 23) | ⬜ |
@@ -538,6 +567,75 @@ der alten Add-on-Datei sind tot (404), das Add-on ist seit Blender 4.2 eine Exte
 (geseed), Blätter entlang der Zweige mit 137,5°-Phyllotaxis, Blattsilhouette per
 Alpha-Test im Shader, Blatt-Laenge/Breite-Verhaeltnis ~2:1, Blattgroessen-Abstufung
 zum Zweigende hin, Kronenform ueber das Astlaengen-Profil.
+
+## Session 2026-10-08, Runde 24 (EZ-Tree-Port, LOD-Semantik, Referenzbilder)
+
+### Commits
+- `3a3be11` Feinast-Gerüst (Generator A) + Messbank `DEMO_ONETREE`/`DEMO_TIER`/`DEMO_TREEDIST`
+- `30d4752` **EZ-Tree-Port** (`ez_grow`), Hooks `DEMO_TREEGEN`, `DEMO_EZPRESET`, `DEMO_EZSPREAD`, Welt-BBox + Stammradien im Log
+- `971873e` **LOD nach EZ-Tree-Semantik** + hängende Zweige behoben
+
+### EZ-Tree-Port: was 1:1 übernommen ist
+`src/trees_cpu.c`, Funktion `ez_grow()`. Preset-Tabelle `EZ_PRESETS` mit den
+Werten aus `ez-tree/src/lib/presets/*_medium.json` (oak, ash, aspen, pine):
+`levels`, `children`, `angle`, `length`, `radius`, `start`, `gnarl`, `twist`,
+`taper`, `force`, `leafCount/leafAngle/leafStart/leafSize`.
+- Abschnitts-Ast: `sec[0..S]`, Wachstum entlang der lokalen Achse, Rahmen via
+  `ring_transport` (bestehender Code), `twist` pro Abschnitt.
+- Gnarliness: `gnarl[lvl] * max(1, 1/sqrt(r))` — **Radius in Preset-Einheiten**
+  (`r / unit`), sonst skaliert der Fehler mit unserem Größenfaktor.
+- Wachstums-Kraft: Drehung um `cross(d, up)` mit `step = force / r`, begrenzt auf
+  `atan2(|cross|, dot)`.
+- Kinder: geschichtet `start + (i + hash) * (1-start)/cnt`, Radial-Slots
+  `2π(radialOff + (slot + ±0,5)/cnt)` mit **vertauschter Slot-Zuweisung**.
+- Kinder-Radius immer `lerp(Elternradius) * radius[childlvl]`.
+- Radius: `base.r * (1 - taper[lvl] * i/S)`, Evergreen `1 - i/S`, letzter
+  Abschnitt des letzten Levels → 0,001.
+- Abweichungen von 1:1 (bewusst): `treeEzSpread` (Kronenlevel-Längen, Default 1),
+  `kidPct` (Kinderzahl fern 60 %, mittel 85 %), Laubkarten auf unseren
+  Atlas-Quads statt eigenen Blattreben-Texturen.
+
+### Fehler dieser Runde (alle mit Messung gefunden)
+1. `force/radius` und `1/sqrt(radius)` sind einheitenabhängig. Nach `unit`-Scaling
+   wirkten sie ~10× zu stark → Äste wurden nach oben gezogen, Krone 26 px breit.
+2. `taper` geraten (0,35) statt ihrer Werte (Eiche 0,73/0,42/0,69/0,75) → Stamm
+   endete dick („abgesägt“). Zusätzlich eine **erfundene** da-Vinci-
+   Flächenabrechnung, die den Stamm auf 2 cm einbrechen ließ — wieder entfernt.
+   Nach dem Fix: Stammradien 0,172 → 0,047 m durchgehend.
+3. LOD aus der Ursprungscodebasis (Struktur weggeworfen) → Inhaltswechsel fern.
+4. Kinder/Laub auf gebogenem Pfad statt auf vernetzter Sehre → Zweige in der Luft.
+
+### Messbank (neu)
+```sh
+DEMO_TREEGEN=alt|ez            # Generator wechseln (Standard ez)
+DEMO_ONETREE=1                 # ein Baum, kein Gras, Kamera davor (10-26 fps)
+DEMO_TIER=0|2|3                # Detailstufe erzwingen
+DEMO_TREEDIST=<m>              # Ganzbaum-Abstand (NICHT vergessen, sonst Nahansicht)
+DEMO_EZPRESET=0..3             # 0 oak, 1 ash, 2 aspen, 3 pine
+DEMO_EZSPREAD=<f>              # Kronenlevel-Längen (1 = 1:1-Port)
+```
+Log pro Build: `Baeume um …`, `BBox: Breite/Hoehe/Tiefe`, `Preset … unit …
+Stammradius … s= … hf=`, `Stammradien (m): …`.
+
+### Referenz-Recherche (Antworte auf „woher die schöne Rinde?“)
+- `quicktree` (Sapling-Frontend): **keine** Texturen im Repo, nur
+  `bark_base_tex`/`bark_normal_tex`-Datei-Properties mit hartkodierten
+  Autor-Pfaden (`bark1.tga`, `bark1_nmp.tga`).
+- `EZ-Tree` (`dgreenheck`, Three.js, **MIT**): liefert 11 Rinden-Sets
+  (`Bark00x_1K-JPG` = Color + NormalGL + Roughness, 512×1024) und Blatt-Texturen
+  (oak/aspen/ash/pine, 1024² RGBA) — als **Git-LFS** (im Clone nur Zeiger;
+  Download über `media.githubusercontent.com/media/<repo>/main/...`).
+- Blattkarten sind durchgängig **Reben**, nicht Einzelblätter:
+  Segmente/Zeile Median oak 4 (max 13), ash 6 (max 19), pine 13 (max 38),
+  quicktree-Beispiel 3 (max 9). Konvention: Stiel unten Mitte.
+- Ihr Look = Geometrie + Foto-Color/Normalmap/Roughness + `MeshStandardMaterial`
+  + **Neutral Tone Mapping, Exposure 2**. Ihr Schattenwurf ist **schwächer** als
+  unserer (512² über ±100 Einheiten, normalBias 0,2 vs. unsere 2048² über ±45 m).
+  Bei uns fehlt Tone Mapping/Exposure völlig (nur `pow(col, 1/2.2)`).
+- EZ-Tree-LOD: `defaultLODLevels` (distance 0 / 100 / 250, Hysterese 0,05,
+  `sectionStride` 3/6, `segmentFactor` 0,75/0,4, `leafStride` 2,
+  `leafScale` 1,25/1,3 mit Begründung „volle Kompensation liest sich als
+  Ballon-Blätter“, äußerste Stufe `billboard: Single`).
 
 ## Session 2026-10-07, Runde 22 (Shadow-Map + Nutzer-Feedback)
 
