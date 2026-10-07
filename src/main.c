@@ -398,7 +398,7 @@ static int grassOnly = 0;     // 1 = TEST: nur Gras zeichnen (V-Taste), kein Ter
 static int hudMode = 2;       // H-Taste: 2 = Vollstats (2 Zeilen), 1 = reduziert (1 Zeile), 0 = aus
 float grassDensityScale = 1.0f;  // 0.2 - 8.0 (Slider unten im Fenster, extern in scene.h)
 float grassHeightScale = 1.0f;   // 0.3 - 3.0 (Halmhoehe-Slider)
-float grassMaxDist = 80.0f;      // 40 - 120m (max. Gras-Sichtweite, Slider)
+float grassMaxDist = 110.0f;     // 40 - 150m (max. Gras-Sichtweite, Slider)
 float gWorldTime = 0.0f;         // aktuelle Weltzeit (fuer Birth-Time der Halme)
 static int sliderDragging = 0;          // 1 = Slider wird per Maus gezogen
 // Slider-Fade: Slider+Labels blenden ein, wenn die Maus sich ueber sie
@@ -673,7 +673,7 @@ static void set_slider(int which, float pos){
   if (pos < 0.0f) pos = 0.0f; if (pos > 1.0f) pos = 1.0f;
   if (which == 1) grassDensityScale = 0.2f + pos * 5.4f;   // max 5.6x (staubt bei MD=120 am 5M-CAP)
   else if (which == 2) grassHeightScale = 0.3f + pos * 2.7f;
-  else grassMaxDist = 40.0f + pos * 80.0f;
+  else grassMaxDist = 40.0f + pos * 110.0f;
 }
 
 // Slider-Rendering (3 Slider: Dichte/Hoehe/Sichtweite). VBO muss gebunden

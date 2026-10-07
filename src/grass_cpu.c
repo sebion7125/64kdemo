@@ -75,7 +75,7 @@ static int   gReqMode = 0;   // Build-Modus (0=POS 1=OUT 2=IN)
 // Zell-Index-Tabellen (eine pro Halm-Buffer): Start-Index und Halm-Anzahl
 // pro Weltzelle (ix,iz absolut -> 1:1-Mapping ueber Builds hinweg).
 // CT×CT deckt das groesste Build-Quadrat ab (MD=120 -> ~693 Zellen/Sseite).
-#define CT 700
+#define CT 1000
 // Pro Zelle: Blockanfang, Gesamtzahl, davon LEBENDE (Blockanfang), und der
 // naechste freie b-Index. Letzteres macht die Intervall-Markierung moeglich:
 // die Generierung setzt bei cellNextB fort statt bei 0 neu anzufangen, also
@@ -134,6 +134,7 @@ static float gBirthT(float v){ return grassGrp[gBirthI(v)*2]; }
 static float gDeathT(float v){ int d = gDeathI(v); return d ? grassGrp[d*2+1] : 0.0f; }
 
 #define GSTEP 0.30f
+#define GRASS_NBMAX 128.0f   // Obergrenze Halme/Zelle (uint8_t-Zellen bis 255)
 #define CLUMP 1.2f   // Bueschel-Grid (Schritt 4): naechster Mittelpunkt in 3x3-Zellen
 // Dichte-Abschneidschwelle der Generierung (= Build-Radius, Bisektion).
 // WICHTIG: die CPU-Dichte faellt glatt auf 0 bei grassMaxDist; diese Schwelle
@@ -158,13 +159,14 @@ void grassSetDensCut(float v){
   gDensCut = v;
   gDCutMD = -1.0f;   // Bisektion-Cache entwerten
 }
+static float dens_at(float dist);   // Profil unten (LUT), hier fuer g_half noetig
 static float g_half(void){
   float md = grassMaxDist;
   if (md != gDCutMD) {
     float lo = 8.0f, hi = md;
     for (int i = 0; i < 30; i++) {
       float mid = (lo + hi) * 0.5f;
-      float dens = powf(1.0f - c_smoothstep(8.0f, md, mid), 1.0f);
+      float dens = dens_at(mid);   // EINE Profil-Quelle (war: Formel dupliziert)
       // Schwelle GRASS_DENS_CUT: Kante, an der die Generierung abschneidet.
       // Muss die SAME Schwelle sein wie der dens-Test im Kopierpfad und im
       // Generierungspfad, sonst entstehen Luecken/harte Kanten (s. oben).
@@ -182,11 +184,36 @@ static float g_half(void){
 #define DENS_LUT_N 480   // 0..240m
 static float densLut[DENS_LUT_N];
 static float densLutMD = -1.0f;
+// Dichte-Profil. Einheit: 1.0 = heutige Volldichte (32 Halme/Zelle VOR den
+// Verwuerfen durch Flecken-/Steilhang-/Wasser-Tests; die werfen gemessen ~50 %
+// raus, kalibriert 0.497).
+//   Sockel  1/(1+(r/R1)^2)   flach bis ~R1, danach ~1/r^2. Der 1/r^2-Schwanz
+//          ist der Grund, warum die Gesamtzahl nur LOGARITHMISCH mit der
+//          Reichweite waechst: N = pi*n0*R1^2*ln(1+(R/R1)^2).
+//   Boost   3/(1+(r/RB)^4)   4x im engsten Nahfeld, sehr schnell weg
+//          (r=1: 3.00, r=2: 1.50, r=3: 0.37, r=4: 0.012) — kostet nur 0,6 %
+//          des Halmebudgets (5215 Halme innerhalb 2 m).
+//   Ausschnitt (1-smoothstep(md-EDGEW, md, r)) faellt exakt auf 0 bei md.
+//     EDGEW MUSS das selbe Band sein wie die LOD-Daempfung im Shader
+//     (grass.vert: lod = 1-smoothstep(uMaxDist-12, uMaxDist, d)). Liegt die
+//     CPU-Kante ausserhalb dieses Bands, schneidet die Generierung bei lod~1.0
+//     -> harte, voll sichtbare Graskante (der Fehler, den Runde 7 behoben hat).
+//     Mit EDGEW=12 liegt die Kante bei md-3..md-8 und damit lod<0.3.
+// Bewusst NICHT 'konstante Pixeldichte': die verlangt n*ss^2 = konst, also bei
+// 1/r^2-Dichte einen Groessenwuchs ss ~ r (bei 120m: 4,3m hohe Halme).
+#define DENS_R1 27.0f
+#define DENS_RB 2.0f
+#define DENS_EDGEW 12.0f   // = LOD-Band in grass.vert
 static float dens_at(float dist){
   float md = grassMaxDist;
   if (md != densLutMD) {
-    for (int i = 0; i < DENS_LUT_N; i++)
-      densLut[i] = powf(1.0f - c_smoothstep(8.0f, md, i * 0.5f), 1.0f);
+    for (int i = 0; i < DENS_LUT_N; i++){
+      float r = i * 0.5f;
+      float s = r / DENS_R1, b = r / DENS_RB;
+      float sockel = 1.0f / (1.0f + s*s);
+      float boost  = 3.0f / (1.0f + b*b*b*b);
+      densLut[i] = (sockel + boost) * (1.0f - c_smoothstep(md - DENS_EDGEW, md, r));
+    }
     densLutMD = md;
   }
   int i = (int)(dist * 2.0f);
@@ -337,7 +364,7 @@ static int cell_nb(int ix, int iz, float dist){
   if (dens < gDensCut) return 0;
   float h4 = c_hash12(ix * 0.271f, iz * 0.711f);
   float nbf = 32.0f * dens * (0.4f + 0.6f * h4) * grassDensityScale;
-  if (nbf > 32.0f) nbf = 32.0f;
+  if (nbf > GRASS_NBMAX) nbf = GRASS_NBMAX;   // war 32; Profil geht bis ~4x vorn
   int nb = (int)nbf;
   if (c_hash12(ix * 0.917f, iz * 0.311f) < nbf - (float)nb) nb++;   // stochastisch
   return nb;

@@ -43,11 +43,12 @@ void main(){
   float t = aBase.x, ww = aBase.y;
   float d = length(iPos - uCamPos);
   // Distanz-Skalierung (war CPU-seitig pro Build -> sprang beim Rebuild):
-  // gleiche Formel wie der Dichte-Falloff (grass_cpu.c): groesser in der
-  // Ferne, damit die Halme die Flaechen abdecken. Jetzt kontinuierlich zur
-  // aktuellen Kameradistanz (aendert sich sanft beim Bewegen).
-  float dens = pow(1.0 - smoothstep(8.0, uMaxDist, d), 1.6);
-  float sizeScale = 1.0 + 1.8 * (1.0 - dens);
+  // kontinuierlich zur AKTUELLEN Kameradistanz. Bewusst NICHT das Dichte-
+  // Profil aus grass_cpu.c: das hat jetzt einen engen 4x-Nahfeld-Boost, und
+  // darueber die Halmgroesse abzunehmen waere falsch (ss < 1 im Nahfeld).
+  // 'sizeLod' ist nur die Groessenkurve: 1.0 vorn bis 2.8 in der Ferne.
+  float sizeLod = pow(1.0 - smoothstep(8.0, uMaxDist, d), 1.6);
+  float sizeScale = 1.0 + 1.8 * (1.0 - sizeLod);
   float h = iData.x * uHeightScale * sizeScale, w = iData.y * sizeScale;
   // LOD: Halme wachsen in der Distanz zurueck (Terrain-Grasfarbe uebernimmt).
   // Dynamisch: Fade-out in den letzten 12m vor uMaxDist (Slider).
