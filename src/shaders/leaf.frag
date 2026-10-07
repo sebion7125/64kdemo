@@ -6,6 +6,7 @@ in vec3 vCol;
 in float vT;
 uniform vec3 uCamPos;
 uniform float uLeafMask;   // DEBUG: Blatt als Maske (reines Rot)
+uniform float uAlbedoOnly; // Atlas-Kapture: nur Albedo + Abdeckung (keine Beleuchtung)
 out vec4 O;
 const vec3 SUN = normalize(vec3(0.55, 0.38, -0.62));
 float hash12(vec2 p){
@@ -54,6 +55,7 @@ void main(){
   vec3 amb = vec3(0.35, 0.45, 0.40) * (0.5 + 0.5 * max(n.y, 0.0));
   float pat = vnoise(vPos.xz * 16.0 + vPos.y * 9.0);
   vec3 albedo = vCol * (0.72 + 0.55 * pat);
+  if(uAlbedoOnly > 0.5){ O = vec4(albedo, 1.0); return; }
   vec3 col = albedo * (vec3(1.0, 0.95, 0.80) * (dif * 0.7 + 0.3) + amb + vec3(0.8, 1.0, 0.5) * thru);
   col *= 0.85 + 0.15 * vT;
   float s = length(vPos - uCamPos) - 60.0;   // Dunst wie fogAmt() in fragment.glsl

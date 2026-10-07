@@ -9,6 +9,9 @@ out vec2 vUV;
 out vec3 vPos;
 out float vSeed;
 out float vFade;
+out vec2 vTile;      // Atlas-Kachel (Spalte, Zeile)
+out vec3 vNrm;      // Billboard-Normale (zeigt zur Kamera)
+out vec3 vRight, vUp;
 void main(){
   // Kamera-Achsen exakt wie der Raymarcher
   vec3 fwd = normalize(uCamTgt - uCamPos);
@@ -24,5 +27,13 @@ void main(){
   vUV = aOff * 2.0;
   vPos = p;
   vSeed = aData.z;
+  // Kachel nach Blickrichtung: aData.w = Kronen-Variante (0..3), azIdx = eine von
+  // 16 Aufnahmerichtungen. Die Krone parallaxiert also, wenn man sie umlaeuft.
+  float az = atan(aCenter.x - uCamPos.x, aCenter.z - uCamPos.z);
+  float azIdx = floor(mod(az * (16.0 / 6.283185) + 8.0, 16.0));
+  float t = aData.w * 16.0 + azIdx;
+  vTile = vec2(mod(t, 8.0), floor(t / 8.0));
+  vNrm = normalize(uCamPos - aCenter);
+  vRight = right; vUp = up;
   gl_Position = uMVP * vec4(p, 1.0);
 }

@@ -37,6 +37,10 @@ float c_terrainH(float px, float py);
 // tilt, pad), iCol(3). Grundblatt ist ein statisches Quad (aBase = t, w).
 #define LEAF_FLOATS  10
 #define LEAF_CAP     60000
+// Referenz-Krone fuer den Blatthorizont-Atlas (ferne Baeume sampeln diese
+// Textur statt prozeduraler Flecken). Layout im Atlas: 8x8 Kacheln =
+// 4 Kronen-Varianten x 16 Ansichts-Richtungen.
+#define FOLIAGE_CAP  2100
 #define WIRE_FLOATS  3
 
 #define TREE_VERT_CAP 700000
@@ -54,6 +58,9 @@ extern int   nTreeVerts, nCrownVerts, nWireVerts, nTrees;
 void trees_build(float tx, float tz);
 // Naechsten Baum zu (x,z) — Debug (Taste F11). Liefert 1, wenn einer gefunden wurde.
 int  tree_find_nearest(float x, float z, float *out, float *sizeOut);
+// Eine Referenz-Krone aus echten Einzelblaettern, zentriert um (0, 2.05*s, 0).
+// Fuellt out (LEAF_FLOATS-Stride) und liefert die Anzahl. seed waehlt die Krone.
+int  foliage_patch(float *out, int cap, float seed, float s);
 
 // ================= Gras (instanzierte Halme) =================
 //   grassInst: pos(3) hoehe(1) breite(1) phase(1) schattierung(1) yaw(1) lean(1) birth(1) death(1) b(1) = 12 floats

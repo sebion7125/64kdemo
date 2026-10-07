@@ -4,7 +4,11 @@ in vec2 vUV;
 in vec3 vPos;
 in float vSeed;
 in float vFade;
+in vec2 vTile;      // Atlas-Kachel (Spalte, Zeile)
+in vec3 vNrm;       // Billboard-Normale
+in vec3 vRight, vUp;
 uniform vec3 uCamPos;
+uniform sampler2D uFoliage;   // Atlas: 8x8 Kacheln echter Blattwerk-Aufnahmen
 out vec4 O;
 const vec3 SUN = normalize(vec3(0.55, 0.38, -0.62));
 float hash12(vec2 p){
@@ -42,26 +46,26 @@ vec3 skyColor(vec3 rd){
   return col;
 }
 void main(){
-  // prozedurales Blatt-Cluster: individuelle Blaetter + Luecken
-  float n1 = fbm(vUV * 2.6 + vSeed);
-  float n2 = fbm(vUV * 7.0 + vSeed * 2.17);
-  // einzelne Blaetter: Luecken wo n2 niedrig
-  float leaf = smoothstep(0.34, 0.52, n2);
-  // unregelmaessiger Rand (organische Silhouette)
-  float r = length(vUV);
-  float edge = smoothstep(1.0, 0.55, r - 0.35 * (n1 - 0.5) * 2.0);
-  float alpha = leaf * edge;
-  // Alpha-Test: scharfe Blaetter; in der Distanz lueckenhafter
-  if(alpha < 0.42 * vFade) discard;
-  // Gruen-Tone (warm beleuchtet)
-  vec3 dark = vec3(0.07, 0.17, 0.05);
-  vec3 lite = vec3(0.30, 0.46, 0.12);
-  vec3 albedo = mix(dark, lite, n1 * 0.7 + 0.15);
-  // Beleuchtung: diffus + Transluzenz (Licht durchs Blatt)
-  float dif = 0.5 + 0.5 * n1;
-  vec3 col = albedo * (vec3(1.0, 0.95, 0.80) * dif
-                      + vec3(0.35, 0.45, 0.40) * 0.5
-                      + vec3(0.80, 1.00, 0.50) * 0.35 * n2);
+  // Atlas-Kachel antasten. Ohne Mipmaps (die Kacheln wuerden sich beim Mip-
+  // Wechsel aufloesen) -> Aufloesungsstufe selbst schaetzen und die UV an den
+  // Kachelrand zurueckziehen, damit nichts in die Nachbar-Kachel blutet.
+  vec2 cell = vUV * 0.5 + 0.5;
+  vec2 tuv = (vTile + cell) * (1.0 / 8.0);
+  float foot = max(length(fwidth(tuv)), 1e-7);
+  float lod = clamp(log2(foot * 2048.0), 0.0, 3.0);
+  float inset = exp2(lod) * 0.5 / 256.0;
+  cell = clamp(cell, inset, 1.0 - inset);
+  vec4 tx = textureLod(uFoliage, (vTile + cell) * (1.0 / 8.0), lod);
+  if(tx.a < 0.5 * vFade) discard;
+  // Beleuchtung: die Kachel enthaelt Albedo, nicht Licht. Eine Kugel-Andeutung
+  // ueber die Quad-Ebene gibt der Krone Volumen (ferne Kronen sind zu klein fuer
+  // echte Normale aus der Textur).
+  vec3 nrm = normalize(vNrm + (vRight * vUV.x + vUp * vUV.y) * 0.55);
+  float dif = 0.45 + 0.55 * max(dot(nrm, SUN), 0.0);
+  float back = pow(max(dot(-nrm, SUN), 0.0), 2.0) * 0.5;   // Gegenlicht-Schimmer
+  vec3 albedo = tx.rgb;
+  vec3 col = albedo * (vec3(1.0, 0.95, 0.80) * (dif + back)
+                      + vec3(0.35, 0.45, 0.40) * 0.55);
   float s = length(vPos - uCamPos) - 60.0;   // Dunst wie fogAmt() in fragment.glsl
   float fog = s <= 0.0 ? 0.0 : 1.0 - exp(-s * s * 0.000012);
   col = mix(col, skyColor(normalize(uCamPos - vPos)), fog);

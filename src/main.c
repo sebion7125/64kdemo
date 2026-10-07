@@ -100,6 +100,8 @@ static void (*p_glGenTextures)(GLsizei n, GLuint *textures);
 static void (*p_glGenerateMipmap)(GLenum target);
 static void (*p_glBindTexture)(GLenum target, GLuint texture);
 static void (*p_glTexImage2D)(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const void *pixels);
+static void (*p_glGetTexImage)(GLenum target, GLint level, GLenum format, GLenum type, void *pixels);
+static void (*p_glScissor)(GLint x, GLint y, GLsizei width, GLsizei height);
 static void (*p_glTexParameteri)(GLenum target, GLenum pname, GLint param);
 static void (*p_glActiveTexture)(GLenum texture);
 static void (*p_glGenFramebuffers)(GLsizei n, GLuint *framebuffers);
@@ -205,6 +207,8 @@ static void load_libs(void) {
   LOADGL2(glGenerateMipmap);
   LOADGL2(glBindTexture);
   LOADGL2(glTexImage2D);
+  LOADGL2(glGetTexImage);
+  LOADGL2(glScissor);
   LOADGL2(glTexParameteri);
   LOADGL2(glActiveTexture);
   LOADGL2(glGenFramebuffers);
@@ -508,6 +512,146 @@ static const float grassBase[5][2] = {
 static const float leafBase[6][2] = {
   {-0.5f,-0.5f},{0.5f,-0.5f},{-0.5f,0.5f},{0.5f,-0.5f},{0.5f,0.5f},{-0.5f,0.5f}
 };
+
+// ================= Blatthorizont-Atlas (ferne Kronen) =================
+// Ferne Baeume zeigen kein echtes Blattwerk (zu viele Blaeue), sondern Quads, die
+// eine Textur sampeln. Die Textur wird NICHT gemalt: sie ist die Aufloesung
+// echter Einzelblaetter einer Referenz-Krone, aus 16 Richtungen orthografisch
+// aufgenommen (Albedo + Abdeckung). Die Kronen-Quads waehlen abhaengig von der
+// Blickrichtung die passende Kachel -> die Krone parallaxiert, wenn man sie
+// umlaeuft, statt wie ein gemalter Fleck zu stehen.
+#define FOL_ATLAS 2048
+#define FOL_TILES 8                 // 8x8 Kacheln = 4 Varianten x 16 Richtungen
+#define FOL_TILEPX (FOL_ATLAS / FOL_TILES)
+#define FOL_AZ    16
+#define FOL_VAR   4
+static GLuint folTex = 0, folFbo = 0, folDepth = 0, vboFol = 0, vaoFol = 0;
+static float folPatch[FOLIAGE_CAP * LEAF_FLOATS];
+
+// Orthografische MVP (quadratischer Viewport), fuer die Atlas-Aufnahme
+static void ortho_mvp(const float cp[3], const float tg[3], float half, float out[16]){
+  float fx = tg[0] - cp[0], fy = tg[1] - cp[1], fz = tg[2] - cp[2];
+  float fl = sqrtf(fx * fx + fy * fy + fz * fz); if(fl < 1e-6f) fl = 1e-6f;
+  fx /= fl; fy /= fl; fz /= fl;
+  float rx = -fz, ry = 0.0f, rz = fx;
+  float rl = sqrtf(rx * rx + rz * rz); if(rl < 1e-6f){ rx = 1.0f; rz = 0.0f; rl = 1.0f; }
+  rx /= rl; rz /= rl;
+  float ux = ry * fz - rz * fy, uy = rz * fx - rx * fz, uz = rx * fy - ry * fx;
+  float dr = rx * cp[0] + ry * cp[1] + rz * cp[2];
+  float du = ux * cp[0] + uy * cp[1] + uz * cp[2];
+  float df = fx * cp[0] + fy * cp[1] + fz * cp[2];
+  const float dz = 2.0f * half * 1.4f;      // Tiefenbereich um die Krone
+  out[0] = rx / half; out[4] = ry / half; out[8]  = rz / half; out[12] = -dr / half;
+  out[1] = ux / half; out[5] = uy / half; out[9]  = uz / half; out[13] = -du / half;
+  out[2] = 2.0f * fx / dz; out[6] = 2.0f * fy / dz; out[10] = 2.0f * fz / dz;
+  out[14] = -2.0f * df / dz - 1.0f;
+  out[3] = 0.0f; out[7] = 0.0f; out[11] = 0.0f; out[15] = 1.0f;
+}
+
+static void build_foliage_atlas(GLuint progLeaf){
+  GLint lMVP  = p_glGetUniformLocation(progLeaf, "uMVP");
+  GLint lCam  = p_glGetUniformLocation(progLeaf, "uCamPos");
+  GLint lTime = p_glGetUniformLocation(progLeaf, "uTime");
+  GLint lAlb  = p_glGetUniformLocation(progLeaf, "uAlbedoOnly");
+  GLint lMask = p_glGetUniformLocation(progLeaf, "uLeafMask");
+  p_glGenTextures(1, &folTex);
+  p_glBindTexture(GL_TEXTURE_2D, folTex);
+  p_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, FOL_ATLAS, FOL_ATLAS, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+  // Kein Mipmap: die Kacheln liegen nebeneinander, ein Mip-Wechsel wuerde sie
+  // auflosen (Kronen-frag begrenzt die Stufe selbst und rueckt die UV an den
+  // Kachelrand heran).
+  p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  p_glGenFramebuffers(1, &folFbo);
+  p_glBindFramebuffer(GL_FRAMEBUFFER, folFbo);
+  p_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, folTex, 0);
+  p_glGenRenderbuffers(1, &folDepth);
+  p_glBindRenderbuffer(GL_RENDERBUFFER, folDepth);
+  p_glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, FOL_ATLAS, FOL_ATLAS);
+  p_glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, folDepth);
+  p_glGenBuffers(1, &vboFol);
+  p_glGenVertexArrays(1, &vaoFol);
+  p_glBindVertexArray(vaoFol);
+  p_glBindBuffer(GL_ARRAY_BUFFER, vboLeafBase);
+  p_glEnableVertexAttribArray(0);
+  p_glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8, (const void *)0);
+  p_glBindBuffer(GL_ARRAY_BUFFER, vboFol);
+  p_glEnableVertexAttribArray(1);
+  p_glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, LEAF_FLOATS * 4, (const void *)0);
+  p_glVertexAttribDivisor(1, 1);
+  p_glEnableVertexAttribArray(2);
+  p_glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, LEAF_FLOATS * 4, (const void *)12);
+  p_glVertexAttribDivisor(2, 1);
+  p_glEnableVertexAttribArray(3);
+  p_glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, LEAF_FLOATS * 4, (const void *)28);
+  p_glVertexAttribDivisor(3, 1);
+
+  p_glDisable(GL_BLEND);
+  p_glEnable(GL_DEPTH_TEST);
+  p_glDepthFunc(GL_LESS);
+  const float s = 2.2f, cy = 2.05f * s, camR = 6.0f, half = 1.62f * s;
+  double tCap0 = now_sec();
+  int nLast = 0;
+  for(int v = 0; v < FOL_VAR; v++){
+    int n = foliage_patch(folPatch, FOLIAGE_CAP, 12.7f + v * 37.31f, s);
+    nLast = n;
+    p_glBindBuffer(GL_ARRAY_BUFFER, vboFol);
+    p_glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)n * LEAF_FLOATS * sizeof(float), folPatch, GL_DYNAMIC_DRAW);
+    for(int a = 0; a < FOL_AZ; a++){
+      int t = v * FOL_AZ + a;
+      float az = a * 6.2832f / (float)FOL_AZ;
+      float cp[3] = { sinf(az) * camR, cy + 0.10f * s, cosf(az) * camR };
+      float tg[3] = { 0.0f, cy, 0.0f };
+      float m[16]; ortho_mvp(cp, tg, half, m);
+      int txi = t % FOL_TILES, tyi = t / FOL_TILES;
+      p_glViewport(txi * FOL_TILEPX, tyi * FOL_TILEPX, FOL_TILEPX, FOL_TILEPX);
+      // glClear wirkt auf den GANZEN Framebuffer, nicht nur den Viewport — ohne
+      // Scissor wuerde jede Kachel alle vorherigen loeschen (gemessen: am Ende
+      // war genau eine Kachel im Atlas).
+      p_glEnable(GL_SCISSOR_TEST);
+      p_glScissor(txi * FOL_TILEPX, tyi * FOL_TILEPX, FOL_TILEPX, FOL_TILEPX);
+      p_glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+      p_glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+      p_glUseProgram(progLeaf);
+      p_glUniformMatrix4fv(lMVP, 1, GL_FALSE, m);
+      p_glUniform3f(lCam, cp[0], cp[1], cp[2]);
+      p_glUniform1f(lTime, 0.0f);
+      p_glUniform1f(lAlb, 1.0f);
+      p_glUniform1f(lMask, 0.0f);
+      p_glBindVertexArray(vaoFol);
+      p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)n);
+    }
+  }
+  // DEBUG (DEMO_FOLDUMP=1): Atlas als PPM — verifiziert, dass die Kacheln
+  // wirklich Blattwerk enthalten und nicht leer sind.
+  if(getenv("DEMO_FOLDUMP")){
+    unsigned char *buf = (unsigned char*)malloc((size_t)FOL_ATLAS * FOL_ATLAS * 4);
+    if(buf){
+      p_glBindTexture(GL_TEXTURE_2D, folTex);
+      p_glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+      FILE *f = fopen("/tmp/64kdemo_folatlas.ppm", "wb");
+      if(f){ fprintf(f, "P6\n%d %d\n255\n", FOL_ATLAS, FOL_ATLAS);
+             unsigned char *row = (unsigned char*)malloc((size_t)FOL_ATLAS * 3);
+             for(int y = FOL_ATLAS - 1; y >= 0; y--) {
+               for(int x = 0; x < FOL_ATLAS; x++){
+                 unsigned char *q = buf + ((size_t)y * FOL_ATLAS + x) * 4;
+                 row[x*3+0] = q[0]; row[x*3+1] = q[1]; row[x*3+2] = q[2];
+               }
+               fwrite(row, 3, FOL_ATLAS, f);
+             }
+             free(row);
+             fclose(f); printf("DEBUG Atlas-Dump geschrieben\n"); }
+      free(buf);
+    }
+  }
+  p_glDisable(GL_SCISSOR_TEST);
+  p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  p_glDisable(GL_DEPTH_TEST);
+  printf("Blatt-Atlas: %dx%d Kacheln (%d px), %d Varianten x %d Richtungen, %d Blaetter je Krone, %.2f s\n",
+         FOL_TILES, FOL_TILES, FOL_TILEPX, FOL_VAR, FOL_AZ, nLast, now_sec() - tCap0);
+}
 
 // Baum-Buffer nach trees_build() hochladen (Gras wird separat geladen)
 static void upload_mesh_buffers(void){
@@ -1122,6 +1266,7 @@ int main(int argc, char **argv) {
   GLint locCMVP    = p_glGetUniformLocation(progCrown, "uMVP");
   GLint locCCam    = p_glGetUniformLocation(progCrown, "uCamPos");
   GLint locCTgt    = p_glGetUniformLocation(progCrown, "uCamTgt");
+  GLint locCFol    = p_glGetUniformLocation(progCrown, "uFoliage");
   GLint locLMVP    = p_glGetUniformLocation(progLeaf, "uMVP");
   GLint locLCam    = p_glGetUniformLocation(progLeaf, "uCamPos");
   GLint locLTime   = p_glGetUniformLocation(progLeaf, "uTime");
@@ -1159,6 +1304,7 @@ int main(int argc, char **argv) {
   envNoLeaf = getenv("DEMO_NOLEAF") ? 1 : 0;
   envLeafMask = getenv("DEMO_LEAFMASK") ? 1 : 0;
   if (envTreeJump) tree_jump();
+  build_foliage_atlas(progLeaf);   // Atlas braucht vboLeafBase (build_tree_lines) + progLeaf
 
   // ---------- Hauptloop ----------
   double tPrev = now_sec();
@@ -1701,6 +1847,9 @@ int main(int argc, char **argv) {
       p_glUniformMatrix4fv(locCMVP, 1, GL_FALSE, mvp);
       p_glUniform3f(locCCam, camPos[0], camPos[1], camPos[2]);
       p_glUniform3f(locCTgt, camTgt[0], camTgt[1], camTgt[2]);
+      p_glActiveTexture(GL_TEXTURE0);
+      p_glBindTexture(GL_TEXTURE_2D, folTex);
+      p_glUniform1i(locCFol, 0);
       p_glBindVertexArray(vaoCrown);
       p_glDrawArrays(GL_TRIANGLES, 0, nCrownVerts);
       p_glDisable(GL_BLEND);

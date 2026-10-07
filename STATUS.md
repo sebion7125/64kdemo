@@ -18,7 +18,7 @@ Himmel/Tageszeiten. Budget ist laut Nutzer zweitrangig.
 | 3 | Pflanzen-Vielfalt (Höhen, Sorten, Blumen, Schilf, Regionen) | ✅ Runde 14 (Ausbaustoffen, siehe unten) |
 | 4 | Baum-Stämme: offene Nähte zu | ✅ Runde 15 (Gelenk-Lücke 11 mm → 0 mm, gemessen) |
 | 5 | Baum-Stämme: prozedurale Rinden-Textur | ✅ Runde 16 (Detail-Energie 0,05 → 2,11) |
-| 6 | Echtes Blattwerk nah + Krone fern als Textur auf Quads | 🔶 Runde 17: echte Einzelblaetter nah fertig; Kronen-Textur folgt |
+| 6 | Echtes Blattwerk nah + Krone fern als Textur auf Quads | ✅ Runde 18 (Atlas 8×8, 22,9 % Deckung/Kachel) |
 | 7 | Blätter im Wind | ⬜ |
 | 8 | Schattenwurf | ⬜ |
 | 9 | Himmel schöner, Wolken, Tageszeiten | ⬜ |
@@ -395,6 +395,41 @@ aber separat gegenpruefen (in der VM nicht testbar).
   CPU-Tests und Host-Augen zaehlen.
 - `xdotool mousedown` erreicht das Demo-Fenster in der VM nicht -> Maus-UI nicht
   automatisierbar.
+
+## Session 2026-10-07, Runde 18 (TODO 6b: ferne Kronen als Textur)
+
+**Atlas statt gemalter Flecken:** `build_foliage_atlas()` nimmt beim Start **echte
+Einzelblaetter** einer Referenz-Krone orthografisch auf — 4 Kronen-Varianten aus je 16
+Richtungen = 64 Kacheln in einem 2048²-Atlas (256 px/Kachel, 2000 Blaetter je Krone,
+Aufnahme dauert 0,09 s). Gespeichert wird Albedo + Abdeckung (leaf.frag hat dafuer
+`uAlbedoOnly`), Beleuchtung passiert erst im Kronen-Shader (noetig fuer TODO 9).
+
+`crown.vert` waehlt die Kachel nach **Blickrichtung**: `azIdx = floor(az*16/2pi)` aus
+`atan(aCenter.xz - uCamPos.xz)`, Variante aus `aData.w` (pro Baum gesetzt). Die ferne
+Krone parallaxiert also, wenn man sie umlaeuft, statt als flacher Aufkleber zu stehen.
+
+**Zwei Fehler, die der Messung vorausgingen:**
+1. `glClear` loescht den **ganzen** Framebuffer, nicht nur den Viewport — jede Kachel
+   ueberschrieb alle vorherigen, am Ende war eine einzige Kachel im Atlas. Fix:
+   `GL_SCISSOR_TEST` + `glScissor` auf das Kachelrechteck (vorher: 1/64 Kacheln gefuellt).
+2. Kronen-Shader kompilierte nicht (`vTile` im Fragment-Shader nicht deklariert) und
+   `make_program` gab eine **leere** Fehlermeldung aus — erst der Blick in die Log-Datei
+   zeigte sie.
+
+**Dichte-Iteration (gemessen an der Atlas-Deckung):** 572 Blaetter/0,05 m -> 2,8 %
+Deckung; 884/0,11 m -> 14,8 %; 1320/0,15 m -> 18,6 %; 2000/0,19 m -> **22,9 %**
+(= 50–61 % innerhalb der Kronen-Silhouette). Nahe Baeume: 805 -> **1550 Blaetter** und
+6 innere Atlas-Quads dahinter; Kronen-Nahschuss dadurch Blatt-Anteil 7,7 % -> **38,5 %**,
+Detail-Energie 1,30 -> 1,68.
+
+**Kosten (sauber gemessen, ohne Streprocesses):** 55.800 Blatt-Instanzen kosten
+2,22 -> 2,15 fps (−3 %). Atlas-Kronen sind sogar schneller als die prozeduralen
+(1,33 vs 1,09 fps), weil nahe Baeume keine 18 Quads mehr zeichnen und frueher discarden.
+
+**Wichtig fuer weitere Messungen:** es liefen zeitweise 8 alte Demo-Prozesse parallel —
+das verfelscht jede fps-Zahl und erklart auch die als "Tastatur geht nicht" gedeuteten
+Testlaeufe (Tasten gingen an ein altes Fenster). Raeumern: `pkill -9 -x 64kdemo`
+(`-x` nach Prozessname, sonst bringt man sich selbst um).
 
 ## Session 2026-10-07, Runde 17 (TODO 6a: echtes Blattwerk an nahen Baeumen)
 

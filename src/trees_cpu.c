@@ -195,7 +195,7 @@ static void leaf_cluster(float cx, float cy, float cz, float rad, int cnt,
     add_leaf(cx + rr * sr * cosf(th),
              cy + rr * cz2 * 0.85f + rad * 0.15f,   // Buschel sinkt leicht nach unten
              cz + rr * sr * sinf(th),
-             s * (0.022f + 0.020f * h4),            // 5..11 cm bei s=2,5
+             s * (0.028f + 0.024f * h4),            // 6..13 cm bei s=2,2
              h2 * 6.2832f,
              0.25f + h3 * 1.05f,                    // Ueberhang
              0.10f + 0.16f * h1, 0.26f + 0.26f * h2, 0.05f + 0.10f * h4);
@@ -288,8 +288,8 @@ static void gen_tree(float bx, float by, float bz, float s, float seed, int near
     // Einzelblaetter nur an nahen Baeumen (leaf.vert cullt ab 50 m ohnehin):
     // Buschel an der Astspitze und entlang des mittleren Aststuecks.
     if(near){
-      leaf_cluster(bx + s * t0x, by + s * t0y, bz + s * t0z, s * 0.24f, 45, 300 + i * 200, s, seed);
-      leaf_cluster(bx + s * m0x, by + s * m0y, bz + s * m0z, s * 0.20f, 20, 380 + i * 200, s, seed);
+      leaf_cluster(bx + s * t0x, by + s * t0y, bz + s * t0z, s * 0.24f, 70, 300 + i * 200, s, seed);
+      leaf_cluster(bx + s * m0x, by + s * m0y, bz + s * m0z, s * 0.20f, 30, 380 + i * 200, s, seed);
     }
     // Seitenaeste: einer am Ast-Mittel, einer an der Spitze
     for(int j = 0; j < 2; j++){
@@ -315,15 +315,16 @@ static void gen_tree(float bx, float by, float bz, float s, float seed, int near
       // 150 Vertices kosten und der Baum-Puffer (TREE_VERT_CAP=700000) waere
       // voll (gemessen 743.796). Die 0,9 cm offenen Enden stecken im Blattwerk.
       if(near)
-        leaf_cluster(bx + s * t2x, by + s * t2y, bz + s * t2z, s * 0.15f, 22, 600 + i * 40 + j * 20, s, seed);
+        leaf_cluster(bx + s * t2x, by + s * t2y, bz + s * t2z, s * 0.15f, 35, 600 + i * 40 + j * 20, s, seed);
     }
   }
   // ---------- Blattdach: K verteilte Billboard-Quads (prozedurale Textur + Alpha-Test) ----------
   {
     float ccx = bx, ccy = by + s * 2.05f, ccz = bz;
     float ex = s * 1.20f, ey = s * 1.00f, ez = s * 1.20f;   // Kronen-Ellipsoid
-    const int K = near ? 7 : 18;   // nahe Baeume: echtes Blattwerk traegt, die
-                                   // Quads fuellen nur die Innenmasse
+    const int K = near ? 6 : 18;   // nahe Baeume: echte Blaetter traussen, die
+                                   // Quads fuellen die Innenmasse dahinter
+    int variant = (int)(fabsf(seed) * 7.31f) % 4;   // Kronenform im Atlas
     static const float corners[6][2] = {
       {-0.5f,-0.5f},{0.5f,-0.5f},{-0.5f,0.5f},
       { 0.5f,-0.5f},{ 0.5f, 0.5f},{-0.5f, 0.5f}
@@ -343,7 +344,7 @@ static void gen_tree(float bx, float by, float bz, float s, float seed, int near
         float *d = &crownVerts[nCrownVerts * CROWN_FLOATS];
         d[0] = cc; d[1] = ccy2; d[2] = ccz2;
         d[3] = corners[c][0]; d[4] = corners[c][1];
-        d[5] = qsize; d[6] = qrot; d[7] = qseed; d[8] = 0.0f;
+        d[5] = qsize; d[6] = qrot; d[7] = qseed; d[8] = (float)variant;
         nCrownVerts++;
       }
     }
@@ -351,7 +352,7 @@ static void gen_tree(float bx, float by, float bz, float s, float seed, int near
     // sehen aus wie gemalte Flecken, erst die Einzelblaetter geben der Krone
     // eine echte Silhouette und Eigenbewegung.
     if(near){
-      for(int i = 0; i < 300; i++){
+      for(int i = 0; i < 700; i++){
         float h1 = TH(1200 + i * 3), h2 = TH(1201 + i * 3), h3 = TH(1202 + i * 3);
         float h4 = TH(1400 + i);
         // Punkt im Ellipsoid (h1,h2,h3 gleichmaessig in der Kugel)
@@ -361,7 +362,7 @@ static void gen_tree(float bx, float by, float bz, float s, float seed, int near
         add_leaf(ccx + rr * sr * cosf(th) * ex * 0.92f,
                  ccy + rr * czz * ey * 0.92f,
                  ccz + rr * sr * sinf(th) * ez * 0.92f,
-                 s * (0.024f + 0.022f * h4), h3 * 6.2832f, 0.25f + h1 * 1.05f,
+                 s * (0.028f + 0.024f * h4), h3 * 6.2832f, 0.25f + h1 * 1.05f,
                  0.09f + 0.17f * h2, 0.24f + 0.28f * h3, 0.04f + 0.11f * h4);
       }
     }
@@ -407,6 +408,42 @@ int tree_find_nearest(float x, float z, float *out, float *sizeOut){
     if(d < bd){ bd = d; out[0] = tp[0]; out[1] = tp[1]; out[2] = tp[2]; if(sizeOut) *sizeOut = s; }
   }
   return bd < 1e29f;
+}
+
+// Eine Referenz-Krone aus echten Einzelblaettern (Vorlage fuer den Atlas).
+// Absichtlich in BUSCHEL gebaut — 26 Klumpen a ~22 Blaetter — weil eine
+// gleichmaessige Fuellung aus der Ferne wie ein gruerner Nebel aussieht,
+// Haufen dagegen wie Blattwerk mit Luecken dazwischen.
+int foliage_patch(float *out, int cap, float seed, float s){
+  #define THP(i) c_hash12(seed * 0.731f + (i) * 13.7f, seed * 1.173f + (i) * 7.9f)
+  int n = 0;
+  float ccy = 2.05f * s, ex = 1.20f * s, ey = 1.00f * s, ez = 1.20f * s;
+  for(int c = 0; c < 40 && n < cap; c++){
+    float g1 = THP(c * 3), g2 = THP(c * 3 + 1), g3 = THP(c * 3 + 2);
+    float bx = (g1 + g2 - 1.0f) * ex * 0.82f;
+    float by = ccy + (g3 + g1 - 1.0f) * ey * 0.82f;
+    float bz = (g2 + g3 - 1.0f) * ez * 0.82f;
+    float rad = s * (0.20f + 0.16f * g2);
+    for(int i = 0; i < 50 && n < cap; i++){
+      int k = c * 32 + i;
+      float h1 = THP(400 + k * 3), h2 = THP(401 + k * 3), h3 = THP(402 + k * 3);
+      float th = h1 * 6.2832f, cz2 = h2 * 2.0f - 1.0f;
+      float rr = rad * cbrtf(h3);
+      float sr = sqrtf(fmaxf(0.0f, 1.0f - cz2 * cz2));
+      float *d = &out[n * LEAF_FLOATS];
+      d[0] = bx + rr * sr * cosf(th);
+      d[1] = by + rr * cz2 * 0.85f;
+      d[2] = bz + rr * sr * sinf(th);
+      d[3] = s * (0.120f + 0.070f * h1);      // Atlas-Blaetter sind bewusst gross:
+      d[4] = h2 * 6.2832f;                    // sie stehen fuer einen Blattbuschel,
+      d[5] = 0.25f + h3 * 1.05f;              // nicht fuer ein Einzelblatt
+      d[6] = 0.0f;
+      d[7] = 0.09f + 0.17f * h2; d[8] = 0.24f + 0.28f * h3; d[9] = 0.04f + 0.11f * h1;
+      n++;
+    }
+  }
+  #undef THP
+  return n;
 }
 
 void trees_build(float tx, float tz){
