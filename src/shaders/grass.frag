@@ -10,6 +10,7 @@ in float vSide;   // Schritt 2: Breitenposition (-0.5..0.5)
 in vec3 vR;       // Schritt 2: Breitenrichtung
 uniform vec3 uCamPos;
 uniform float uDbgCat;   // C-Taste: 1 = Kategorie-Farbe als Albedo statt Grasfarbe
+uniform float uAlbedoOnly; // 1 = nur Albedo ausgeben (Top-Down-Einfang)
 out vec4 O;
 const vec3 SUN = normalize(vec3(0.55, 0.38, -0.62));
 const float WATER_Y = 0.25;   // Wasserstand (wie fragment.glsl/scene.h)
@@ -78,6 +79,10 @@ void main(){
     base = cat; tip = cat;
   }
   vec3 albedo = mix(base, tip, vT * vT) * (0.75 + 0.5 * vCol.x);
+  // Top-Down-Einfang: die Ferntextur wird als ALBEDO verwendet und im Terrain
+  // ganz normal beleuchtet. Beleuchtung, Fog und Tonemapping duerfen hier nicht
+  // einfließen, sonst werden sie spaeter doppelt angewandt.
+  if (uAlbedoOnly > 0.5) { O = vec4(albedo, 1.0); return; }
   float dif = max(dot(n, SUN), 0.0) * 0.85 + 0.15;
   vec3 amb = vec3(0.40, 0.50, 0.68) * (0.45 + 0.55 * max(n.y, 0.0));
   vec3 col = albedo * (vec3(1.0, 0.92, 0.78) * dif + amb);

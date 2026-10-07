@@ -12,6 +12,8 @@ uniform float uMaxDist;     // max. Gras-Sichtweite (Slider)
 uniform float uFadeDur;     // Fade-Dauer (musz gleich grassFadeDur sein, L-Taste)
 uniform float uAngS0;       // Blickwinkel-Duennung: sin(theta)-Referenz (0 = aus)
 uniform float uAngQ;        // Exponent der Winkel-Modulation
+uniform float uCapture;     // 1 = Top-Down-Einfang fuer die Ferntextur
+uniform float uFarFade;     // ab hier duennen die Halme zugunsten der Textur aus
 // Fade-GRUPPEN: (birth, death) pro Gruppe, death == 0 heisst "lebt". Birth und
 // Death sind Fakten pro Build, nicht pro Halm — der Halm traegt beide Indizes
 // gepackt in EINEM Float: iGrp = birthGrp + deathGrp * NGRP (deathGrp 0 = lebt).
@@ -53,7 +55,7 @@ void main(){
   // Der Schwellwert ist pro Halm stabil aus seiner Position gehasht: beim
   // Kameradrehen duennen vorhandene Halme aus, es ploppen keine nach.
   float angFade = 1.0;
-  if (uAngS0 > 0.0) {
+  if (uAngS0 > 0.0 && uCapture < 0.5) {
     float st = (uCamPos.y - iPos.y) / max(d, 1e-3);   // sin(Erhebungswinkel)
     float P = pow(clamp(st / uAngS0, 0.0, 1.0), uAngQ);
     float rnd = fract(sin(dot(iPos.xz, vec2(12.9898, 78.233))) * 43758.5453);
@@ -69,9 +71,12 @@ void main(){
   float sizeScale = 1.0 + 1.8 * (1.0 - sizeLod);
   float h = iData.x * uHeightScale * sizeScale, w = iData.y * sizeScale;
   // LOD: Halme wachsen in der Distanz zurueck (Terrain-Grasfarbe uebernimmt).
-  // Dynamisch: Fade-out in den letzten 12m vor uMaxDist (Slider).
-  float lod = 1.0 - smoothstep(uMaxDist - 12.0, uMaxDist, d);
-  if(lod < 0.004){ gl_Position = vec4(2.0, 0.0, 0.0, 1.0); return; }
+  // Der Uebergabe-Abstand kommt von uFarFade: ab dort uebernimmt die eingefangene
+  // Top-Down-Textur, weil ein Halm unter ~2 px Bildbreite nur noch flackert.
+  float farEnd = min(uMaxDist, uFarFade + 12.0);
+  float lod = 1.0 - smoothstep(farEnd - 12.0, farEnd, d);
+  if (uCapture > 0.5) { sizeScale = 1.0; lod = 1.0; }   // echter Massstab, kein Cull
+  else if(lod < 0.004){ gl_Position = vec4(2.0, 0.0, 0.0, 1.0); return; }
   float cy = cos(yaw), sy = sin(yaw);
   vec3 p = iPos;
   // Neigung: Spitze weicht in yaw-Richtung ab (t^2 = gekruemmter Halm).
@@ -90,6 +95,10 @@ void main(){
   float gust = vnoise(gp * 2.3 + 7.7) * smoothstep(0.55, 0.85, vnoise(gp));
   float wx = wnd * 0.11 + gust * 0.30;
   float wz = wnd2 * 0.08 + gust * 0.18;
+  if (uCapture > 0.5) { wx = 0.0; wz = 0.0; }   // eingefroren, damit die Textur
+                                                 // nicht waehrend des Einfangs waechst
+  // KEIN Scheren: die schraege Einfang-Kamera (siehe ortho_oblique) bringt die
+  // Seitenflaeche der Halme von selbst ins Bild.
   p.x += wx * t * t * lod;
   p.z += wz * t * t * lod;
   // Breite: zulaeufig zur Spitze, Ebene um yaw rotiert
@@ -124,6 +133,7 @@ void main(){
     float da = clamp((uTime - death) / uFadeDur, 0.0, 1.0);
     f *= 1.0 - (da * da * (3.0 - 2.0 * da));
   }
+  if (uCapture > 0.5) f = 1.0;   // Einfang unabhaengig vom laufenden Fade
   if (f < 0.004) { gl_Position = vec4(2.0, 0.0, 0.0, 1.0); return; }
   // Kategorie-Codierung (C-Taste): GELB = laeuft aus, CYAN = laeuft ein,
   // 0 = KEIN Override (normale Grasfarbe). Ein Halm ist also nur waehrend des

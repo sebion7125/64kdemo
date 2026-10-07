@@ -80,6 +80,7 @@ static void (*p_glDepthMask)(GLboolean flag);
 static void (*p_glGenRenderbuffers)(GLsizei n, GLuint *renderbuffers);
 static void (*p_glBindRenderbuffer)(GLenum target, GLuint renderbuffer);
 static void (*p_glRenderbufferStorageMultisample)(GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height);
+static void (*p_glRenderbufferStorage)(GLenum target, GLenum internalformat, GLsizei width, GLsizei height);
 static void (*p_glFramebufferRenderbuffer)(GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer);
 static void (*p_glDeleteRenderbuffers)(GLsizei n, const GLuint *renderbuffers);
 // glBlitNamedFramebuffer: eindeutige 12-Parameter-Signatur (GL 4.2+ / ARB_direct_state_access).
@@ -96,6 +97,7 @@ static void (*p_glClearColor)(GLclampf red, GLclampf green, GLclampf blue, GLcla
 static void (*p_glReadPixels)(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, void *data);
 static void (*p_glFinish)(void);
 static void (*p_glGenTextures)(GLsizei n, GLuint *textures);
+static void (*p_glGenerateMipmap)(GLenum target);
 static void (*p_glBindTexture)(GLenum target, GLuint texture);
 static void (*p_glTexImage2D)(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const void *pixels);
 static void (*p_glTexParameteri)(GLenum target, GLenum pname, GLint param);
@@ -189,6 +191,7 @@ static void load_libs(void) {
   LOADGL2(glGenRenderbuffers);
   LOADGL2(glBindRenderbuffer);
   LOADGL2(glRenderbufferStorageMultisample);
+  LOADGL2(glRenderbufferStorage);
   LOADGL2(glFramebufferRenderbuffer);
   LOADGL2(glDeleteRenderbuffers);
   LOADGL2(glBlitNamedFramebuffer);
@@ -199,6 +202,7 @@ static void load_libs(void) {
   LOADGL2(glReadPixels);
   LOADGL2(glFinish);
   LOADGL2(glGenTextures);
+  LOADGL2(glGenerateMipmap);
   LOADGL2(glBindTexture);
   LOADGL2(glTexImage2D);
   LOADGL2(glTexParameteri);
@@ -597,6 +601,111 @@ static void build_mvp(const float camPos[3], const float camTgt[3], int w, int h
   }
 }
 
+// ---------------- Ferne Grasflaeche: Top-Down-Einfang der echten Halme ----------------
+// Ab ~25m ist ein Halm nur noch 1-2 px breit (w_px 2,3 bei 20m, 1,67 bei 40m,
+// 1,04 bei 110m). Seine MSAA-Abdeckung flackert beim Kameramarsch -> das
+// AA-Rauschen. Ab diesem Band uebernimmt eine Textur, die von der Engine selbst
+// eingefangen wird: Ortho von oben auf ein echtes Grasstueck, als ALBEDO (ohne
+// Beleuchtung/Fog/Tonemap, damit das Terrain sie normal beleuchtet). Kostet
+// Laufzeit, aber keine Datei-Bytes.
+#define CAP_TEX   1024      // Kantenlaenge der Einfangtextur [px]
+#define CAP_M     16.0f     // Kantenlaenge des eingefangenen Feldes [m] -> 64 px/m
+#define REGION_M  48.0f     // neuer Einfang pro Region
+// Aufnahmewinkel. Ein Top-Down-Foto der senkrecht stehenden Halme ist als
+// Ferntextur unbrauchbar: gemessen nur 7% Bildabdeckung bei 145 Halmen/m2,
+// weil von oben fast nur die Spitzen zu sehen sind. Die Ferne sieht aber die
+// SEITEN, also wird schraeg aufgenommen. Der echte Blickwinkel auf fernen Grund
+// ist winzig (Kamera 2m ueber Grund, 40m entfernt = 3 Grad); eine stark
+// foerzierte Aufnahme waere aber ein 16 x 1,4m-Schmalband und kachelt sichtbar.
+// 22 Grad ist der Kompromiss aus seitigem Anteil und kachelbarer Form.
+static float capElev = 22.0f * 0.01745329f;
+static GLuint grassTex = 0, capFbo = 0, capDepth = 0;
+static float  capBox[2] = {0.0f, 0.0f};   // Welt-XZ der Unterencke
+static float  capAmt = 0.0f;
+static int    capRegion = -2147483647;
+static int    grassTexOn = 1;
+static float  grassTexFar0 = 25.0f, grassTexFar1 = 45.0f;
+// Uniform-Orte des Gras-Programms (auch fuer den Einfang-Pass noetig)
+typedef struct { GLuint prog; GLint mvp, cam, time, height, maxdist, fadedur,
+                 grp, cat, angS0, angQ, cap, farfade, albOnly; } GrassProg;
+static GrassProg gpGrass;
+// Schraege Ortho-Kamera: Blick in +X mit Erhoehungswinkel e ueber dem Grund.
+// Bild-x <- Welt-Z, Bild-y <- Grundrichtung +X (um sin e foerziert), Tiefe
+// entlang der Blickrichtung. Das Grundstueck CAP_M x CAP_M m fuellt genau das
+// Bild, weil die y-Ausdehnung CAP_M*sin e betraegt.
+static void ortho_oblique(float px, float pz, float h0, float e, float out[16]){
+  float sE = sinf(e), cE = cosf(e);
+  float s  = 2.0f / CAP_M;
+  float sv = 2.0f / (CAP_M * sE);
+  float d  = 1.0f / (CAP_M * 1.5f);
+  out[0]=0.0f;  out[4]=0.0f;  out[8]=-s;        out[12]= pz * s;
+  out[1]=sE*sv; out[5]=cE*sv; out[9]=0.0f;      out[13]=-(sE*px + cE*h0)*sv;
+  out[2]=cE*d;  out[6]=-sE*d; out[10]=0.0f;     out[14]=(-cE*px + sE*h0)*d;
+  out[3]=0.0f;  out[7]=0.0f;  out[11]=0.0f;     out[15]=1.0f;
+}
+static void grass_capture(float cx, float cz){
+  if(!capFbo || !gpGrass.prog || nGrass < 1) return;
+  // Nur auf echter Grasflaeche einfangen (kein Wasser, kein Steilhang).
+  float px = cx, pz = cz; int found = 0;
+  for(int ring = 0; ring < 8 && !found; ring++)
+    for(int k = 0; k < 10 && !found; k++){
+      float a = k * 0.6283185f + ring * 0.37f, r = ring * 5.0f;
+      float tx = cx + cosf(a) * r, tz = cz + sinf(a) * r;
+      float h = c_terrainH(tx, tz);
+      if(h < WATER_Y + 0.20f || h > 7.0f) continue;
+      if(fabsf(c_terrainH(tx + 0.6f, tz) - h) > 0.3f ||
+         fabsf(c_terrainH(tx, tz + 0.6f) - h) > 0.3f) continue;
+      px = tx; pz = tz; found = 1;
+    }
+  float x0 = px - CAP_M * 0.5f, z0 = pz - CAP_M * 0.5f;
+  float h0 = c_terrainH(px, pz);
+  // UV-Anker: u=0 bei Welt-Z = pz + CAP_M/2 (Bild-x ist -Z), v=0 bei Welt-X = x0
+  capBox[0] = pz + CAP_M * 0.5f; capBox[1] = x0;
+  // Hintergrund = Terrain-Grasfarbe genau dort: die Lücken zwischen den Halmen
+  // sollen spaeter genauso aussehen wie der Untergrund.
+  float g  = c_fbm(px * 0.9f, pz * 0.9f);
+  float cr = (0.18f + 0.19f * g) * 0.87f;
+  float cg = (0.46f + 0.20f * g) * 0.93f;
+  float cb = (0.09f + 0.03f * g) * 0.89f;
+  float mvp[16]; ortho_oblique(px, pz, h0, capElev, mvp);
+  p_glBindFramebuffer(GL_FRAMEBUFFER, capFbo);
+  p_glViewport(0, 0, CAP_TEX, CAP_TEX);
+  p_glClearColor(cr, cg, cb, 1.0f);
+  p_glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  p_glEnable(GL_DEPTH_TEST); p_glDepthFunc(GL_LEQUAL); p_glDepthMask(GL_TRUE);
+  p_glDisable(GL_BLEND); p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+  p_glUseProgram(gpGrass.prog);
+  p_glUniformMatrix4fv(gpGrass.mvp, 1, GL_FALSE, mvp);
+  p_glUniform3f(gpGrass.cam, px, 30.0f, pz);
+  p_glUniform1f(gpGrass.time, 0.0f);
+  p_glUniform1f(gpGrass.height, grassHeightScale);
+  p_glUniform1f(gpGrass.maxdist, 1e9f);
+  p_glUniform1f(gpGrass.fadedur, grassFadeDur);
+  p_glUniform2fv(gpGrass.grp, GRASS_NGRP, grassGrp);
+  p_glUniform1f(gpGrass.cat, 0.0f);
+  p_glUniform1f(gpGrass.angS0, 0.0f);
+  p_glUniform1f(gpGrass.angQ, 0.0f);
+  p_glUniform1f(gpGrass.cap, 1.0f);
+  p_glUniform1f(gpGrass.farfade, 1e9f);
+  p_glUniform1f(gpGrass.albOnly, 1.0f);
+  p_glBindVertexArray(vaoGrass);
+  p_glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 9, (GLuint)nGrass, 0);
+  p_glBindVertexArray(0);
+  p_glGenerateMipmap(GL_TEXTURE_2D);
+  capAmt = 1.0f;
+  {
+    int inPatch = 0;
+    for (int i = 0; i < nGrass; i++){
+      float bx = grassInst[i * GRASS_FLOATS + 0], bz = grassInst[i * GRASS_FLOATS + 2];
+      if (bx >= x0 && bx < x0 + CAP_M && bz >= z0 && bz < z0 + CAP_M) inPatch++;
+    }
+    printf("Gras-Einfang: Zentrum (%.1f,%.1f) Terrain %.2f m, gefunden=%d, "
+           "Halme im Feld %d von %d (%.0f Halme/m2)\n",
+           px, pz, c_terrainH(px, pz), found, inPatch, nGrass,
+           (float)inPatch / (CAP_M * CAP_M));
+  }
+}
+
 
 // ================= HUD-Text =================
 // HUD-Groesse skaliert mit der Bildhoehe (4K = 3x, Minimum 720p)
@@ -669,6 +778,30 @@ static void save_screenshot_ppm(const char *path, int w, int h) {
     fwrite(buf, 1, (size_t)w * h * 3, f);
     fclose(f);
     printf("Screenshot: %s\n", path);
+  }
+  free(buf);
+}
+// Debug: den eingefangenen Gras-Ausschnitt als PPM sichern (verifiziert, dass
+// der Top-Down-Pass wirklich Halme enthaelt und nicht nur den Klarfarbton).
+static void save_grass_tex_ppm(const char *path){
+  if(!capFbo) return;
+  unsigned char *buf = malloc((size_t)CAP_TEX * CAP_TEX * 4);
+  if(!buf) return;
+  p_glBindFramebuffer(GL_FRAMEBUFFER, capFbo);
+  p_glReadBuffer(GL_COLOR_ATTACHMENT0);
+  p_glFinish();
+  p_glReadPixels(0, 0, CAP_TEX, CAP_TEX, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+  p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  if(p_glGetError() != GL_NO_ERROR){ free(buf); return; }
+  for (int i = 0; i < CAP_TEX * CAP_TEX; i++){
+    buf[i*3+0] = buf[i*4+0]; buf[i*3+1] = buf[i*4+1]; buf[i*3+2] = buf[i*4+2];
+  }
+  FILE *f = fopen(path, "wb");
+  if(f){
+    fprintf(f, "P6\n%d %d\n255\n", CAP_TEX, CAP_TEX);
+    fwrite(buf, 1, (size_t)CAP_TEX * CAP_TEX * 3, f);
+    fclose(f);
+    printf("Gras-Einfang: %s\n", path);
   }
   free(buf);
 }
@@ -868,6 +1001,42 @@ int main(int argc, char **argv) {
   GLint locGCat = p_glGetUniformLocation(progGrass, "uDbgCat");
   GLint locGAngS0 = p_glGetUniformLocation(progGrass, "uAngS0");
   GLint locGAngQ  = p_glGetUniformLocation(progGrass, "uAngQ");
+  GLint locGCap   = p_glGetUniformLocation(progGrass, "uCapture");
+  GLint locGFarFade = p_glGetUniformLocation(progGrass, "uFarFade");
+  GLint locGAlbOnly = p_glGetUniformLocation(progGrass, "uAlbedoOnly");
+  gpGrass.prog = progGrass; gpGrass.mvp = locGMVP; gpGrass.cam = locGCam;
+  gpGrass.time = locGTime; gpGrass.height = locGHeight; gpGrass.maxdist = locGMaxDist;
+  gpGrass.fadedur = locGFade; gpGrass.grp = locGrp; gpGrass.cat = locGCat;
+  gpGrass.angS0 = locGAngS0; gpGrass.angQ = locGAngQ; gpGrass.cap = locGCap;
+  gpGrass.farfade = locGFarFade; gpGrass.albOnly = locGAlbOnly;
+  // Einfang-Textur + FBO (Laufzeit, keine Datei-Bytes)
+  p_glGenTextures(1, &grassTex);
+  p_glBindTexture(GL_TEXTURE_2D, grassTex);
+  p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+  p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  p_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, CAP_TEX, CAP_TEX, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+  p_glGenFramebuffers(1, &capFbo);
+  p_glBindFramebuffer(GL_FRAMEBUFFER, capFbo);
+  p_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, grassTex, 0);
+  p_glGenRenderbuffers(1, &capDepth);
+  p_glBindRenderbuffer(GL_RENDERBUFFER, capDepth);
+  p_glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, CAP_TEX, CAP_TEX);
+  p_glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, capDepth);
+  if(p_glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+    printf("WARN: Gras-Einfang-FBO unvollstaendig: status=0x%x GL-Err=0x%x "
+           "tex=%u fbo=%u depth=%u\n",
+           p_glCheckFramebufferStatus(GL_FRAMEBUFFER), p_glGetError(),
+           grassTex, capFbo, capDepth);
+  p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  p_glBindRenderbuffer(GL_RENDERBUFFER, 0);
+  GLint locGTex    = p_glGetUniformLocation(progScene, "uGrassTex");
+  GLint locGBox    = p_glGetUniformLocation(progScene, "uGrassBox");
+  GLint locGSide   = p_glGetUniformLocation(progScene, "uGrassSide");
+  GLint locGTexAmt = p_glGetUniformLocation(progScene, "uGrassTexAmt");
+  GLint locGFar0   = p_glGetUniformLocation(progScene, "uGrassFar0");
+  GLint locGFar1   = p_glGetUniformLocation(progScene, "uGrassFar1");
   GLint locCMVP    = p_glGetUniformLocation(progCrown, "uMVP");
   GLint locCCam    = p_glGetUniformLocation(progCrown, "uCamPos");
   GLint locCTgt    = p_glGetUniformLocation(progCrown, "uCamTgt");
@@ -936,7 +1105,8 @@ int main(int argc, char **argv) {
           if (ks == XK_1) scaleIdx = 0;
           if (ks == XK_2) scaleIdx = 1;
           if (ks == XK_3) scaleIdx = 2;
-          if (ks == XK_p) save_screenshot_ppm("/tmp/64kdemo_shot.ppm", winW, winH);
+          if (ks == XK_p) { save_screenshot_ppm("/tmp/64kdemo_shot.ppm", winW, winH);
+                            save_grass_tex_ppm("/tmp/64kdemo_grasstex.ppm"); }
           if (ks == XK_t) showTreeWire = !showTreeWire;
           if (ks == XK_m) {   // MSAA zyklisch: 4x -> 8x -> off -> 4x
             if (useMSAA && msaaSamples == 4) { msaaSamples = 8; fboW = 0; printf("MSAA: 8x\n"); }
@@ -950,6 +1120,14 @@ int main(int argc, char **argv) {
             grassSetDensCut(dbgGrassEdge ? 0.01f : 0.0f);
             printf("DEBUG Dichte-Kante: %s (neuer Build noetig: G aus/ein oder 1m bewegen)\n",
                    dbgGrassEdge ? "AN (CUT 0.01)" : "AUS (CUT 0)"); }
+          if (ks == XK_z) {
+            // Uebergabe-Abstand Gras-Geometrie -> Ferntextur
+            if (grassTexOn && grassTexFar0 > 20.0f) { grassTexFar0 = 15.0f; grassTexFar1 = 30.0f; }
+            else if (grassTexOn) { grassTexOn = 0; }
+            else { grassTexOn = 1; grassTexFar0 = 25.0f; grassTexFar1 = 45.0f; capRegion = -2147483647; }
+            printf("Ferne Gras-Textur: %s (Uebergabe %.0f..%.0fm)\n",
+                   grassTexOn ? "AN" : "AUS", grassTexFar0, grassTexFar1);
+          }
           if (ks == XK_u) { dbgAngThin = !dbgAngThin;
             printf("DEBUG Blickwinkel-Duennung: %s (s0=%.2f q=%.2f)\n",
                    dbgAngThin ? "AN" : "AUS", grassAngS0, grassAngQ); }
@@ -1292,6 +1470,13 @@ int main(int argc, char **argv) {
     ensure_fbo(winW, winH);
     float mvp[16];
     build_mvp(camPos, camTgt, fboW, fboH, mvp);
+    // Regionwechsel -> neues Grasstueck einfangen. Bindet sein eigenes FBO und
+    // laesst das Haupt-FBO danach unangetastet (der naechste Pass bindet eh neu).
+    if(grassTexOn && nGrass > 0){
+      int reg = (int)floorf(camPos[0] / REGION_M) * 46337
+              + (int)floorf(camPos[2] / REGION_M);
+      if(reg != capRegion){ capRegion = reg; grass_capture(camPos[0], camPos[2]); }
+    }
 
     // 1) Szene-Pass (Raymarch: Himmel/Terrain/Wasser) ERST: Farbe +
     //    Projektionstiefe (gl_FragDepth) ins FBO. Meshes werden danach mit
@@ -1315,6 +1500,14 @@ int main(int argc, char **argv) {
       p_glUniform1f(locTime, (float)tNow);
       p_glUniform3f(locCamPos, camPos[0], camPos[1], camPos[2]);
       p_glUniform3f(locCamTgt, camTgt[0], camTgt[1], camTgt[2]);
+      p_glActiveTexture(GL_TEXTURE0);
+      p_glBindTexture(GL_TEXTURE_2D, grassTex);
+      p_glUniform1i(locGTex, 0);
+      p_glUniform2f(locGBox, capBox[0], capBox[1]);
+      p_glUniform1f(locGSide, CAP_M);
+      p_glUniform1f(locGTexAmt, (grassTexOn && capAmt > 0.0f) ? 1.0f : 0.0f);
+      p_glUniform1f(locGFar0, grassTexFar0);
+      p_glUniform1f(locGFar1, grassTexFar1);
       p_glDrawArrays(GL_TRIANGLES, 0, 3);
     }
 
@@ -1349,6 +1542,11 @@ int main(int argc, char **argv) {
     p_glUniform1f(locGCat, dbgGrassCat ? 1.0f : 0.0f);
     p_glUniform1f(locGAngS0, dbgAngThin ? grassAngS0 : 0.0f);
     p_glUniform1f(locGAngQ, grassAngQ);
+    p_glUniform1f(locGCap, 0.0f);
+    p_glUniform1f(locGAlbOnly, 0.0f);
+    // Halme duennen genau dort aus, wo die Textur uebernimmt (gleiches Band,
+    // damit sich Uebergabe und Cull nicht gegenseitig wiedersprechen).
+    p_glUniform1f(locGFarFade, (grassTexOn && capAmt > 0.0f) ? grassTexFar1 : grassMaxDist);
     // Transparenz des Grases: ZWEI sich ausschliessende Wege.
     //  A) Alpha-to-Coverage: Alpha wird in eine MSAA-Sample-Maske uebersetzt.
     //     Die Abdeckung stellt die Transparenz her -> KEIN Blending, sonst
@@ -1457,6 +1655,7 @@ int main(int argc, char **argv) {
     if (dbgAlpha2Cov) strncat(hud2, " A2C", sizeof(hud2) - (int)strlen(hud2) - 1);
     if (dbgSortOrder) strncat(hud2, " SORT", sizeof(hud2) - (int)strlen(hud2) - 1);
     if (dbgAngThin) strncat(hud2, " WINK", sizeof(hud2) - (int)strlen(hud2) - 1);
+    if (grassTexOn) strncat(hud2, " TEX", sizeof(hud2) - (int)strlen(hud2) - 1);
     if (grassFadeDur != 1.0f) strncat(hud2, " FADE", sizeof(hud2) - (int)strlen(hud2) - 1);
     snprintf(hud3, sizeof hud3, "POS %d %d %d%s%s",
              (int)camPos[0], (int)camPos[1], (int)camPos[2],

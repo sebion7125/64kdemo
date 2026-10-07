@@ -5,6 +5,16 @@ uniform vec2  uRes;
 uniform float uTime;
 uniform vec3  uCamPos;
 uniform vec3  uCamTgt;
+// Ferne Grasflaeche: von der Engine eingefangenes Top-Down-Albedo der ECHTEN
+// Halme (grass_capture in main.c). Ab ~25m ist ein Halm nur noch 1-2 px breit,
+// seine MSAA-Abdeckung flackert — das ist das AA-Rauschen. Dort uebernimmt
+// diese Textur, statt Halme weiter als Geometrie zu zeichnen.
+uniform sampler2D uGrassTex;
+uniform vec2  uGrassBox;     // Welt-XZ der Unterencke des eingefangenen Feldes
+uniform float uGrassSide;    // Kantenlaenge des Feldes [m]
+uniform float uGrassTexAmt;  // 0 = Textur aus
+uniform float uGrassFar0;    // Uebergabeband: ab hier kommt die Textur dazu
+uniform float uGrassFar1;
 
 const vec3 SUN = normalize(vec3(0.55, 0.38, -0.62));
 const float WATER_Y = 0.25;   // Wasserstand (mit main.c abgestimmt)
@@ -153,6 +163,18 @@ vec3 terrainColor(vec3 p, vec3 n, float h, vec3 rd){
     grass = mix(grass, fc2, m);
   }
   float slope = length(n.xz);
+  // Uebergabe an die eingefangene Textur. Getachelt ueber Welt-XZ; die Maske
+  // ist dieselbe, die auch das Gras-LOD steuert (Fels/Sand/Schnee raus).
+  float grassTexW = 0.0;
+  if (uGrassTexAmt > 0.002) {
+    float d = length(p - uCamPos);
+    grassTexW = smoothstep(uGrassFar0, uGrassFar1, d) * uGrassTexAmt;
+    if (grassTexW > 0.002) {
+      vec2 uv = vec2(uGrassBox.x - p.z, p.x - uGrassBox.y) / uGrassSide;
+      vec3 ta = texture(uGrassTex, fract(uv)).rgb;
+      grass = mix(grass, ta, grassTexW);
+    }
+  }
   float rockM = max(smoothstep(0.45, 0.75, slope), smoothstep(9.0, 15.0, p.y));
   vec3 rock = mix(vec3(0.42, 0.38, 0.34), vec3(0.55, 0.52, 0.48), fbm(p.xz * 0.6));
   vec3 col = mix(grass, rock, rockM);
@@ -167,7 +189,7 @@ vec3 terrainColor(vec3 p, vec3 n, float h, vec3 rd){
   {
     float face = -dot(rd, n);
     float onGrass = (1.0 - rockM) * (1.0 - sandM) * (1.0 - snowM);
-    float st = smoothstep(0.55, 0.9, face) * onGrass;
+    float st = smoothstep(0.55, 0.9, face) * onGrass * (1.0 - grassTexW);
     if(st > 0.004){
       vec2 gp = p.xz * 5.0;
       vec2 gi = floor(gp);
