@@ -8,7 +8,8 @@ in float vFade;   // 0..1 (Fade-in nach Build)
 in float vCat;    // 0 = kein Override, 1 = Fade-in laeuft, 2 = Fade-out laeuft
 in float vSide;   // Schritt 2: Breitenposition (-0.5..0.5)
 in vec3 vR;       // Schritt 2: Breitenrichtung
-in float vSp;     // Pflanzen-Typ aus grass.vert (0 Wiese, 1 Hochgras,
+in float vSp;
+in float vThick;     // Pflanzen-Typ aus grass.vert (0 Wiese, 1 Hochgras,
                   // 2 Lavendel, 3 Gaensebluemchen, 4 Schilf)
 in vec4 vReg;     // Deckungsgrade der Region aus grass.vert
                   // (x Hochgras, y Lavendel, z Gaensebluemchen, w Schilf)
@@ -77,16 +78,19 @@ void main(){
   base = mix(base, base * vec3(0.86, 0.94, 0.78), wTall * 0.55);   // Hochgras-Zone
   base = mix(base, vec3(0.34, 0.36, 0.50), wLav * 0.30);           // Lavendel-Schimmer
   base = mix(base, vec3(0.30, 0.44, 0.18), wDaisy * 0.35);         // Gaeensebluemchen-Wiese
-  base = mix(base, vec3(0.44, 0.46, 0.24), wReed * 0.65);          // Schilfguertel
+  base = mix(base, vec3(0.20, 0.36, 0.16), wReed * 0.65);          // Schilfguertel
   // Art-Farben (vSp): Spitze bzw. Bluetenstand anders als der Halm
   if(vSp > 1.5 && vSp < 2.5){            // Lavendel: graugruener Stiel, violetter Stand
     base = mix(base, vec3(0.30, 0.36, 0.24), 0.45);
     tip  = mix(tip, vec3(0.44, 0.26, 0.64), smoothstep(0.40, 0.72, vT));
   } else if(vSp > 2.5 && vSp < 3.5){     // Gaensebluemchen: weisser Koerbchen-Rand
     tip  = mix(tip, vec3(0.93, 0.93, 0.88), smoothstep(0.55, 0.82, vT));
-  } else if(vSp > 3.5){                  // Schilf: gelblich-gruen, brauner Kolben
-    base = mix(base, vec3(0.44, 0.46, 0.24), 0.55);
-    tip  = mix(tip, vec3(0.52, 0.36, 0.19), smoothstep(0.50, 0.78, vT));
+  } else if(vSp > 3.5){                  // Schilf: gruen wie die Baumblaetter,
+    // Kolben ein weicher braenlich-gruenlicher Stand (kein strohiges Gelb)
+    base = mix(base, vec3(0.16, 0.33, 0.13), 0.60);
+    tip  = mix(tip, vec3(0.26, 0.38, 0.18), smoothstep(0.45, 0.66, vT));
+    tip  = mix(tip, mix(vec3(0.40, 0.36, 0.24), vec3(0.50, 0.44, 0.30), vThick),
+               smoothstep(0.66, 0.86, vT));
   } else if(vSp > 0.5 && vSp < 1.5){     // Hochgras: dunkler + gesaettigter
     base = base * vec3(0.88, 0.96, 0.80);
     tip  = mix(tip, vec3(0.26, 0.52, 0.10), 0.65);

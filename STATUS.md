@@ -25,7 +25,7 @@ Himmel/Tageszeiten. Budget ist laut Nutzer zweitrangig.
 | 10 | **Kronen-Redesign** (Nah: nur Einzelblätter, zahlreich; weicher LOD-Übergang; Blattsilhouette statt Quadrate; keine Polygonkanten fern) | 🔶 Runde 20: Silhouette + Zweige + 137,5° + 272k Blätter (Krone 8 % → 39 %); ferne Kachel-Optik noch offen |
 | 11 | Rinde auch an Abzweigungen (Oberflächenkoordinaten pro Rohr, nicht nur am Stamm) | ✅ Runde 21 (Detail 2,27 → 4,00, texturlos 57 % → 38 %) |
 | 12 | Ast-Gerüst pro Baum unterschiedlich + Baumgrößen stärker streuen | ✅ Runde 20 |
-| 13 | Schilf: lichter, nicht kerzengerade, Farbe wie Baumblätter, vereinzelt dicke Halme mit Kolben | ⬜ (Nutzer-Runde 20) |
+| 13 | Schilf: lichter, nicht kerzengerade, Farbe wie Baumblätter, vereinzelt dicke Halme mit Kolben | ✅ Runde 21 (Anteil 59,9 % → 7,7 %) |
 | 14 | Blumen auf den Wiesen | ⬜ (Nutzer-Runde 20) |
 
 ### 2. Nebel/Sichtweite — „alles ein bisschen milchig"
@@ -446,6 +446,27 @@ der alten Add-on-Datei sind tot (404), das Add-on ist seit Blender 4.2 eine Exte
 (geseed), Blätter entlang der Zweige mit 137,5°-Phyllotaxis, Blattsilhouette per
 Alpha-Test im Shader, Blatt-Laenge/Breite-Verhaeltnis ~2:1, Blattgroessen-Abstufung
 zum Zweigende hin, Kronenform ueber das Astlaengen-Profil.
+
+## Session 2026-10-07, Runde 21b (TODO 13: Schilf)
+
+Nutzer: „zu dicht und viel zu kerzengerade, Farbe sollte eher wie die Baumblätter
+sein, vereinzelt dicke Halme mit dem ellipsoiden Bommel“.
+
+- **Lichter:** `wReed *= 0.45` in `species()`. Gemessen (Arten-Farbmodus, untere
+  Bildhälfte): Schilf-Anteil **59,9 % → 7,7 %** der gefärbten Pflanzen-Pixel.
+- **Nicht kerzengerade:** `lean *= 0.25` → `lean *= 1.30`, und die Krümmung wandert
+  nach oben (`lo = lean * pow(t, bendPow) * h * bendK` mit bendPow 1.55, bendK 1.30)
+  — der Oberkopf neigt sich, wie bei echtem Schilf.
+- **Farbe:** statt strohigem Gelb (0.44,0.46,0.24) jetzt grünes Laub wie die
+  Baumblätter (0.16,0.33,0.13), Kolben braun-grünlich. Auch der Terrain-Unterton
+  des Schilfgürtels wurde von gelb auf grün gestellt.
+- **Dicke Halme mit Bommel:** pro Halm gehasht (`hash12 > 0.90`, ~10 %): 4,2 m hoch,
+  2,2× breiter, und der Kolben ist ein Ellipsoid (`headW = 0.40 + (0.75+0.85·thick)·
+  sin(π·ht)` statt einer festen Verbreiterung).
+- Neuer Env-Hook `DEMO_ARTEN=2` (Arten-Farbmodus ohne Tasten — X-Tasten sind in der
+  VM unzuverlässig). **Messfehler:** mit `DEMO_FREEZE` stehen die Gras-Fades still,
+  der Screenshot landete mitten im „alle Halme sterben“-Zyklus → fast keine
+  Pflanzen-Pixel. Ohne Freeze gemessen.
 
 ## Session 2026-10-07, Runde 21 (TODO 11: Rinde auf Ästen)
 

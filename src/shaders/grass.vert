@@ -29,7 +29,8 @@ out float vFade;
 out float vCat;  // 0 = kein Override, 1 = Fade-in laeuft, 2 = Fade-out laeuft
 out float vSide;   // Schritt 2: Breitenposition (ww: -0.5..0.5)
 out vec3 vR;       // Schritt 2: Breitenrichtung (Halm-"rechts")
-out float vSp;     // Pflanzen-Typ (0 Wiese, 1 Hochgras, 2 Lavendel,
+out float vSp;
+out float vThick;   // 1 = dicker Schilfhalm mit grossem Kolben     // Pflanzen-Typ (0 Wiese, 1 Hochgras, 2 Lavendel,
                    // 3 Gaensebluemchen, 4 Schilf) — siehe species() unten
 out vec4 vReg;     // Deckungsgrade der Region (Hochgras, Lavendel, Gaensebl.,
                    // Schilf) als Varying — grass.frag rechnet sie nicht selbst
@@ -76,7 +77,9 @@ float reedW(float x, float z, float y){
 // geht als Varying an grass.frag — dort darf es nicht nochmal gerechnet werden.
 float species(float x, float z, float y, out vec4 reg){
   float dh = y - WATER_Y;
-  float wReed  = reedW(x, z, y);
+  // Schilf deutlich lichter als vorher: es stand in dichten Teppichen
+  // (Nutzer: "zu dicht"). 0.45 laesst Uferbu schel statt Riegel.
+  float wReed  = reedW(x, z, y) * 0.45;
   float wTall = 0.0, wLav = 0.0, wDaisy = 0.0;
   if(dh >= 0.15){
     float nA = rgf(vec2(x * 0.011, z * 0.011));
@@ -106,11 +109,22 @@ void main(){
   // lief 3,3 % Abweichungen (Rundung), dann haette Halm-Hoehe und Halm-Farbe zu
   // verschiedenen Arten gehoert.
   float sp = species(iPos.x, iPos.z, iPos.y, vReg);
-  float spH = 1.0, spW = 1.0;
+  float spH = 1.0, spW = 1.0, bendPow = 2.0, bendK = 1.0;
+  vThick = 0.0;
   if(sp > 0.5 && sp < 1.5){ spH = 1.75; spW = 1.35; lean *= 0.85; }   // Hochgras
   else if(sp > 1.5 && sp < 2.5){ spH = 1.35; spW = 0.55; lean *= 0.45; } // Lavendel
   else if(sp > 2.5 && sp < 3.5){ spH = 0.55; spW = 0.60; lean *= 1.20; } // Gaensebluemchen
-  else if(sp > 3.5){ spH = 4.20; spW = 1.50; lean *= 0.25; }            // Schilf
+  else if(sp > 3.5){
+    // Schilf: hoch, aber NICHT kerzengerade. Der Oberkopf neigt sich (bendPow < 2
+    // verlagert die Krueimmung nach oben), und vereinzelt stehen dicke Halme mit
+    // grossem Kolben.
+    float th = hash12(vec2(iPos.x * 3.11, iPos.z * 5.17));
+    vThick = th > 0.90 ? 1.0 : 0.0;
+    spH = 3.10 + 1.10 * vThick;
+    spW = 1.05 + 1.15 * vThick;
+    lean *= 1.30;
+    bendPow = 1.55; bendK = 1.30;
+  }
   // Blickwinkel-Duennung. Ein senkrechter Halm wird NICHT foerziert, eine
   // Wiese schon (Faktor sin theta). Flaechige Bedeckung = n*h*w/sin(theta),
   // konstante Pixeldichte verlangt also n ~ sin(theta). Gemessen ohne diese
@@ -146,7 +160,7 @@ void main(){
   vec3 p = iPos;
   // Neigung: Spitze weicht in yaw-Richtung ab (t^2 = gekruemmter Halm).
   // Macht die Halme von oben sichtbar (projizierte Breite ~ w*sin(lean)).
-  float lo = lean * t * t * h;
+  float lo = lean * pow(t, bendPow) * h * bendK;
   p.x += cy * lo;
   p.z += sy * lo;
   p.y += t * h * lod * (1.0 - 0.3 * lean);
@@ -173,7 +187,14 @@ void main(){
   float headOn = 0.0, headW = 0.0;
   if(sp > 1.5 && sp < 2.5){ headOn = smoothstep(0.55, 0.82, t); headW = 0.34; }
   else if(sp > 2.5 && sp < 3.5){ headOn = smoothstep(0.72, 0.95, t); headW = 0.62; }
-  else if(sp > 3.5){ headOn = smoothstep(0.68, 0.90, t); headW = 0.50; }
+  else if(sp > 3.5){
+    // Schilf-Kolben als Ellipsoid: erst breiter werdend, dann zur Spitze wieder zu
+    // (sin-Profil ueber den Kolbenanteil), dicke Halme bekommen einen deutlich
+    // groesseren Bommel.
+    float ht = clamp((t - 0.58) / 0.42, 0.0, 1.0);
+    headOn = smoothstep(0.58, 0.70, t);
+    headW  = 0.40 + (0.75 + 0.85 * vThick) * sin(3.14159 * ht);
+  }
   taper = mix(taper, headW, headOn);
   vec2 woff = vec2(ww * w * taper, ww * w * taper * 0.7);
   p.x += woff.x * cy - woff.y * sy;
