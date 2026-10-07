@@ -9,6 +9,7 @@ in float vCat;    // 0 = kein Override, 1 = Fade-in laeuft, 2 = Fade-out laeuft
 in float vSide;   // Schritt 2: Breitenposition (-0.5..0.5)
 in vec3 vR;       // Schritt 2: Breitenrichtung
 in float vSp;
+in vec2 vHead;    // x = Kopf-Anteil dieses Punkts, y = 0..1 entlang des Kopfes
 in float vThick;     // Pflanzen-Typ aus grass.vert (0 Wiese, 1 Hochgras,
                   // 2 Lavendel, 3 Gaensebluemchen, 4 Schilf)
 in vec4 vReg;     // Deckungsgrade der Region aus grass.vert
@@ -95,6 +96,33 @@ void main(){
     base = base * vec3(0.88, 0.96, 0.80);
     tip  = mix(tip, vec3(0.26, 0.52, 0.10), 0.65);
   }
+  // ---- Blumen: echter Bluetenkopf mit Silhouette (Alpha-Test). Der Kopf ist im
+  // Vertex-Shader kammerzugewandt orientiert, von jeder Seite also ein Teller und
+  // nicht die Kante eines Bands.
+  if(vHead.x > 0.5 && ((vSp > 2.5 && vSp < 3.5) || vSp > 4.5)){
+    float u = vSide / 0.34;   // Kopfgeometrie: |ww| ist am breitesten Vertex 0.34
+    float w = vHead.y;
+    float keep; vec3 fc;
+    if(vSp > 2.5 && vSp < 3.5){            // Gaensebluemchen: weisser Teller, gelber Grund
+      float e = length(vec2(u, (w - 0.5) * 1.7));
+      e *= 1.0 + 0.10 * step(0.5, fract(atan(u, w - 0.5) * 4.0));
+      keep = 1.0 - smoothstep(0.85, 1.0, e);
+      fc = mix(vec3(0.92, 0.90, 0.80), vec3(0.85, 0.68, 0.16), 1.0 - smoothstep(0.25, 0.42, e));
+    } else if(vSp > 4.5 && vSp < 5.5){     // Mohn: roter Napf mit dunkler Mitte
+      float e = length(vec2(u, (w - 0.5) * 1.45));
+      e *= 1.0 + 0.12 * step(0.5, fract(atan(u, w - 0.5) * 2.0));
+      keep = 1.0 - smoothstep(0.80, 1.0, e);
+      fc = mix(vec3(0.48, 0.05, 0.05), vec3(0.20, 0.02, 0.02), 1.0 - smoothstep(0.0, 0.35, e));
+    } else {                               // Lupine: aehriger Stand aus Einzelblueten
+      float hw = 0.55 + 0.45 * sin(3.14159 * clamp(w, 0.0, 1.0));
+      float floret = smoothstep(0.30, 0.55, abs(fract(w * 7.0) - 0.5) * 1.4);
+      keep = (1.0 - smoothstep(hw * 0.80, hw, abs(u))) * (0.55 + 0.45 * floret);
+      fc = mix(vec3(0.34, 0.20, 0.58), vec3(0.52, 0.36, 0.72), fract(w * 7.0));
+    }
+    if(keep < 0.35) discard;
+    base = mix(base, fc, vHead.x);
+    tip  = mix(tip, fc, vHead.x);
+  }
   // C-Taste: der Zustand wird als ALBEDO gefaerbt, aber nur WAHREND ein Fade
   // laeuft. Ist der Fade durch, ist der Halm normales Gras (base/tip unveraendert).
   // Beleuchtung, Transluzenz, Specular, Fog, Tonemapping und das Alpha-Blending
@@ -116,7 +144,9 @@ void main(){
     if(vSp > 0.5 && vSp < 1.5)      sc = vec3(0.95, 0.90, 0.10);  // 1 Hochgras
     else if(vSp > 1.5 && vSp < 2.5) sc = vec3(0.75, 0.15, 0.90);  // 2 Lavendel
     else if(vSp > 2.5 && vSp < 3.5) sc = vec3(0.95, 0.95, 0.95);  // 3 Gaensebluemchen
-    else if(vSp > 3.5)              sc = vec3(0.95, 0.45, 0.05);  // 4 Schilf
+    else if(vSp > 3.5 && vSp < 4.5)   sc = vec3(0.95, 0.45, 0.05);  // 4 Schilf
+    else if(vSp > 4.5 && vSp < 5.5)   sc = vec3(0.98, 0.05, 0.05);  // 5 Mohn
+    else if(vSp > 5.5)                sc = vec3(0.05, 0.25, 0.98);  // 6 Lupine
     base = sc; tip = sc;
   }
   vec3 albedo = mix(base, tip, vT * vT) * (0.75 + 0.5 * vCol.x);

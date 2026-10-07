@@ -1306,6 +1306,10 @@ int main(int argc, char **argv) {
   { const char *es = getenv("DEMO_SHOT"); if (es) envShotAt = (float)atof(es); }
   { const char *ef = getenv("DEMO_FREEZE"); if (ef) envFreeze = (float)atof(ef); }
   { const char *ea = getenv("DEMO_ARTEN"); if (ea) dbgGrassCat = atoi(ea); }
+  { const char *ec = getenv("DEMO_CAM");
+    if (ec){ float cx=0, cz=0; if(sscanf(ec, "%f %f", &cx, &cz) == 2){
+      flyPos[0] = cx; flyPos[2] = cz; flyPos[1] = c_terrainH(cx, cz) + 1.10f;
+      flyPitch = -0.30f; printf("DEBUG Kamera gesetzt: (%.1f, %.2f, %.1f)\n", cx, flyPos[1], cz); } } }
   envNoLeaf = getenv("DEMO_NOLEAF") ? 1 : 0;
   envLeafMask = getenv("DEMO_LEAFMASK") ? 1 : 0;
   if (envTreeJump) tree_jump();

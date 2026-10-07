@@ -30,6 +30,7 @@ out float vCat;  // 0 = kein Override, 1 = Fade-in laeuft, 2 = Fade-out laeuft
 out float vSide;   // Schritt 2: Breitenposition (ww: -0.5..0.5)
 out vec3 vR;       // Schritt 2: Breitenrichtung (Halm-"rechts")
 out float vSp;
+out vec2 vHead;   // x = 0..1 Kopf-Anteil, y = 0..1 entlang des Kopfes
 out float vThick;   // 1 = dicker Schilfhalm mit grossem Kolben     // Pflanzen-Typ (0 Wiese, 1 Hochgras, 2 Lavendel,
                    // 3 Gaensebluemchen, 4 Schilf) — siehe species() unten
 out vec4 vReg;     // Deckungsgrade der Region (Hochgras, Lavendel, Gaensebl.,
@@ -80,7 +81,7 @@ float species(float x, float z, float y, out vec4 reg){
   // Schilf deutlich lichter als vorher: es stand in dichten Teppichen
   // (Nutzer: "zu dicht"). 0.45 laesst Uferbu schel statt Riegel.
   float wReed  = reedW(x, z, y) * 0.45;
-  float wTall = 0.0, wLav = 0.0, wDaisy = 0.0;
+  float wTall = 0.0, wLav = 0.0, wDaisy = 0.0, wPoppy = 0.0, wLupine = 0.0;
   if(dh >= 0.15){
     float nA = rgf(vec2(x * 0.011, z * 0.011));
     float nB = rgf(vec2(x * 0.031 + 5.3, z * 0.031));
@@ -88,11 +89,29 @@ float species(float x, float z, float y, out vec4 reg){
     wTall  = smoothstep(0.44, 0.64, nC) * 0.40 * smoothstep(0.15, 0.60, dh);
     wLav   = smoothstep(0.45, 0.62, nA) * 0.30 * smoothstep(0.90, 1.80, dh);
     wDaisy = smoothstep(0.50, 0.68, nB) * 0.25 * smoothstep(0.15, 0.60, dh);
+    // Blumen stehen in ARTREINEN Flecken (hohe Schwelle, schmales Band), nicht
+    // als Zufallspunkte ueber die ganze Wiese verteilt.
+    // Frequenz 0.05 (Noiszelle ~20 m). Bei 0.017..0.023 liegt das ganze Sichtfeld
+    // in EINER Noiszelle, deren Wert hier weit unter der Schwelle lag
+    // (gemessen rgf-Max 0.33 bei Schwelle 0.63) -> es gab nie Blumen.
+    // EIN Feld, zwei Baelnder: ein zweites Feld mit eigenem Offset hatte eine
+    // andere lokale Mittelzahl (gemessen 0.14 vs 0.54) und damit eine
+    // Schwellweite, die regional nie erreichbar ist -> Lupine kam nirgends vor.
+    float nD = rgf(vec2(x * 0.050 + 21.7, z * 0.050));
+    // Kein Hohen-Gate: Blumen stehen auf jeder Wiese oberhalb der Wasserlinie.
+    // (Mit Gate smoothstep(0.15,0.45,dh) waren im Nahfeld fast keine Blumen —
+    // das Gelaende dort liegt bei dh ~0.20..0.30.)
+    wPoppy  = smoothstep(0.55, 0.66, nD) * 0.55 * smoothstep(0.05, 0.20, dh);
+    wLupine = smoothstep(0.455, 0.515, nD) * 0.12 * smoothstep(0.05, 0.20, dh);
   }
   reg = vec4(wTall, wLav, wDaisy, wReed);
   float r  = hash12(vec2(x * 7.31, z * 11.7));
   float acc = wReed;
   if(r < acc) return 4.0;
+  // Blumen VOR Hochgras/Lavendel: sonst gewinnen die grossen Regionen fast immer
+  // und auf einer Hochgraswiese steht keine einzige Blume.
+  acc += wPoppy;  if(r < acc) return 5.0;
+  acc += wLupine; if(r < acc) return 6.0;
   acc += wTall;  if(r < acc) return 1.0;
   acc += wLav;   if(r < acc) return 2.0;
   acc += wDaisy; if(r < acc) return 3.0;
@@ -113,7 +132,9 @@ void main(){
   vThick = 0.0;
   if(sp > 0.5 && sp < 1.5){ spH = 1.75; spW = 1.35; lean *= 0.85; }   // Hochgras
   else if(sp > 1.5 && sp < 2.5){ spH = 1.35; spW = 0.55; lean *= 0.45; } // Lavendel
-  else if(sp > 2.5 && sp < 3.5){ spH = 0.55; spW = 0.60; lean *= 1.20; } // Gaensebluemchen
+  else if(sp > 2.5 && sp < 3.5){ spH = 0.60; spW = 0.45; lean *= 1.20; } // Gaensebluemchen
+  else if(sp > 4.5 && sp < 5.5){ spH = 1.55; spW = 0.42; lean *= 1.15; }  // Mohn: duenner Stiel
+  else if(sp > 5.5){            spH = 1.45; spW = 0.50; lean *= 0.55; }  // Lupine: standfest
   else if(sp > 3.5){
     // Schilf: hoch, aber NICHT kerzengerade. Der Oberkopf neigt sich (bendPow < 2
     // verlagert die Krueimmung nach oben), und vereinzelt stehen dicke Halme mit
@@ -184,21 +205,40 @@ void main(){
   float taper = (1.0 - t) * (1.0 - t) * 0.5 + 0.06;
   // Bluetenstand / Schilf-Kolben: am oberen Ende wird der Halm wieder breiter
   // (Lavendel-Aehre, Gaensebluemchen-Koerbchen, Schilf-Kolben).
-  float headOn = 0.0, headW = 0.0;
-  if(sp > 1.5 && sp < 2.5){ headOn = smoothstep(0.55, 0.82, t); headW = 0.34; }
-  else if(sp > 2.5 && sp < 3.5){ headOn = smoothstep(0.72, 0.95, t); headW = 0.62; }
-  else if(sp > 3.5){
-    // Schilf-Kolben als Ellipsoid: erst breiter werdend, dann zur Spitze wieder zu
-    // (sin-Profil ueber den Kolbenanteil), dicke Halme bekommen einen deutlich
-    // groesseren Bommel.
-    float ht = clamp((t - 0.58) / 0.42, 0.0, 1.0);
-    headOn = smoothstep(0.58, 0.70, t);
-    headW  = 0.40 + (0.75 + 0.85 * vThick) * sin(3.14159 * ht);
+  float headOn = 0.0, headW = 0.0, headT0 = 1.0;
+  // Wichtig: die Halmgeometrie ist bei t=0.55 am breitesten und laeuft zur Spitze
+  // (t=1) auf die Breite NULL zu. Ein Kopf muss deshalb als BUCKEL um t~0.75
+  // eingesetzt werden (max, nicht mix) — eine Verbreiterung am t=1-Vertex wäre
+  // wirkungslos, dessen ww ist 0.
+  // Der Kopf darf erst oberhalb der breiten Vertices (t=0.55) anfangen: die
+  // Strip-Dreiecke darunter haetten sonst vHead>0.5 und der Silhouetten-Discard
+  // frisst den halben Halm (gemessen: 45 % Mohn -> nur 354 Bildpunkte).
+  const float HT0 = 0.55;
+  float hampl = 0.0;
+  if(sp > 1.5 && sp < 2.5)       hampl = 0.55f;                 // Lavendel-Aehre
+  else if(sp > 2.5 && sp < 3.5)  hampl = 2.00f;                 // Gaensebluemchen (~2,5 cm)
+  else if(sp > 4.5 && sp < 5.5)  hampl = 4.40f;                 // Mohn-Napf (~7 cm)
+  else if(sp > 5.5)              hampl = 2.60f;                 // Lupinen-Stand (~4 cm)
+  else if(sp > 3.5 && sp < 4.5)  hampl = 0.90f + 1.10f * vThick;// Schilf-Kolben
+  if(hampl > 0.0){
+    headT0 = HT0;
+    float ht = clamp((t - HT0) / (1.0 - HT0), 0.0, 1.0);
+    headW  = hampl * sin(3.14159 * ht);
+    headOn = smoothstep(HT0, HT0 + 0.12, t);
   }
-  taper = mix(taper, headW, headOn);
+  taper = max(taper, headW);
+  vHead = vec2(headOn, clamp((t - headT0) / max(1.0 - headT0, 1e-3), 0.0, 1.0));
+  vec2 wdir = vec2(cy, sy);
+  // Bluetenkoepfe und Bluetenstaende schauen die Kamera an (sonst sieht der
+  // flache Kopf von der Seite aus wie eine Linie). Schilf/Lavendel bleiben aus.
+  if(headOn > 0.02 && (sp < 1.5 || sp > 2.5) && sp < 4.5){
+    vec3 vd = normalize(iPos - uCamPos);
+    vec2 f = normalize(vec2(-vd.z, vd.x) + vec2(1e-5));
+    wdir = mix(wdir, f, headOn);
+  }
   vec2 woff = vec2(ww * w * taper, ww * w * taper * 0.7);
-  p.x += woff.x * cy - woff.y * sy;
-  p.z += woff.x * sy + woff.y * cy;
+  p.x += woff.x * wdir.x - woff.y * sy;
+  p.z += woff.x * wdir.y + woff.y * cy;
   // Abgerundete Normale (Schritt 2): Halm ist kein flaches Band, sondern
   // leicht gewoelbt. vNrm = Flaechennormale F (horizontal, senkrecht zur
   // Breitenrichtung R) + kleine Wind-Stoerung; die Rundung ueber die Breite

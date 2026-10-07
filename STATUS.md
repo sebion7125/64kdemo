@@ -26,7 +26,7 @@ Himmel/Tageszeiten. Budget ist laut Nutzer zweitrangig.
 | 11 | Rinde auch an Abzweigungen (Oberflächenkoordinaten pro Rohr, nicht nur am Stamm) | ✅ Runde 21 (Detail 2,27 → 4,00, texturlos 57 % → 38 %) |
 | 12 | Ast-Gerüst pro Baum unterschiedlich + Baumgrößen stärker streuen | ✅ Runde 20 |
 | 13 | Schilf: lichter, nicht kerzengerade, Farbe wie Baumblätter, vereinzelt dicke Halme mit Kolben | ✅ Runde 21 (Anteil 59,9 % → 7,7 %) |
-| 14 | Blumen auf den Wiesen | ⬜ (Nutzer-Runde 20) |
+| 14 | Blumen auf den Wiesen | ✅ Runde 21c (Mohn 13,8 %, Lupine 14,2 % der Pflanzen-Pixel in einer Blumenfläche) |
 
 ### 2. Nebel/Sichtweite — „alles ein bisschen milchig"
 - `fog = 1 - exp(-t²·0.000015)` in `fragment.glsl` (3 Stellen: Zeilen ~229, 240,
@@ -446,6 +446,40 @@ der alten Add-on-Datei sind tot (404), das Add-on ist seit Blender 4.2 eine Exte
 (geseed), Blätter entlang der Zweige mit 137,5°-Phyllotaxis, Blattsilhouette per
 Alpha-Test im Shader, Blatt-Laenge/Breite-Verhaeltnis ~2:1, Blattgroessen-Abstufung
 zum Zweigende hin, Kronenform ueber das Astlaengen-Profil.
+
+## Session 2026-10-07, Runde 21c (TODO 14: Blumen auf den Wiesen)
+
+**Umsetzung:** zwei neue Arten in `species()` — 5 Mohn, 6 Lupine — plus ein echter
+Gänseblümchen-Kopf. Kopf = Verbreiterung des Halmbands + Silhouette per Alpha-Test in
+`grass.frag` (Mohn: roter Napf mit dunkler Mitte, Lupine: ähriger Stand aus
+Einzelblüten, Gänseblümchen: weißer Teller mit gelbem Grund). Blütenköpfe werden im
+Vertex-Shader **kammerzugewandt** orientiert, sonst sind sie von der Seite eine Linie.
+
+**Vier echte Fehler, die ich erst finden musste:**
+1. **Kopf an der Spitze wirkt nicht:** die Halmgeometrie ist bei t=0.55 am breitesten
+   und läuft bei t=1 auf Breite **null** zu. Eine Verbreiterung am t=1-Vertex ändert
+   nichts. Kopf jetzt als Buckel `headW = amp·sin(π·t)` ab t=0.55, `taper = max(taper, headW)`.
+2. **Der Silhouetten-Discard frisst den Halm:** begann der Kopf bei t=0.5, hatten die
+   unteren Strip-Dreiecke `vHead > 0.5` und wurden weggeschmissen (45 % Mohn → nur
+   354 Bildpunkte). Kopf darf erst oberhalb der breiten Vertices anfangen.
+3. **`rgf()` hat keine feste Skala:** bei niedriger Frequenz (0.017–0.023) liegt das
+   ganze Sichtfeld in EINER Noiszelle — gemessen rgf-Maximum 0.33 bei Schwellwert 0.63
+   → nie Blumen. Und ein zweites Feld mit eigenem Offset hatte eine andere lokale
+   Mittelzahl (0.14 vs. 0.54) → Lupine erschien nirgends. Jetzt **ein** Feld (Frequenz
+   0.05, Zelle ~20 m) mit **zwei Bändern** (Mohn 0.55–0.66, Lupine 0.455–0.515).
+4. **Höhengate zu hoch:** `smoothstep(0.15,0.45,dh)` — das Nahfeld liegt bei dh 0.20–0.30,
+   dort war das Gate halb zu. Jetzt `smoothstep(0.05,0.20,dh)` (nur über Wasserlinie).
+
+**Messung** (Arten-Farbmodus, Kamera mitten in einer Blumenfläche, `DEMO_CAM="38 44"`):
+Mohn **13,8 %**, Lupine **14,2 %**, Wiese 72 % der gefärbten Pflanzen-Pixel.
+Ohne die Fixes: 0–17 Pixel. fps 2,03 → 1,86.
+
+**Nebenprodukt — neue Test-Harnesses und ihre Fallen:** `/tmp/spectest.c` und
+`/tmp/hashtest.c` werten die echte GLSL-Auswahl auf einem Raster aus und lesen sie zurück.
+Drei Harness-Fehler, die jeweils eine falsche Diagnose geliefert hätten: Core-Profil
+braucht ein gebundenes VAO (sonst wird nichts gezeichnet), drei Shader-Ecken auf einem
+Punkt rasterisieren nichts (Vollbild-Dreieck über `gl_VertexID`), und RGBA8-Ausgabe
+clamped Werte >1 (Art-Nummern müssen durch 6 geteilt werden).
 
 ## Session 2026-10-07, Runde 21b (TODO 13: Schilf)
 
