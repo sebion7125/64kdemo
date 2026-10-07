@@ -15,7 +15,7 @@ Himmel/Tageszeiten, Nebel weniger milchig. Budget ist laut Nutzer zweitrangig.
 | # | Aufgabe | Status |
 |---|---|---|
 | 1 | Ferne Gras-Textur wird schwarz | ✅ Runde 12 |
-| 2 | Nebel weniger milchig, Sichtweite größer | ⬜ |
+| 2 | Nebel weniger milchig, Sichtweite größer | ✅ Runde 13 |
 | 3 | Pflanzen-Vielfalt (Höhen, Sorten, Blumen, Schilf, Regionen) | ⬜ |
 | 4 | Baum-Stämme: offene Nähte zu | ⬜ |
 | 5 | Baum-Stämme: prozedurale Rinden-Textur | ⬜ |
@@ -397,7 +397,59 @@ aber separat gegenpruefen (in der VM nicht testbar).
 - `xdotool mousedown` erreicht das Demo-Fenster in der VM nicht -> Maus-UI nicht
   automatisierbar.
 
+## Session 2026-10-07, Runde 13 (TODO 2: Dunst + Sichtweite)
+
+### Dunst: Einsatz erst ab 60 m, dann quadratisch
+Vorher in 5 Shadern identisch: `1 - exp(-t^2 * 0.000015)` -> schon bei 110 m
+**16 %** Dunst, gemischt in die helle Himmelsfarbe = milchig.
+Neu: `fogAmt(t)` in `fragment.glsl` (FOG_ON=60, FOG_K=0.000012) -> 110 m **3 %**,
+200 m 21 %, 300 m 50 %. Die vier Mesh-Shader (`tree/grass/crown/leaf.frag`)
+benutzen dieselbe Formel inline (kein extra Function-Bytes pro Shader).
+**Farbe bleibt `skyColor(rd)`**: eine eigene Dunstfarbe wuerde am Horizont eine
+Naht erzeugen (ferner Boden muss exakt in den Himmel uebergehen).
+
+Gemessen (1280x720, identische Fahrt, `/tmp/shot1.sh`, Auswertung `/tmp/haze.py`
+und Zeilenband-Vergleich): Saettigung (max-min)/max pro Zeilenband ALT -> NEU
+- oben/fern  y=0..60:   0.269 -> 0.297 (+10,5 %)
+- fern       y=60..120: 0.326 -> 0.371 (+13,9 %)
+- fern       y=120..180: 0.298 -> 0.350 (+17,3 %)
+- Mitte      y=180..240: 0.235 -> 0.278 (+18,6 %)
+- nah        y=660..720: 0.388 -> 0.406 (+4,5 %)
+Der Blaustich geht in der Ferne am staerksten zurueck (mittlere Differenz
+ueber das ganze Bild: R -5.2, G -2.1, B -5.7).
+
+### Sichtweite
+- `march()`: 128 -> **168** Schritte, Abbruch 250 -> **400 m**.
+- `marchTerrain()` (Wasser-Reflexion): 96 -> 112 Schritte, 200 -> 300 m.
+- `CAM_FAR` 300 -> **600** (scene.h) und `F0/N0` in `fragment.glsl` mitgezogen.
+  Die Tiefenpraezision aendert sich kaum: PB = 2*zn*zf/(zn-zf) ~ 2*zn, also
+  nahezubereichsbestimmt (bei zn=0.1: PB -0.2001 bei zf=300, -0.2000 bei 600).
+- Baeume: `RANGE` 16 -> **20** Zellen (144 -> 180 m), `TREE_VERT_CAP` 420000 ->
+  **700000**, `CROWN_CAP` 55000 -> **90000**, Crown-Fade 120..160 -> 150..185 m.
+  Gemessen: 429 -> **640..655 Baeume**, 386100 -> **576000..589500 Vertices**,
+  7722 -> **11520..11790** Canopy-Quads (Caps halten).
+
+### Verifikation
+- **Sichtweite:** vom Boden (2 m Kamerahohe) aendert sich fast nichts (flaches
+  Land, 8.5 % -> 8.2 % Himmel oben). Auf ~12 m hochgeflogen (`/tmp/shot_up.sh`,
+  Space halten) zeigt sich der Effekt deutlich: im Horizontband y=150..260 faellt
+  der Himmel-Anteil von **49,7 % auf 15,6 %** — dort steht jetzt echtes Terrain,
+  wo der March vorher bei 250 m aufgab.
+- **FPS (VM, llvmpipe, 640x360, `/tmp/bench.sh`):** ALT 2,0 / NEU 2,0 — keine
+  messbare Regression (VM ist raymarch-limitiert). Auf dem Host kosten die
+  40 extra Schritte nur die Horizonte-Rays.
+- Binary groesse unveraendert 80536 B (Caps sind nur BSS).
+
+### Neue Werkzeuge
+- `/tmp/bench.sh <sek>` — FPS-Mittel aus den `DBG fps`-Zeilen (Print ist jetzt in
+  main.c alle 10 Frames, Debug-Zweig).
+- `/tmp/shot1.sh <out.ppm>` / `/tmp/shot_up.sh <out.ppm>` — definierter
+  Bildaufbau (6 s vor / 8 s hoch) fuer Vorher/Nachher-Vergleiche.
+- `/tmp/xhold2.c` neu gebaut (Taste halten via XSendEvent + XFlush).
+- `/tmp/haze.py` — Saettigungs-/Verwaschenheit-Messung ueber Zeilenbaender.
+
 ## Session 2026-10-07, Runde 12 (BUG schwarze Ferntextur GEFUNDEN + FIX)
+
 
 ### WURZEL: `grassTex` hatte NIE Mipmaps -> mipmap-incomplett -> Sample = schwarz
 `glGenerateMipmap(target)` wirkt auf die **aktuell gebundene Textur**. In

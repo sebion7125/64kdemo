@@ -8,7 +8,7 @@
 #define WATER_Y 0.25f
 // Near/Far der Mesh-Projektion (mit build_mvp in main.c + linearT in fragment.glsl)
 #define CAM_NEAR 0.1f
-#define CAM_FAR  300.0f
+#define CAM_FAR  600.0f
 
 // ================= Hilfen =================
 static inline float c_smoothstep(float e0, float e1, float x){
@@ -34,8 +34,8 @@ float c_terrainH(float px, float py);
 #define CROWN_FLOATS 9
 #define WIRE_FLOATS  3
 
-#define TREE_VERT_CAP 420000
-#define CROWN_CAP     55000
+#define TREE_VERT_CAP 700000
+#define CROWN_CAP     90000
 #define WIRE_CAP      90000
 
 extern float treeVerts[TREE_VERT_CAP * TREE_FLOATS];

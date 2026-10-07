@@ -20,7 +20,7 @@ void main(){
   vec3 p = aCenter + right * (ro.x * aData.x) + up * (ro.y * aData.x);
   float d = length(aCenter - uCamPos);
   // Blattdach ist in allen Distanzen sichtbar; nur am Horizont ausblenden
-  vFade = 1.0 - smoothstep(120.0, 160.0, d);
+  vFade = 1.0 - smoothstep(150.0, 185.0, d);
   vUV = aOff * 2.0;
   vPos = p;
   vSeed = aData.z;

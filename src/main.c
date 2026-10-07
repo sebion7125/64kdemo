@@ -1100,6 +1100,7 @@ int main(int argc, char **argv) {
       // Ab 3. Frame: EMA
       if (rawDt > 0) fpsEMA = fpsEMA * 0.95 + (1.0 / rawDt) * 0.05;
     }
+    if (frameCount % 10 == 0) printf("DBG fps %.2f t %.2f\n", fpsEMA, tNow);
     float dt = rawDt > 0.1f ? 0.1f : (float)rawDt;
 
     // --- Events (XEvent aus Xlib.h, Tasten via XLookupKeysym) ---

@@ -54,8 +54,8 @@ void main(){
   vec3 albedo = vCol * (0.72 + 0.55 * pat);
   vec3 col = albedo * (vec3(1.0, 0.95, 0.80) * (dif * 0.7 + 0.3) + amb + vec3(0.8, 1.0, 0.5) * thru);
   col *= 0.85 + 0.15 * vT;
-  float t = length(vPos - uCamPos);
-  float fog = 1.0 - exp(-t * t * 0.000015);
+  float s = length(vPos - uCamPos) - 60.0;   // Dunst wie fogAmt() in fragment.glsl
+  float fog = s <= 0.0 ? 0.0 : 1.0 - exp(-s * s * 0.000012);
   col = mix(col, skyColor(rd), fog);
   O = vec4(col, 1.0);
 }

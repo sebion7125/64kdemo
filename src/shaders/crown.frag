@@ -62,8 +62,8 @@ void main(){
   vec3 col = albedo * (vec3(1.0, 0.95, 0.80) * dif
                       + vec3(0.35, 0.45, 0.40) * 0.5
                       + vec3(0.80, 1.00, 0.50) * 0.35 * n2);
-  float t = length(vPos - uCamPos);
-  float fog = 1.0 - exp(-t * t * 0.000015);
+  float s = length(vPos - uCamPos) - 60.0;   // Dunst wie fogAmt() in fragment.glsl
+  float fog = s <= 0.0 ? 0.0 : 1.0 - exp(-s * s * 0.000012);
   col = mix(col, skyColor(normalize(uCamPos - vPos)), fog);
   // Tonemapping + Gamma (identisch zu fragment.glsl)
   col = 1.0 - exp(-col * 1.25);

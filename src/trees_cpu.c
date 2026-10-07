@@ -181,7 +181,8 @@ static void gen_tree(float bx, float by, float bz, float s, float seed){
 void trees_build(float tx, float tz){
   nTreeVerts = 0; nCrownVerts = 0; nWireVerts = 0; nTrees = 0;
   const float G = 9.0f;
-  const int RANGE = 16;   // Zellen-Radius um das Kameraziel (~144m)
+  const int RANGE = 20;   // Zellen-Radius um das Kameraziel (~180m, passt zur
+                          // groesseren Sichtweite: march bis 400m)
   int ix0 = (int)floorf((tx - RANGE * G) / G);
   int ix1 = (int)floorf((tx + RANGE * G) / G);
   int iz0 = (int)floorf((tz - RANGE * G) / G);

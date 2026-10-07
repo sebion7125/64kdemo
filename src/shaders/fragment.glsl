@@ -18,7 +18,7 @@ uniform float uGrassFar1;
 
 const vec3 SUN = normalize(vec3(0.55, 0.38, -0.62));
 const float WATER_Y = 0.25;   // Wasserstand (mit main.c abgestimmt)
-const float F0 = 0.1, N0 = 300.0;  // muss zu build_mvp() in main.c passen
+const float F0 = 0.1, N0 = 600.0;  // muss zu build_mvp() in main.c passen
 // Projektions-Z-Konstanten (zu build_mvp): NDC.z = -PA + PB/tproj
 const float PA = (F0 + N0) / (F0 - N0);
 const float PB = 2.0 * F0 * N0 / (F0 - N0);
@@ -91,23 +91,23 @@ float sceneDist(vec3 p, out float matId){
 float march(vec3 ro, vec3 rd, out float matId){
   float t = 0.02;
   matId = 0.0;
-  for(int i = 0; i < 128; i++){
+  for(int i = 0; i < 168; i++){
     vec3 p = ro + rd * t;
     float d = sceneDist(p, matId);
     if(d < 0.004 + t * 0.0025) return t;
     t += d * 0.9;
-    if(t > 250.0) return -1.0;
+    if(t > 400.0) return -1.0;
   }
   return -1.0;
 }
 // Reflexions-March: nur Terrain (Baeume sind Mesh und nicht im SDF)
 float marchTerrain(vec3 ro, vec3 rd){
   float t = 0.05;
-  for(int i = 0; i < 96; i++){
+  for(int i = 0; i < 112; i++){
     float d = (ro.y + rd.y * t - terrainH(ro.xz + rd.xz * t)) * 0.85;
     if(d < 0.004 + t * 0.0025) return t;
     t += d * 0.9;
-    if(t > 200.0) return -1.0;
+    if(t > 300.0) return -1.0;
   }
   return -1.0;
 }
@@ -125,6 +125,17 @@ vec3 calcNormal(vec3 p, float matId){
     sceneDist(p + vec3(e,0,0), m0) - sceneDist(p - vec3(e,0,0), m1),
     sceneDist(p + vec3(0,e,0), m0) - sceneDist(p - vec3(0,e,0), m1),
     sceneDist(p + vec3(0,0,e), m0) - sceneDist(p - vec3(0,0,e), m1)));
+}
+
+// Dunst. Vorher: 1-exp(-t^2*0.000015) wirkte schon ab ~30m (bei 110m schon
+// 16 %) und mischte in die helle Himmelsfarbe -> alles wirkte milchig.
+// Jetzt: Einsatz erst ab FOG_ON m, danach quadratisch wachsend. Bei 110m ~3 %,
+// 200m ~21 %, 300m ~50 %. Farbe bleibt skyColor(rd), damit der ferne Boden am
+// Horizont nahtlos in den Himmel uebergeht (andere Dunstfarbe = sichtbare Naht).
+const float FOG_ON = 60.0, FOG_K = 0.000012;
+float fogAmt(float t){
+  float s = t - FOG_ON;
+  return s <= 0.0 ? 0.0 : 1.0 - exp(-s * s * FOG_K);
 }
 
 // ---------------- sky ----------------
@@ -226,7 +237,7 @@ vec3 waterColor(vec3 p, vec3 n, vec3 rd, float t){
     float rdiff = max(dot(rn, SUN), 0.0) * 0.85 + 0.15;
     vec3 ramb = vec3(0.40, 0.50, 0.68) * (0.45 + 0.55 * max(rn.y, 0.0));
     vec3 rcol = terrainColor(rp, rn, terrainH(rp.xz), -rr) * (vec3(1.0,0.92,0.78) * rdiff + ramb);
-    float rfog = 1.0 - exp(-tr * tr * 0.000015);
+    float rfog = fogAmt(tr);
     rcol = mix(rcol, skyColor(rr), rfog);
     refl = rcol;
   }
@@ -237,7 +248,7 @@ vec3 waterColor(vec3 p, vec3 n, vec3 rd, float t){
   col += vec3(1.0, 0.95, 0.8) * glint * 1.5;
   float dif = max(dot(n, SUN), 0.0) * 0.85 + 0.15;
   col *= 0.75 + 0.25 * dif;
-  float fog = 1.0 - exp(-t * t * 0.000015);
+  float fog = fogAmt(t);
   col = mix(col, skyColor(rd), fog);
   return col;
 }
@@ -261,7 +272,7 @@ vec3 shade(vec3 p, vec3 n, vec3 rd, float t, float matId){
   }
   vec3 amb = vec3(0.40, 0.50, 0.68) * (0.45 + 0.55 * max(n.y, 0.0));
   vec3 col = albedo * (vec3(1.0, 0.92, 0.78) * dif * ao + amb);
-  float fog = 1.0 - exp(-t * t * 0.000015);
+  float fog = fogAmt(t);
   col = mix(col, skyColor(rd), fog);
   return col;
 }

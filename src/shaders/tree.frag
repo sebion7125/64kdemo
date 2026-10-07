@@ -52,8 +52,8 @@ void main(){
   float dif = max(dot(n, SUN), 0.0) * 0.85 + 0.15;
   vec3 amb = vec3(0.40, 0.50, 0.68) * (0.45 + 0.55 * max(n.y, 0.0));
   vec3 col = albedo * (vec3(1.0, 0.92, 0.78) * dif + amb);
-  float t = length(vPos - uCamPos);
-  float fog = 1.0 - exp(-t * t * 0.000015);
+  float s = length(vPos - uCamPos) - 60.0;   // Dunst wie fogAmt() in fragment.glsl
+  float fog = s <= 0.0 ? 0.0 : 1.0 - exp(-s * s * 0.000012);
   col = mix(col, skyColor(rd), fog);
   // Tonemapping + Gamma (identisch zu fragment.glsl, da Mesh jetzt direkt
   // ueber die schon tonemapte Szene geblendet/geschrieben wird)
