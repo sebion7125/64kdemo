@@ -245,6 +245,8 @@ extern const char GRASS_VS_SRC[];
 extern const char GRASS_FS_SRC[];
 extern const char CROWN_VS_SRC[];
 extern const char CROWN_FS_SRC[];
+extern const char LEAF_VS_SRC[];
+extern const char LEAF_FS_SRC[];
 
 static GLuint compile_shader(GLenum type, const char *src, const char *name) {
   GLuint s = p_glCreateShader(type);
@@ -400,6 +402,10 @@ static float envShotAt = -1.0f;
 //                      Maschen-Abgleich: der Baum-Sway verschiebt die Meshes sonst
 //                      um zehn Pixel)
 static float envFreeze = -1.0f;
+//   DEMO_NOLEAF=1    Einzelblaetter nicht zeichnen (Vorher/Nachher-Messung)
+static int envNoLeaf = 0;
+//   DEMO_LEAFMASK=1    Einzelblaetter in reinem Rot (Maske fuer Blatt-Messungen)
+static int envLeafMask = 0;
 //   Y = Alpha-to-Coverage im Gras-Pass. Alpha wird dann in eine MSAA-Sample-
 //       Maske uebersetzt statt gemischt: ein halbtransparenter Halm schreibt
 //       Tiefe nur noch fuer die Samples, die er abdeckt. Loesst den Reveal-Pop
@@ -482,6 +488,7 @@ static void ensure_fbo(int w, int h) {
 // ================= Mesh-Resources (Baeume/Gras, Geometrie aus trees_cpu/grass_cpu) =================
 static GLuint vboTree = 0, vaoTree = 0;
 static GLuint vboCrown = 0, vaoCrown = 0;
+static GLuint vboLeaf = 0, vaoLeaf = 0, vboLeafBase = 0;
 static GLuint vboGrass = 0, vaoGrass = 0, vboGrassBase = 0;
 static GLuint vboWire = 0, vaoWire = 0;
 
@@ -497,6 +504,10 @@ static GLuint vboWire = 0, vaoWire = 0;
 static const float grassBase[5][2] = {
   {0.0f, -0.5f}, {0.0f, 0.5f}, {0.55f, -0.34f}, {0.55f, 0.34f}, {1.0f, 0.0f}
 };
+// Grundblatt (leaf.vert): aBase = (t laengs, w quer), zwei Dreiecke
+static const float leafBase[6][2] = {
+  {-0.5f,-0.5f},{0.5f,-0.5f},{-0.5f,0.5f},{0.5f,-0.5f},{0.5f,0.5f},{-0.5f,0.5f}
+};
 
 // Baum-Buffer nach trees_build() hochladen (Gras wird separat geladen)
 static void upload_mesh_buffers(void){
@@ -504,6 +515,8 @@ static void upload_mesh_buffers(void){
   p_glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)nTreeVerts * TREE_FLOATS * sizeof(float), treeVerts, GL_DYNAMIC_DRAW);
   p_glBindBuffer(GL_ARRAY_BUFFER, vboCrown);
   p_glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)nCrownVerts * CROWN_FLOATS * sizeof(float), crownVerts, GL_DYNAMIC_DRAW);
+  p_glBindBuffer(GL_ARRAY_BUFFER, vboLeaf);
+  p_glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)nLeafInst * LEAF_FLOATS * sizeof(float), leafInst, GL_DYNAMIC_DRAW);
   p_glBindBuffer(GL_ARRAY_BUFFER, vboWire);
   p_glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)nWireVerts * WIRE_FLOATS * sizeof(float), wireVerts, GL_DYNAMIC_DRAW);
 }
@@ -511,6 +524,8 @@ static void upload_mesh_buffers(void){
 static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: trees_cpu.c)
   p_glGenBuffers(1, &vboTree);
   p_glGenBuffers(1, &vboCrown);
+  p_glGenBuffers(1, &vboLeaf);
+  p_glGenBuffers(1, &vboLeafBase);
   p_glGenBuffers(1, &vboGrass);
   p_glGenBuffers(1, &vboWire);
   p_glGenBuffers(1, &vboGrassBase);
@@ -538,6 +553,25 @@ static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: t
   p_glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, CROWN_FLOATS * 4, (const void *)12);
   p_glEnableVertexAttribArray(2);
   p_glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, CROWN_FLOATS * 4, (const void *)20);
+
+  // Einzelblaetter naher Baeume: aBase(2) statisch + iPos(3) iData(4) iCol(3) [instanzen]
+  p_glBindBuffer(GL_ARRAY_BUFFER, vboLeafBase);
+  p_glBufferData(GL_ARRAY_BUFFER, sizeof leafBase, leafBase, GL_STATIC_DRAW);
+  p_glGenVertexArrays(1, &vaoLeaf);
+  p_glBindVertexArray(vaoLeaf);
+  p_glBindBuffer(GL_ARRAY_BUFFER, vboLeafBase);
+  p_glEnableVertexAttribArray(0);
+  p_glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8, (const void *)0);
+  p_glBindBuffer(GL_ARRAY_BUFFER, vboLeaf);
+  p_glEnableVertexAttribArray(1);
+  p_glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, LEAF_FLOATS * 4, (const void *)0);
+  p_glVertexAttribDivisor(1, 1);
+  p_glEnableVertexAttribArray(2);
+  p_glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, LEAF_FLOATS * 4, (const void *)12);
+  p_glVertexAttribDivisor(2, 1);
+  p_glEnableVertexAttribArray(3);
+  p_glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, LEAF_FLOATS * 4, (const void *)28);
+  p_glVertexAttribDivisor(3, 1);
 
   // Gras: aBase(2) + iPos(3) iData(4) [instanzen]
   p_glGenVertexArrays(1, &vaoGrass);
@@ -899,12 +933,15 @@ static void tree_jump(void){
   float dx = flyPos[0] - tp[0], dz = flyPos[2] - tp[2];
   float l = sqrtf(dx * dx + dz * dz);
   if(l < 0.1f){ dx = 1.0f; dz = 0.0f; l = 1.0f; }
-  float dist = 2.4f + ts * 0.25f;
+  // So rahmen, dass die KRONE im Bild ist: sie sitzt bei by + s*2.05, also
+  // mehrere Meter ueber der Stamm-Basis. Frueherer Pitch (-0.22) schaute an ihr
+  // vorbei — deshalb war eine Blattwerk-Messung unmoeglich.
+  float dist = 3.6f + ts * 0.9f;
   flyPos[0] = tp[0] + dx / l * dist;
-  flyPos[1] = tp[1] + 2.40f;
+  flyPos[1] = tp[1] + 1.00f;
   flyPos[2] = tp[2] + dz / l * dist;
   flyYaw = atan2f(tp[0] - flyPos[0], tp[2] - flyPos[2]);
-  flyPitch = -0.22f;
+  flyPitch = 0.55f;
   printf("DEBUG Baum-Sprung: (%.1f, %.1f, %.1f) Groesse %.2f, Abstand %.2f m\n",
          tp[0], tp[1], tp[2], ts, dist);
 }
@@ -1020,6 +1057,7 @@ int main(int argc, char **argv) {
   GLuint progTMesh = make_program(TREE_VS_SRC, TREE_FS_SRC, "tmesh");
   GLuint progGrass = make_program(GRASS_VS_SRC, GRASS_FS_SRC, "grass");
   GLuint progCrown = make_program(CROWN_VS_SRC, CROWN_FS_SRC, "crown");
+  GLuint progLeaf  = make_program(LEAF_VS_SRC, LEAF_FS_SRC, "leaf");
 
   GLint locRes    = p_glGetUniformLocation(progScene, "uRes");
   GLint locTime   = p_glGetUniformLocation(progScene, "uTime");
@@ -1084,6 +1122,10 @@ int main(int argc, char **argv) {
   GLint locCMVP    = p_glGetUniformLocation(progCrown, "uMVP");
   GLint locCCam    = p_glGetUniformLocation(progCrown, "uCamPos");
   GLint locCTgt    = p_glGetUniformLocation(progCrown, "uCamTgt");
+  GLint locLMVP    = p_glGetUniformLocation(progLeaf, "uMVP");
+  GLint locLCam    = p_glGetUniformLocation(progLeaf, "uCamPos");
+  GLint locLTime   = p_glGetUniformLocation(progLeaf, "uTime");
+  GLint locLMask   = p_glGetUniformLocation(progLeaf, "uLeafMask");
 
   // Fullscreen-Dreieck
   static const float tri[6] = { -1,-1, 3,-1, -1,3 };
@@ -1114,6 +1156,8 @@ int main(int argc, char **argv) {
   if (getenv("DEMO_TREEMASK")) dbgTreeMask = 1;
   { const char *es = getenv("DEMO_SHOT"); if (es) envShotAt = (float)atof(es); }
   { const char *ef = getenv("DEMO_FREEZE"); if (ef) envFreeze = (float)atof(ef); }
+  envNoLeaf = getenv("DEMO_NOLEAF") ? 1 : 0;
+  envLeafMask = getenv("DEMO_LEAFMASK") ? 1 : 0;
   if (envTreeJump) tree_jump();
 
   // ---------- Hauptloop ----------
@@ -1448,7 +1492,7 @@ int main(int argc, char **argv) {
         trees_build(tCX, tCZ);
         upload_mesh_buffers();
         builtT = 1;
-        printf("Baeume um (%.0f,%.0f): %d Baeume, %d Vertices, %d Canopy-Quads\n", tCX, tCZ, nTrees, nTreeVerts, nCrownVerts / 6);
+        printf("Baeume um (%.0f,%.0f): %d Baeume, %d Vertices, %d Canopy-Quads, %d Einzelblaetter\n", tCX, tCZ, nTrees, nTreeVerts, nCrownVerts / 6, nLeafInst);
       }
       // Blickrichtung (XZ-projiziert) fuer die sortierte Walk-Ordnung setzen —
       // vor jedem Build, damit der Build die aktuelle Richtung benutzt.
@@ -1660,6 +1704,20 @@ int main(int argc, char **argv) {
       p_glBindVertexArray(vaoCrown);
       p_glDrawArrays(GL_TRIANGLES, 0, nCrownVerts);
       p_glDisable(GL_BLEND);
+    }
+
+    // Einzelblaetter naher Baeume: Alpha-Test im Shader (discard), also opak wie
+    // das Baum-Mesh -> Depth schreiben, kein Blend. Vor dem Gras zeichnen, damit
+    // der Tiefentest Gras hinter den Blaettern verwirft.
+    if(!grassOnly && nLeafInst > 0 && !envNoLeaf){
+      p_glDepthMask(GL_TRUE);
+      p_glUseProgram(progLeaf);
+      p_glUniformMatrix4fv(locLMVP, 1, GL_FALSE, mvp);
+      p_glUniform3f(locLCam, camPos[0], camPos[1], camPos[2]);
+      p_glUniform1f(locLTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
+      p_glUniform1f(locLMask, (float)envLeafMask);
+      p_glBindVertexArray(vaoLeaf);
+      p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInst);
     }
 
     // 3) MSAA-Resolve: fboMS -> fbo (Farbe + Tiefe in einem Blit, Single-Sample)

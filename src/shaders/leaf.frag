@@ -5,6 +5,7 @@ in vec3 vPos;
 in vec3 vCol;
 in float vT;
 uniform vec3 uCamPos;
+uniform float uLeafMask;   // DEBUG: Blatt als Maske (reines Rot)
 out vec4 O;
 const vec3 SUN = normalize(vec3(0.55, 0.38, -0.62));
 float hash12(vec2 p){
@@ -42,6 +43,7 @@ vec3 skyColor(vec3 rd){
   return col;
 }
 void main(){
+  if(uLeafMask > 0.5){ O = vec4(1.0, 0.0, 0.0, 1.0); return; }
   vec3 n = normalize(vNrm);
   vec3 rd = normalize(uCamPos - vPos);
   // Blaetter sind duenn: beidseitig beleuchtet (kein "blaues" Ambient mehr)

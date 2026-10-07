@@ -33,6 +33,10 @@ float c_terrainH(float px, float py);
 //   wireVerts:  pos(3)
 #define TREE_FLOATS  10
 #define CROWN_FLOATS 9
+// Einzelblaetter an nahen Baeumen (leaf.vert): iPos(3), iData(4: size, rotY,
+// tilt, pad), iCol(3). Grundblatt ist ein statisches Quad (aBase = t, w).
+#define LEAF_FLOATS  10
+#define LEAF_CAP     60000
 #define WIRE_FLOATS  3
 
 #define TREE_VERT_CAP 700000
@@ -41,6 +45,8 @@ float c_terrainH(float px, float py);
 
 extern float treeVerts[TREE_VERT_CAP * TREE_FLOATS];
 extern float crownVerts[CROWN_CAP * CROWN_FLOATS];
+extern float leafInst[LEAF_CAP * LEAF_FLOATS];
+extern int   nLeafInst;
 extern float wireVerts[WIRE_CAP * WIRE_FLOATS];
 extern int   nTreeVerts, nCrownVerts, nWireVerts, nTrees;
 

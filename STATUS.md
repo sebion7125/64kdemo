@@ -18,7 +18,7 @@ Himmel/Tageszeiten. Budget ist laut Nutzer zweitrangig.
 | 3 | Pflanzen-Vielfalt (Höhen, Sorten, Blumen, Schilf, Regionen) | ✅ Runde 14 (Ausbaustoffen, siehe unten) |
 | 4 | Baum-Stämme: offene Nähte zu | ✅ Runde 15 (Gelenk-Lücke 11 mm → 0 mm, gemessen) |
 | 5 | Baum-Stämme: prozedurale Rinden-Textur | ✅ Runde 16 (Detail-Energie 0,05 → 2,11) |
-| 6 | Echtes Blattwerk nah + Krone fern als Textur auf Quads | ⬜ |
+| 6 | Echtes Blattwerk nah + Krone fern als Textur auf Quads | 🔶 Runde 17: echte Einzelblaetter nah fertig; Kronen-Textur folgt |
 | 7 | Blätter im Wind | ⬜ |
 | 8 | Schattenwurf | ⬜ |
 | 9 | Himmel schöner, Wolken, Tageszeiten | ⬜ |
@@ -395,6 +395,38 @@ aber separat gegenpruefen (in der VM nicht testbar).
   CPU-Tests und Host-Augen zaehlen.
 - `xdotool mousedown` erreicht das Demo-Fenster in der VM nicht -> Maus-UI nicht
   automatisierbar.
+
+## Session 2026-10-07, Runde 17 (TODO 6a: echtes Blattwerk an nahen Baeumen)
+
+**Befund:** `leaf.vert`/`leaf.frag` waren seit Ewigkeiten fertig (Einzelblatt mit
+Ueberhang, Transluzenz, Wind, LOD-Auscull), wurden aber **nie erzeugt oder gezeichnet** —
+kein Blatt-Buffer, kein Draw-Call. Die Kopfzeile von `trees_cpu.c` behauptete seitdem
+„240-360 individuelle Blaetter pro Baum“.
+
+**Neu:**
+- `leafInst` (LEAF_CAP 60.000 Instanzen a 10 floats: iPos, size/rotY/tilt, iCol) wird in
+  `gen_tree()` gefuellt: Buschel an den 5 Astspitzen (45), an den Astmitten (20), an den
+  10 Seittrieben (22) und 300 Punkte im Kronen-Ellipsoid — zusammen ~805 pro Baum.
+- **Nur nahe Baeume** (< 50 m ums Build-Zentrum): dieselbe Grenze, ab der `leaf.vert`
+  selbst auscullt. Ferne Baeume behalten die 18 Billboards, nahe nur noch 7 (Innenmasse),
+  damit sich nichts doppelt.
+- VAO/VBO + `glDrawArraysInstanced(GL_TRIANGLES, 0, 6, nLeafInst)` nach dem Kronen-Pass.
+  Blatt ist Alpha-Test/ opak -> Depth schreiben, vor dem Gras.
+- Messung im Kronen-Nahschuss: **10,5 % der Bildpunkte veraendert**, Detail-Energie
+  1,16 → 1,39, satt-gruen 42,1 % → 45,2 %. Kosten: **keine** messbaren fps
+  (Kronen-Nahschuss 2,19 fps mit und ohne, Default identisch).
+
+**Fehler, der erst alles unverdaechtig machte:** der Multi-Edit, der VAO/VBO/Upload
+anlegen sollte, war komplett fehlgeschlagen (ein Block matchte nicht -> gar nichts wurde
+angewendet). Der Draw lief deshalb auf VAO 0 und brachte `GL_INVALID_OPERATION (0x502)`
+pro Frame — und weil `save_screenshot_ppm()` bei jedem anhaengigen GL-Fehler abbricht,
+war monatelang einfach **kein Screenshot mehr geschrieben** worden, obwohl die Konsole
+„Auto-Screenshot“ druckte. Aufgespoert mit einer `uLeafMask`-Uniform (Blatt = reines Rot,
+`DEMO_LEAFMASK=1`): zuerst 72 sichtbare Pixel, nach dem Fix 46.984.
+
+**Zweiter Messfehler:** `tree_jump()` stellte die Kamera 2,4 m ueber die Stamm-Basis mit
+Pitch −0,22 — die Krone sitzt aber bei `by + s*2,05`, also mehrere Meter hoeher, und war
+nicht im Bild. Jetzt `dist = 3,6 + 0,9*s`, Hoehe +1,0 m, Pitch +0,55 (Krone im Bild).
 
 ## Session 2026-10-07, Runde 16 (TODO 5: prozedurale Rinde)
 

@@ -19,8 +19,9 @@
 
 float treeVerts[TREE_VERT_CAP * TREE_FLOATS];
 float crownVerts[CROWN_CAP * CROWN_FLOATS];
+float leafInst[LEAF_CAP * LEAF_FLOATS];
 float wireVerts[WIRE_CAP * WIRE_FLOATS];
-int nTreeVerts = 0, nCrownVerts = 0, nWireVerts = 0, nTrees = 0;
+int nTreeVerts = 0, nCrownVerts = 0, nWireVerts = 0, nTrees = 0, nLeafInst = 0;
 
 // ---------- kleine Helfer ----------
 static void add_wire(float x0, float y0, float z0, float x1, float y1, float z1){
@@ -167,8 +168,43 @@ static void emit_cap(const Ring *a, int sides, float sway,
 // Deterministischer per-Baum-Hash (Seed aus der Weltposition)
 #define TH(i) c_hash12(seed * 0.731f + (i) * 13.7f, seed * 1.173f + (i) * 7.9f)
 
+// Einzelblatt-Instanz: Basispunkt (Welt), Groesse, Orientierung, Farbe
+static void add_leaf(float x, float y, float z, float size, float rotY, float tilt,
+                     float cr, float cg, float cb){
+  if(nLeafInst >= LEAF_CAP) return;
+  float *d = &leafInst[nLeafInst * LEAF_FLOATS];
+  d[0] = x; d[1] = y; d[2] = z;
+  d[3] = size; d[4] = rotY; d[5] = tilt; d[6] = 0.0f;
+  d[7] = cr; d[8] = cg; d[9] = cb;
+  nLeafInst++;
+}
+// Blattbuschel um eine Welt-Position. Die Blatter sitzen NICHT symmetrisch:
+// zwei Hashes verschieben sie entlang der Astachse, damit ein Buschel wie eine
+// kleine Wolke aus Einzelblaettern aussieht und nicht wie ein flacher Faecher.
+static void leaf_cluster(float cx, float cy, float cz, float rad, int cnt,
+                         int sb, float s, float seed){
+  // TH() oben in der Datei nutzt das `seed` von gen_tree — hier ist es ein Parameter
+  #define THL(i) c_hash12(seed * 0.731f + (i) * 13.7f, seed * 1.173f + (i) * 7.9f)
+  for(int i = 0; i < cnt; i++){
+    float h1 = THL(sb + i * 4),       h2 = THL(sb + i * 4 + 1);
+    float h3 = THL(sb + i * 4 + 2),   h4 = THL(sb + i * 4 + 3);
+    // gleichmaessig in einer Kugel (h1..h3) — rad ist bereits Weltmass
+    float th = h1 * 6.2832f, cz2 = h2 * 2.0f - 1.0f;
+    float rr = rad * cbrtf(h3);
+    float sr = sqrtf(fmaxf(0.0f, 1.0f - cz2 * cz2));
+    add_leaf(cx + rr * sr * cosf(th),
+             cy + rr * cz2 * 0.85f + rad * 0.15f,   // Buschel sinkt leicht nach unten
+             cz + rr * sr * sinf(th),
+             s * (0.022f + 0.020f * h4),            // 5..11 cm bei s=2,5
+             h2 * 6.2832f,
+             0.25f + h3 * 1.05f,                    // Ueberhang
+             0.10f + 0.16f * h1, 0.26f + 0.26f * h2, 0.05f + 0.10f * h4);
+  }
+  #undef THL
+}
+
 // Ein Baum in "Einheitsspace" (Höhe ~3.0), nach (bx,by,bz) verschoben, * s skaliert.
-static void gen_tree(float bx, float by, float bz, float s, float seed){
+static void gen_tree(float bx, float by, float bz, float s, float seed, int near){
   // ---------- Stamm: 6 Knoten, y 0..1.5, konisch + Wurzelflan + leichte Krümmung
   float kx[6], ky[6], kz[6], kr[6];
   Ring kn[6];
@@ -249,6 +285,12 @@ static void gen_tree(float bx, float by, float bz, float s, float seed){
     emit_tube(&br[1], &br[2], 6, 0.7f, 1.0f,
               0.36f, 0.28f, 0.18f, 0.85f + 0.3f * TH(56 + i));
     emit_cap(&br[2], 6, 1.0f, 0.34f, 0.27f, 0.17f, 0.9f);   // Astspitze schliessen
+    // Einzelblaetter nur an nahen Baeumen (leaf.vert cullt ab 50 m ohnehin):
+    // Buschel an der Astspitze und entlang des mittleren Aststuecks.
+    if(near){
+      leaf_cluster(bx + s * t0x, by + s * t0y, bz + s * t0z, s * 0.24f, 45, 300 + i * 200, s, seed);
+      leaf_cluster(bx + s * m0x, by + s * m0y, bz + s * m0z, s * 0.20f, 20, 380 + i * 200, s, seed);
+    }
     // Seitenaeste: einer am Ast-Mittel, einer an der Spitze
     for(int j = 0; j < 2; j++){
       float px = j == 0 ? m0x : t0x, py = j == 0 ? m0y : t0y, pz = j == 0 ? m0z : t0z;
@@ -272,13 +314,16 @@ static void gen_tree(float bx, float by, float bz, float s, float seed){
       // Keine Kappe an den Seitentrieb-Spitzen: 10 Kappen pro Baum wuerden
       // 150 Vertices kosten und der Baum-Puffer (TREE_VERT_CAP=700000) waere
       // voll (gemessen 743.796). Die 0,9 cm offenen Enden stecken im Blattwerk.
+      if(near)
+        leaf_cluster(bx + s * t2x, by + s * t2y, bz + s * t2z, s * 0.15f, 22, 600 + i * 40 + j * 20, s, seed);
     }
   }
   // ---------- Blattdach: K verteilte Billboard-Quads (prozedurale Textur + Alpha-Test) ----------
   {
     float ccx = bx, ccy = by + s * 2.05f, ccz = bz;
     float ex = s * 1.20f, ey = s * 1.00f, ez = s * 1.20f;   // Kronen-Ellipsoid
-    const int K = 18;
+    const int K = near ? 7 : 18;   // nahe Baeume: echtes Blattwerk traegt, die
+                                   // Quads fuellen nur die Innenmasse
     static const float corners[6][2] = {
       {-0.5f,-0.5f},{0.5f,-0.5f},{-0.5f,0.5f},
       { 0.5f,-0.5f},{ 0.5f, 0.5f},{-0.5f, 0.5f}
@@ -300,6 +345,24 @@ static void gen_tree(float bx, float by, float bz, float s, float seed){
         d[3] = corners[c][0]; d[4] = corners[c][1];
         d[5] = qsize; d[6] = qrot; d[7] = qseed; d[8] = 0.0f;
         nCrownVerts++;
+      }
+    }
+    // Kronenvolumen mit echten Blaettern fuellen (nur nah): die Quads allein
+    // sehen aus wie gemalte Flecken, erst die Einzelblaetter geben der Krone
+    // eine echte Silhouette und Eigenbewegung.
+    if(near){
+      for(int i = 0; i < 300; i++){
+        float h1 = TH(1200 + i * 3), h2 = TH(1201 + i * 3), h3 = TH(1202 + i * 3);
+        float h4 = TH(1400 + i);
+        // Punkt im Ellipsoid (h1,h2,h3 gleichmaessig in der Kugel)
+        float th = h1 * 6.2832f, czz = h2 * 2.0f - 1.0f;
+        float rr = cbrtf(h3);
+        float sr = sqrtf(fmaxf(0.0f, 1.0f - czz * czz));
+        add_leaf(ccx + rr * sr * cosf(th) * ex * 0.92f,
+                 ccy + rr * czz * ey * 0.92f,
+                 ccz + rr * sr * sinf(th) * ez * 0.92f,
+                 s * (0.024f + 0.022f * h4), h3 * 6.2832f, 0.25f + h1 * 1.05f,
+                 0.09f + 0.17f * h2, 0.24f + 0.28f * h3, 0.04f + 0.11f * h4);
       }
     }
   }
@@ -347,7 +410,7 @@ int tree_find_nearest(float x, float z, float *out, float *sizeOut){
 }
 
 void trees_build(float tx, float tz){
-  nTreeVerts = 0; nCrownVerts = 0; nWireVerts = 0; nTrees = 0;
+  nTreeVerts = 0; nCrownVerts = 0; nWireVerts = 0; nTrees = 0; nLeafInst = 0;
   const int RANGE = 20;   // Zellen-Radius um das Kameraziel (~180m, passt zur
                           // groesseren Sichtweite: march bis 400m)
   int ix0 = (int)floorf((tx - RANGE * TREE_G) / TREE_G);
@@ -358,7 +421,11 @@ void trees_build(float tx, float tz){
   for(int ix = ix0; ix <= ix1; ix++){
     float tp[3], s;
     if(!tree_cell(ix, iz, tp, &s)) continue;
-    gen_tree(tp[0], tp[1], tp[2], s, tp[0] * 12.9898f + tp[2] * 78.233f);
+    // Nahe Baeume bekommen echte Einzelblaetter, ferne nur die Billboards.
+    // 50 m = die Grenze, ab der leaf.vert die Blaeue selbst auscullt.
+    float ddx = tp[0] - tx, ddz = tp[2] - tz;
+    gen_tree(tp[0], tp[1], tp[2], s, tp[0] * 12.9898f + tp[2] * 78.233f,
+             ddx * ddx + ddz * ddz < 2500.0f);
     nTrees++;
   }
 }
