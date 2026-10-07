@@ -363,6 +363,30 @@ void grass_build_begin(float cx, float cz, int mode){
 }
 
 
+// Pflanzen-Typen (Arten, Blumen, Schilf)
+// Typen: 0 Wiese (Standard) · 1 Hochgras · 2 Lavendel · 3 Gaensebluemchen
+//        4 Schilf/Rohricht
+// WICHTIG: CPU-seitig existiert nur das Schilf-Feld c_reedW (Ufer-Gate).
+// Hoehe/Breite/Neigung je Art rechnet der SHADER (grass.vert). Grund: ein
+// CPU-/Shader-Vergleich der Art lieferte 3,3 % Abweichungen (Rundung/FMA in
+// fbm+hash, Test /tmp/specmatch.c). Hatte die CPU die Hoehe nach Art gesetzt,
+// haetten manche Halme Hoehe und Farbe von UNTERSCHIEDLICHEN Arten bekommen.
+// So existiert die Art fuer alles Sichtbare genau EINMAL, im Shader.
+// Die Felder sind weiche fbm-Felder -> Regionen ohne harte Kanten. Botanisch:
+// Schilf in Rieden am/ufer (dh = Hoehe ueber Wasserlinie), Lavendel auf
+// trockenen sonnigen Haengen, Hochgras und Gaensebluemchen in feuchteren Wiesen.
+static float c_rgf(float px, float py){
+  float s = 0.5f * c_vnoise(px, py);
+  s += 0.25f * c_vnoise(px * 2.03f + 17.1f, py * 2.03f + 9.2f);
+  return s * 1.3333f;
+}
+static float c_reedW(float x, float z, float y){
+  float dh = y - WATER_Y;
+  if(dh > 0.45f) return 0.0f;
+  float patch = c_rgf(x * 0.05f + 3.7f, z * 0.05f);
+  return (1.0f - c_smoothstep(0.05f, 0.45f, dh)) * c_smoothstep(0.42f, 0.60f, patch);
+}
+
 // Halm-Anzahl einer Zelle — EINE Formel, immer am ZELLZENTRUM.
 // Frueher rechnete der Kopierpfad am Zellzentrum, die Generierung am gestreuten
 // Punkt (px,pz) -> ±1-Differenz, und das war die Quelle des Overlap-Bugs
@@ -394,7 +418,15 @@ static int gen_blades(int ix, int iz, float x, int bStart, int nWant, int *nextB
   float px = x + (h1 - 0.5f) * 0.5f * GSTEP;
   float pz = z + (h2 - 0.5f) * 0.5f * GSTEP;
   float h = c_terrainH(px, pz);
-  if(h < WATER_Y + 0.10f || h > 7.5f) return 0;  // kein Wasser, keine Gipfel
+  // Schilf/Rohricht steht flach im Wasser oder direkt an der Wasserlinie, daher
+  // ist die Untergrenze WATER_Y-0.12 (vorher WATER_Y+0.10: Uferzone fehlte ganz).
+  if(h < WATER_Y - 0.12f || h > 7.5f) return 0;  // kein tiefes Wasser, keine Gipfel
+  // Unter der Wasserlinie nur Schilf (Riede). Diese Pruefung gehoert auf ZELL-
+  // EBENE: pro Halm waere sie ein weiteres fbm-Feld, und weil verworfene b die
+  // b-Suche bis 255 laufen lassen, war der 1m-POS-Build 9x langsamer (186 ->
+  // 1649 ms, gemessen). Das Rieden-Feld hat ~20 m Wellenlaenge, eine Zelle ist
+  // 0,3 m — der Unterschied Zellmitte vs. Halm ist visuell irrelevant.
+  if(h < WATER_Y + 0.10f && c_reedW(px, pz, h - 0.03f) < 0.30f) return 0;
   if(fabsf(c_terrainH(px + 0.4f, pz) - h) > 0.25f ||
      fabsf(c_terrainH(px, pz + 0.4f) - h) > 0.25f) return 0;  // Steilhang
   float cl = c_fbm(px * 0.12f, pz * 0.12f);       // Gras-Flecken
@@ -427,7 +459,7 @@ static int gen_blades(int ix, int iz, float x, int bStart, int nWant, int *nextB
     float bx = px + (b1 - 0.5f) * 0.28f;
     float bz = pz + (b2 - 0.5f) * 0.28f;
     float bh = c_terrainH(bx, bz);
-    if(bh < WATER_Y + 0.10f) continue;   // dieser b faellt aus (Wasser)
+    if(bh < WATER_Y - 0.12f) continue;   // dieser b faellt aus (tiefes Wasser)
     float *d = &buildBuf[nGrassNew * GRASS_FLOATS];
     d[0] = bx; d[1] = bh - 0.03f; d[2] = bz;      // Basis leicht eingegraben
     d[3] = 0.22f + 0.30f * b3 + 0.12f * cl;    // Halmhoehe (Basis)

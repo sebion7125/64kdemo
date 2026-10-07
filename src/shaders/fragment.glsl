@@ -138,6 +138,10 @@ float fogAmt(float t){
   return s <= 0.0 ? 0.0 : 1.0 - exp(-s * s * FOG_K);
 }
 
+// 2-Oktaven-Rauschen der Pflanzen-Regionen (identisch zu grass.vert::rgf).
+float rgf(vec2 p){
+  return (0.5 * vnoise(p) + 0.25 * vnoise(p * 2.03 + vec2(17.1, 9.2))) * 1.3333;
+}
 // ---------------- sky ----------------
 vec3 skyColor(vec3 rd){
   float t = clamp(rd.y, 0.0, 1.0);
@@ -163,14 +167,37 @@ vec3 terrainColor(vec3 p, vec3 n, float h, vec3 rd){
   // 0.93, 0.89) = Halm-Mittelwert / Terrain-Mittelwert (siehe Albedo in
   // grass.frag: mix(base,tip,vT^2) * (0.75+0.5*sh), Mittel = 0.304/0.475/0.138).
   vec3 grass = mix(vec3(0.18, 0.46, 0.09), vec3(0.37, 0.66, 0.12), g) * vec3(0.87, 0.93, 0.89);
+  // Pflanzen-Regionen (dieselben 2-Oktaven-Felder wie grass.vert/grass.frag).
+  // Der ferne Grund muss dieselbe Region zeigen wie das nahe Gras, sonst sieht
+  // man an der LOD-Uebergabe einen Farbbruch. 4 Oktaven waeren im Raymarch zu
+  // teuer; die Felder haben 20..90 m Wellenlaenge.
+  // dh = Hoehe ueber Wasserlinie, -0.03 wie die Halm-Basis im Puffer.
+  float rgA = rgf(p.xz * 0.011);
+  float rgB = rgf(p.xz * 0.031 + vec2(5.3, 0.0));
+  float rgC = rgf(p.xz * 0.019 + vec2(11.1, 0.0));
+  float rdh = h - 0.03 - WATER_Y;
+  float wReed  = (rdh > 0.45) ? 0.0
+               : (1.0 - smoothstep(0.05, 0.45, rdh))
+                 * smoothstep(0.42, 0.60, rgf(p.xz * 0.05 + vec2(3.7, 0.0)));
+  float wTall  = smoothstep(0.44, 0.64, rgC) * smoothstep(0.15, 0.60, rdh);
+  float wLav   = smoothstep(0.45, 0.62, rgA) * smoothstep(0.90, 1.80, rdh);
+  float wDaisy = smoothstep(0.50, 0.68, rgB) * smoothstep(0.15, 0.60, rdh);
+  grass = mix(grass, grass * vec3(0.86, 0.94, 0.78), wTall * 0.55);
+  grass = mix(grass, vec3(0.34, 0.36, 0.50), wLav * 0.30);
+  grass = mix(grass, vec3(0.30, 0.44, 0.18), wDaisy * 0.35);
+  grass = mix(grass, vec3(0.44, 0.46, 0.24), wReed * 0.65);
   // Blumen
   vec2 fc = floor(p.xz * 1.3);
   float fl = hash12(fc);
-  if(fl > 0.983){
+  // In Blumen-Regionen deutlich dichter, und die Farbe folgt der Region
+  // (Lavendel violett, sonst weiss/gelb) — dieselben Regionen wie das echte Gras.
+  float fdens = 0.983 - 0.020 * (wLav + wDaisy) - 0.010 * wReed;
+  if(fl > fdens){
     vec2 off = (vec2(hash12(fc * 1.31), hash12(fc * 1.73)) - 0.5);
     float dd = length(fract(p.xz * 1.3) - 0.5 - off * 0.5);
     float m = smoothstep(0.10, 0.04, dd);
-    vec3 fc2 = (fl > 0.991) ? vec3(0.95, 0.85, 0.25) : vec3(0.95, 0.95, 0.95);
+    vec3 fc2 = (wLav > wDaisy) ? vec3(0.55, 0.38, 0.75)
+             : ((fl > 0.991) ? vec3(0.95, 0.85, 0.25) : vec3(0.95, 0.95, 0.95));
     grass = mix(grass, fc2, m);
   }
   float slope = length(n.xz);

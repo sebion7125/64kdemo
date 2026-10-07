@@ -21,6 +21,7 @@ static inline float c_smoothstep(float e0, float e1, float x){
 // ================= CPU-Terrain (1:1-Port von fragment.glsl) =================
 float c_hash12(float px, float py);
 void  c_hash22(float px, float py, float *rx, float *ry);
+float c_vnoise(float px, float py);
 float c_fbm(float px, float py);
 float c_rfbm(float px, float py);
 float c_terrainH(float px, float py);

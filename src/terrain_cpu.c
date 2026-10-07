@@ -23,7 +23,7 @@ void c_hash22(float px, float py, float *rx, float *ry){
   *rx = cfract((p3x + p3y) * p3z);
   *ry = cfract((p3x + p3z) * p3y);
 }
-static float c_vnoise(float px, float py){
+float c_vnoise(float px, float py){
   float ix = floorf(px), iy = floorf(py);
   float fx = px - ix, fy = py - iy;
   float ux = fx * fx * (3.0f - 2.0f * fx);

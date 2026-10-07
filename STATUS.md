@@ -1,12 +1,11 @@
 # 64kDemo — Status
 
-Stand: 2026-10-07, Runde 12. **Issue A GELÖST** (Alpha-to-Coverage, vom Nutzer
-bestätigt). **BUG schwarze Ferntextur GELÖST** (fehlende Mipmaps, Ursache
-nachgemessen). Kennzahlen: 551.268 Halme bei grassMaxDist=110, POS-Build 1 m
-186 ms, Initial-Build 920 ms, Binary 80.536 Byte.
+Stand: 2026-10-07, Runde 14. **Pflanzen-Vielfalt GEBAUT** (5 Arten in Regionen,
+botanisch zugeordnet). Kennzahlen: 640.972 Halme bei grassMaxDist=110, POS-Build 1 m
+194 ms, Initial-Build 1420 ms, VM-fps 1,86 (vor der Aufgabe 2,26), Binary 84.632 Byte.
 **Fade-Dauer Standard 1 s. Issue A/B/C und R-Reset erledigt.**
-Jetzt: Pflanzen-Vielfalt, Baum-Optik (Rinde/Blattwerk/Nähte), Schatten,
-Himmel/Tageszeiten, Nebel weniger milchig. Budget ist laut Nutzer zweitrangig.
+Jetzt: Baum-Optik (Nähte/Rinde/Blattwerk), Schatten, Himmel/Tageszeiten. Budget ist
+laut Nutzer zweitrangig.
 
 ## TODO-Liste (Nutzer-Aufträge 2026-10-07, der Reihe nach abarbeiten)
 
@@ -16,7 +15,7 @@ Himmel/Tageszeiten, Nebel weniger milchig. Budget ist laut Nutzer zweitrangig.
 |---|---|---|
 | 1 | Ferne Gras-Textur wird schwarz | ✅ Runde 12 |
 | 2 | Nebel weniger milchig, Sichtweite größer | ✅ Runde 13 |
-| 3 | Pflanzen-Vielfalt (Höhen, Sorten, Blumen, Schilf, Regionen) | ⬜ |
+| 3 | Pflanzen-Vielfalt (Höhen, Sorten, Blumen, Schilf, Regionen) | ✅ Runde 14 (Ausbaustoffen, siehe unten) |
 | 4 | Baum-Stämme: offene Nähte zu | ⬜ |
 | 5 | Baum-Stämme: prozedurale Rinden-Textur | ⬜ |
 | 6 | Echtes Blattwerk nah + Krone fern als Textur auf Quads | ⬜ |
@@ -396,6 +395,68 @@ aber separat gegenpruefen (in der VM nicht testbar).
   CPU-Tests und Host-Augen zaehlen.
 - `xdotool mousedown` erreicht das Demo-Fenster in der VM nicht -> Maus-UI nicht
   automatisierbar.
+
+## Session 2026-10-07, Runde 14 (TODO 3: Pflanzen-Vielfalt)
+
+**Fünf Pflanzentypen in weichen Regionen** (`grass.vert::species()`, `grass.frag`,
+`terrainColor` in `fragment.glsl`, `c_reedW` in `grass_cpu.c`):
+0 Wiese · 1 Hochgras · 2 Lavendel · 3 Gänseblümchen · 4 Schilf/Rohricht.
+Verteilung im Initial-Build (30,34), gemessen mit `/tmp/test_species.c`:
+**55,5 % Wiese, 16,6 % Hochgras, 3,9 % Lavendel, 3,8 % Gänseblümchen, 20,1 % Schilf.**
+
+Botanische Zuordnung (weiche Rauschfelder, keine harten Regionengrenzen):
+- **Schilf** nur an der Wasserlinie (dh = Höhe über Wasserlinie < 0,45 m) und dort in
+  **Rieden** (Flecken von ~20 m, nicht das ganze Ufer entlang). Neu: Halme wachsen
+  bis 0,12 m UNTER die Wasserlinie (vorher +0,10 m — die Uferzone fehlte ganz).
+- **Lavendel** auf trockenen, höheren Hängen (dh 0,9…1,8 m).
+- **Hochgras und Gänseblümchen** in der feuchteren Wiese (dh 0,15…0,60 m).
+- Jede Art bekommt Höhe, Breite, Steifigkeit (lean), Kopfform (`taper`-Anhebung am
+  oberen Ende = Blütenstand/Kolben) und eigene Farben (Grund/Spitze).
+
+**Die Art entsteht ausschließlich im Shader.** Zuerst war sie CPU *und* Shader
+(je 1:1-Port). Der Vergleichstest `/tmp/specmatch.c` (256×256 Positionen, Shader
+gegen C-Port) ergab **3,3 % unterschiedliche Arten bei derselben Weltposition**:
+`hash12` mit *stetigen* Argumenten ist nicht portabel — 1 ulp im Argument wird nach
+`fract()` zu einem völlig anderen Wert. Die glatten fbm-Felder stimmen dagegen auf
+**<1e-3** überein (der Test misst das pro Feld). Folge der Doppelrechnung wäre
+gewesen: Halm-Höhe von der CPU-Art, Farbe von der Shader-Art. Deshalb setzt die CPU
+Höhe/Breite/lean **nicht** mehr nach Art; CPU-seitig bleibt nur das Schilf-Feld
+`c_reedW` als **Zell-Gate** (unter der Wasserlinie wächst nur Schilf).
+Zwischenstand, verworfen: die CPU-Art in den Halm-Puffer zu schreiben, kostet 4 Byte
+pro Halm (+25 % Speicher) — erübrigt sich mit der Shader-Lösung.
+
+**Performance — drei Maßnahmen, sonst war es unbenutzbar:**
+1. Arten-Rechnung mit 4-Oktaven-fbm brachte die VM von 2,0 auf **0,2 FPS**
+   (5,8 Mio. Vertex-Aufrufe/Frame). Neu `rgf()` mit **2 Oktaven** (die Felder haben
+   20…90 m Wellenlänge, feine Oktaven bringen dort nichts) und Schilf-Feld nur bei
+   dh ≤ 0,45 (die allermeisten Halme sparen es komplett).
+2. `grass.frag` rechnete die Regionen **pro Fragment** nochmal → jetzt als
+   **Varying `vReg`** aus `grass.vert` (und `vBase` flog wieder raus).
+3. Halm-Grundform **9 → 5 Vertices**: `GL_TRIANGLE_STRIP` über (v0,v1,v2,v3,v4)
+   erzeugt exakt dieselben drei Dreiecke wie vorher `GL_TRIANGLES` mit duplizierten
+   Vertices — **44 % weniger Vertex-Aufrufe**. (Culling ist aus, die alternierende
+   Windung im Strip ist egal, die Normale kommt aus yaw.)
+Endkosten der Aufgabe: **VM-fps 2,26 → 1,86** (`/tmp/bench.sh 60`), Halme 551k →
+641k (Uferzone kam dazu), POS-Build 1 m 186 → 194 ms, Initial-Build 920 → 1420 ms.
+
+**Debug: C Taste hat drei Modi** (durchschalten): AUS → FADE (gelb/cyan) →
+**ARTEN** (grün Wiese, gelb Hochgras, violett Lavendel, weiß Gänseblümchen,
+orange Schilf). Nachweis im Standbild (Startposition, unteres Bilddrittel):
+grün 15,4 %, orange (Schilf) 7,6 %, gelb (Hochgras) 3,3 %, violett 0 % — korrekt,
+denn die Startgegend liegt bei dh ≈ 0,4 m und Lavendel braucht dh > 0,9 m. Im
+16-m-Einfangfeld (32,0/43,8) rechnet die CPU-Referenz (`/tmp/specdist.c`) 54,5 %
+Wiese / 19,5 % Hochgras / 23,9 % Schilf / 0 % Lavendel — gleiche Größenordnung.
+**Hinweis:** der P-Textur-Dump ist dafür unbrauchbar, der Einfang-Pass setzt
+`uDbgCat=0` (nur Albedo ohne Debugfarben).
+
+**Bildwirkung** (unteres Bilddrittel, Startposition, normaler Farbmodus):
+"strohige" Pixel 5,4 % → **15,7 %**, grüne Bedeckung 4,5 % → **16,7 %**, keine
+schwarzen Pixel.
+
+**Noch offen an Aufgabe 3:**
+- Lavendel liegt nur auf den Hügeln — vom Start aus meist außer Sicht.
+- "Blüten" sind verbreiterte Halmspitzen, keine echten Blütenblätter/Stängel.
+- Nur 5 Arten; gewünscht sind mehr (Klatschmohn, Kornblume, weitere Gräserarten).
 
 ## Session 2026-10-07, Runde 13 (TODO 2: Dunst + Sichtweite)
 

@@ -29,6 +29,11 @@ out float vFade;
 out float vCat;  // 0 = kein Override, 1 = Fade-in laeuft, 2 = Fade-out laeuft
 out float vSide;   // Schritt 2: Breitenposition (ww: -0.5..0.5)
 out vec3 vR;       // Schritt 2: Breitenrichtung (Halm-"rechts")
+out float vSp;     // Pflanzen-Typ (0 Wiese, 1 Hochgras, 2 Lavendel,
+                   // 3 Gaensebluemchen, 4 Schilf) — siehe species() unten
+out vec4 vReg;     // Deckungsgrade der Region (Hochgras, Lavendel, Gaensebl.,
+                   // Schilf) als Varying — grass.frag rechnet sie nicht selbst
+const float WATER_Y = 0.25;   // wie fragment.glsl / scene.h / grass.frag
 // hash12/vnoise: identisch zu fragment.glsl (Consistency-Regel)
 float hash12(vec2 p){
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -41,11 +46,71 @@ float vnoise(vec2 p){
   return mix(mix(hash12(i),           hash12(i + vec2(1,0)), u.x),
              mix(hash12(i + vec2(0,1)), hash12(i + vec2(1,1)), u.x), u.y);
 }
+float fbm(vec2 p){
+  float s = 0.0, a = 0.5;
+  for(int i = 0; i < 4; i++){
+    s += a * vnoise(p);
+    p = p * 2.03 + vec2(17.1, 9.2);
+    a *= 0.5;
+  }
+  return s;
+}
+// 2-Oktaven-Rauschen fuer die Pflanzen-Regionen: die Felder haben 20..90 m
+// Wellenlaenge, die feinen Oktaven des 4-Oktaven-fbm bringen dort nichts — bei
+// ~5 Mio. Vertex-Aufrufen pro Frame kosten sie aber viel (gemessen: mit 4
+// Oktaven 2,0 -> 0,2 FPS in der VM). *1.3333 normiert auf 0..1 wie fbm, damit
+// die Schwellwerte gleich bleiben. (Test /tmp/specmatch.c: die glatten Felder
+// stimmen zwischen C und GLSL auf <1e-3 ueberein.)
+float rgf(vec2 p){
+  return (0.5 * vnoise(p) + 0.25 * vnoise(p * 2.03 + vec2(17.1, 9.2))) * 1.3333;
+}
+// Schilf/Rohricht: nur an der Wasserlinie, und dort in Rieden (Flecken von
+// ~20 m Durchmesser) — nicht lueckenlos entlang des ganzen Ufers.
+float reedW(float x, float z, float y){
+  float dh = y - WATER_Y;
+  if(dh > 0.45) return 0.0;   // Feld sparen: oberhalb der Uferzone nie Schilf
+  float patch = rgf(vec2(x * 0.05 + 3.7, z * 0.05));
+  return (1.0 - smoothstep(0.05, 0.45, dh)) * smoothstep(0.42, 0.60, patch);
+}
+// reg = Deckungsgrade der Region (Hochgras, Lavendel, Gaensebluemchen, Schilf).
+// geht als Varying an grass.frag — dort darf es nicht nochmal gerechnet werden.
+float species(float x, float z, float y, out vec4 reg){
+  float dh = y - WATER_Y;
+  float wReed  = reedW(x, z, y);
+  float wTall = 0.0, wLav = 0.0, wDaisy = 0.0;
+  if(dh >= 0.15){
+    float nA = rgf(vec2(x * 0.011, z * 0.011));
+    float nB = rgf(vec2(x * 0.031 + 5.3, z * 0.031));
+    float nC = rgf(vec2(x * 0.019 + 11.1, z * 0.019));
+    wTall  = smoothstep(0.44, 0.64, nC) * 0.40 * smoothstep(0.15, 0.60, dh);
+    wLav   = smoothstep(0.45, 0.62, nA) * 0.30 * smoothstep(0.90, 1.80, dh);
+    wDaisy = smoothstep(0.50, 0.68, nB) * 0.25 * smoothstep(0.15, 0.60, dh);
+  }
+  reg = vec4(wTall, wLav, wDaisy, wReed);
+  float r  = hash12(vec2(x * 7.31, z * 11.7));
+  float acc = wReed;
+  if(r < acc) return 4.0;
+  acc += wTall;  if(r < acc) return 1.0;
+  acc += wLav;   if(r < acc) return 2.0;
+  acc += wDaisy; if(r < acc) return 3.0;
+  return 0.0;
+}
 void main(){
   float ph = iData.z, sh = iData.w;
   float yaw = iData2.x, lean = iData2.y;
   float t = aBase.x, ww = aBase.y;
   float d = length(iPos - uCamPos);
+  // Art (Wiese/Hochgras/Lavendel/Gaensebluemchen/Schilf) — die EINZIGE Stelle,
+  // an der Art-Effekte entstehen (Hoehe, Breite, Steifigkeit, Form, Farbe).
+  // Die CPU rechnet die Art nicht mehr fuer die Geometrie: ein CPU/GPU-Vergleich
+  // lief 3,3 % Abweichungen (Rundung), dann haette Halm-Hoehe und Halm-Farbe zu
+  // verschiedenen Arten gehoert.
+  float sp = species(iPos.x, iPos.z, iPos.y, vReg);
+  float spH = 1.0, spW = 1.0;
+  if(sp > 0.5 && sp < 1.5){ spH = 1.75; spW = 1.35; lean *= 0.85; }   // Hochgras
+  else if(sp > 1.5 && sp < 2.5){ spH = 1.35; spW = 0.55; lean *= 0.45; } // Lavendel
+  else if(sp > 2.5 && sp < 3.5){ spH = 0.55; spW = 0.60; lean *= 1.20; } // Gaensebluemchen
+  else if(sp > 3.5){ spH = 4.20; spW = 1.50; lean *= 0.25; }            // Schilf
   // Blickwinkel-Duennung. Ein senkrechter Halm wird NICHT foerziert, eine
   // Wiese schon (Faktor sin theta). Flaechige Bedeckung = n*h*w/sin(theta),
   // konstante Pixeldichte verlangt also n ~ sin(theta). Gemessen ohne diese
@@ -69,7 +134,7 @@ void main(){
   // 'sizeLod' ist nur die Groessenkurve: 1.0 vorn bis 2.8 in der Ferne.
   float sizeLod = pow(1.0 - smoothstep(8.0, uMaxDist, d), 1.6);
   float sizeScale = 1.0 + 1.8 * (1.0 - sizeLod);
-  float h = iData.x * uHeightScale * sizeScale, w = iData.y * sizeScale;
+  float h = iData.x * uHeightScale * sizeScale * spH, w = iData.y * sizeScale * spW;
   // LOD: Halme wachsen in der Distanz zurueck (Terrain-Grasfarbe uebernimmt).
   // Der Uebergabe-Abstand kommt von uFarFade: ab dort uebernimmt die eingefangene
   // Top-Down-Textur, weil ein Halm unter ~2 px Bildbreite nur noch flackert.
@@ -103,6 +168,13 @@ void main(){
   p.z += wz * t * t * lod;
   // Breite: zulaeufig zur Spitze, Ebene um yaw rotiert
   float taper = (1.0 - t) * (1.0 - t) * 0.5 + 0.06;
+  // Bluetenstand / Schilf-Kolben: am oberen Ende wird der Halm wieder breiter
+  // (Lavendel-Aehre, Gaensebluemchen-Koerbchen, Schilf-Kolben).
+  float headOn = 0.0, headW = 0.0;
+  if(sp > 1.5 && sp < 2.5){ headOn = smoothstep(0.55, 0.82, t); headW = 0.34; }
+  else if(sp > 2.5 && sp < 3.5){ headOn = smoothstep(0.72, 0.95, t); headW = 0.62; }
+  else if(sp > 3.5){ headOn = smoothstep(0.68, 0.90, t); headW = 0.50; }
+  taper = mix(taper, headW, headOn);
   vec2 woff = vec2(ww * w * taper, ww * w * taper * 0.7);
   p.x += woff.x * cy - woff.y * sy;
   p.z += woff.x * sy + woff.y * cy;
@@ -117,6 +189,7 @@ void main(){
   vR = R;
   vSide = ww;
   vPos = p;
+  vSp = sp;
   vCol = vec3(sh, t, lod);
   vT = t;
   // Per-Halm-Fade: ein (Birth-Zeit der Gruppe) und aus (Death-Zeit der Gruppe),

@@ -473,13 +473,16 @@ static GLuint vboGrass = 0, vaoGrass = 0, vboGrassBase = 0;
 static GLuint vboWire = 0, vaoWire = 0;
 
 // Grundformen (per-Vertex-Attribute der Instanz-Shader)
-// Gras-Grundform: 3 Dreiecke (ohne Index-Buffer -> duplizierte Vertices).
-// Draw-Call: GL_TRIANGLES count=9 -> 9 Vertices noetig.
-// (0,1,2) = unterer Keil, (2,1,3) = oberer Keil, (2,3,4) = Spitze.
-static const float grassBase[9][2] = {
-  {0.0f, -0.5f}, {0.0f, 0.5f}, {0.55f, -0.34f},   // Tri 1: (0,1,2)
-  {0.55f, -0.34f}, {0.0f, 0.5f}, {0.55f, 0.34f},   // Tri 2: (2,1,3)
-  {0.55f, -0.34f}, {0.55f, 0.34f}, {1.0f, 0.0f}    // Tri 3: (2,3,4)
+// Gras-Grundform: 5 Vertices als GL_TRIANGLE_STRIP -> genau dieselben drei
+// Dreiecke wie frueher mit 9 duplizierten Vertices (GL_TRIANGLES):
+//   Strip (v0,v1,v2,v3,v4) = (v0,v1,v2), (v1,v2,v3), (v2,v3,v4)
+//   = unterer Keil, oberer Keil, Spitze   (Menge identisch zu 0,1,2 / 2,1,3 / 2,3,4)
+// Das sind 44 % weniger Vertex-Aufrufe pro Halm — bei 550k+ Halmen der
+// guenstigste Hebel, und noetig geworden durch die Arten-Rechnung im Vertex-Shader.
+// Culling ist fuer Gras aus, die alternierende Windung im Strip ist also egal
+// (die Normale kommt aus yaw, nicht aus der Windung).
+static const float grassBase[5][2] = {
+  {0.0f, -0.5f}, {0.0f, 0.5f}, {0.55f, -0.34f}, {0.55f, 0.34f}, {1.0f, 0.0f}
 };
 
 // Baum-Buffer nach trees_build() hochladen (Gras wird separat geladen)
@@ -689,7 +692,7 @@ static void grass_capture(float cx, float cz){
   p_glUniform1f(gpGrass.farfade, 1e9f);
   p_glUniform1f(gpGrass.albOnly, 1.0f);
   p_glBindVertexArray(vaoGrass);
-  p_glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 9, (GLuint)nGrass, 0);
+  p_glDrawArraysInstancedBaseInstance(GL_TRIANGLE_STRIP, 0, 5, (GLuint)nGrass, 0);
   p_glBindVertexArray(0);
   // Mips erzeugen: zwingend mit grassTex GEBUNDEN und ohne gebundenes FBO.
   // Der Aufruf wirkt auf die aktuell gebundene Textur - vorher war das die
@@ -1147,9 +1150,11 @@ int main(int argc, char **argv) {
           if (ks == XK_y) { dbgAlpha2Cov = !dbgAlpha2Cov;
             printf("DEBUG Alpha-to-Coverage: %s (wirkt nur mit MSAA an)\n",
                    dbgAlpha2Cov ? "AN" : "AUS"); }
-          if (ks == XK_c) { dbgGrassCat = !dbgGrassCat;
-            printf("DEBUG Gras-Farbmodus: %s (gelb = laeuft aus, cyan = laeuft ein)\n",
-                   dbgGrassCat ? "AN" : "AUS"); }
+          if (ks == XK_c) { dbgGrassCat = (dbgGrassCat + 1) % 3;
+            printf("DEBUG Gras-Farbmodus: %s\n",
+                   dbgGrassCat == 0 ? "AUS"
+                   : (dbgGrassCat == 1 ? "FADE (gelb=aus, cyan=ein)"
+                     : "ARTEN (gruen Wiese, gelb Hochgras, violett Lavendel, weiss Gaensebl., orange Schilf)")); }
           if (ks == XK_l) {   // Fade-Dauer strecken/stauchen: VM laeuft mit 1-2 FPS,
             // ein 2s-Fade ist dort zeitlich nicht aufloesbar. CPU und Shader
             // nutzen dieselbe Dauer.
@@ -1548,7 +1553,7 @@ int main(int argc, char **argv) {
     // Fade-Gruppen (birth,death) — GRASS_NGRP*8 Byte, pro Frame. Aendert sich
     // nur am Swap, der Upload ist 4 KB und damit gegen 37 MB Halmpuffer frei.
     p_glUniform2fv(locGrp, GRASS_NGRP, grassGrp);
-    p_glUniform1f(locGCat, dbgGrassCat ? 1.0f : 0.0f);
+    p_glUniform1f(locGCat, (float)dbgGrassCat);
     p_glUniform1f(locGAngS0, dbgAngThin ? grassAngS0 : 0.0f);
     p_glUniform1f(locGAngQ, grassAngQ);
     p_glUniform1f(locGCap, 0.0f);
@@ -1586,12 +1591,12 @@ int main(int argc, char **argv) {
         // Puffer ist fern->nah sortiert (Index 0 = fernste Zelle) -> von 0 aufwaerts
         for (int off = 0; off < nGrass; off += chunk) {
           int c = (nGrass - off) > chunk ? chunk : (nGrass - off);
-          p_glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 9, c, (GLuint)off);
+          p_glDrawArraysInstancedBaseInstance(GL_TRIANGLE_STRIP, 0, 5, c, (GLuint)off);
         }
       } else {
       for (int off = nGrass; off > 0; off -= chunk) {
         int c = off > chunk ? chunk : off;
-        p_glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 9, c, (GLuint)(off - c));
+        p_glDrawArraysInstancedBaseInstance(GL_TRIANGLE_STRIP, 0, 5, c, (GLuint)(off - c));
       }
       }
     }
@@ -1660,7 +1665,7 @@ int main(int argc, char **argv) {
              grassDensityScale, grassHeightScale, (int)grassMaxDist, (int)(grassMaxDist * 10) % 10,
              grassFrozen ? " FRZ" : "", grassOnly ? " NUR-GRAS" : "",
              dbgGrassDepth ? " DW+" : " DW-", dbgGrassEdge ? " EDGE+" : " EDGE-");
-    if (dbgGrassCat) strncat(hud2, " CAT", sizeof(hud2) - (int)strlen(hud2) - 1);
+    if (dbgGrassCat) strncat(hud2, dbgGrassCat == 1 ? " CAT" : " ART", sizeof(hud2) - (int)strlen(hud2) - 1);
     if (dbgAlpha2Cov) strncat(hud2, " A2C", sizeof(hud2) - (int)strlen(hud2) - 1);
     if (dbgSortOrder) strncat(hud2, " SORT", sizeof(hud2) - (int)strlen(hud2) - 1);
     if (dbgAngThin) strncat(hud2, " WINK", sizeof(hud2) - (int)strlen(hud2) - 1);
