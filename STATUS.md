@@ -16,7 +16,7 @@ laut Nutzer zweitrangig.
 | 1 | Ferne Gras-Textur wird schwarz | ✅ Runde 12 |
 | 2 | Nebel weniger milchig, Sichtweite größer | ✅ Runde 13 |
 | 3 | Pflanzen-Vielfalt (Höhen, Sorten, Blumen, Schilf, Regionen) | ✅ Runde 14 (Ausbaustoffen, siehe unten) |
-| 4 | Baum-Stämme: offene Nähte zu | ⬜ |
+| 4 | Baum-Stämme: offene Nähte zu | ✅ Runde 15 (Gelenk-Lücke 11 mm → 0 mm, gemessen) |
 | 5 | Baum-Stämme: prozedurale Rinden-Textur | ⬜ |
 | 6 | Echtes Blattwerk nah + Krone fern als Textur auf Quads | ⬜ |
 | 7 | Blätter im Wind | ⬜ |
@@ -395,6 +395,48 @@ aber separat gegenpruefen (in der VM nicht testbar).
   CPU-Tests und Host-Augen zaehlen.
 - `xdotool mousedown` erreicht das Demo-Fenster in der VM nicht -> Maus-UI nicht
   automatisierbar.
+
+## Session 2026-10-07, Runde 15 (TODO 4: offene Nähte in den Baum-Röhren)
+
+**Ursache (gemessen, nicht geraten):** jedes Rohr-Segment baute sich eine EIGENE
+orthogonale Basis aus seiner Achsenrichtung (up-Heuristik). An einem Gelenk
+(Segmentende = Anfang des nächsten) liegen zwar dieselben Mittelpunkte, aber die
+beiden Ringe sind um verschiedene Winkel gedreht → die Quad-Ränder teilen sich
+nicht → **offene Schlitze**, durch die man durch Stamm und Äste sieht.
+Messung mit `/tmp/seambuild.c` + `/tmp/seam.py` (Debug-Ausgabe der Ringe über
+`-DTREE_SEAM_DEBUG`, Skript vergleicht Segmente mit gemeinsamem Gelenkpunkt):
+**5751 Gelenke, Median der Lücke 11,1 mm, größte 40,7 mm, alle 5751 über 1 mm.**
+
+**Fix: ein Ring pro Knoten, Parallel Transport.** Neuer `Ring` (Punkt, Radius, u, v)
+pro Knoten; der nächste Ring wird mit Rodrigues-Drehung um `cross(d0,d1)` aus dem
+vorherigen gewonnen, danach Drift-Korrektur (u senkrecht auf die neue Achse,
+v = cross(Achse, u)). Damit sind die Ringe an einem Gelenk **identisch**:
+**max Lücke 0,00 mm bei allen 5751 Gelenken.**
+
+**T-Kreuzungen (Ast an Stamm, Seitentrieb an Ast):** der Anfangsring eines
+Hauptastes liegt jetzt **auf der Stammachse** (Radius `min(0,075, 0,85·Stammradius)`),
+damit steckt er ganz im Stamm und es gibt keinen Spalt; Anfangsringe von
+Seitentrieben werden um das 0,9-fache des Elternradius in den Elternast
+zurückgezogen.
+
+**Kappen:** Stamm-Oberkante und die 5 Hauptastspitzen sind jetzt geschlossen
+(`emit_cap`, Dreiecksfächer). Die 10 Seitentrieb-Spitzen bleiben offen — 10 Kappen
+pro Baum (150 Vertices) hätten den Baum-Puffer über `TREE_VERT_CAP=700000` gehoben
+(gemessen 743.796); die 0,9 cm offenen Enden stecken im Blattwerk.
+
+**Zwei Folgefehler, die der neue Flächen-Test (`/tmp/tsurf.c`) gefangen hat:**
+1. `kn[5]` (oberster Stammknoten) bekam nie `p`/`r` gesetzt → die Kappe lief von der
+   Baumspitze in den **Weltursprung** (Dreiecke mit 1e25 m²).
+2. Nach dessen Fix wurde `kn[5]` nie **transportiert** (Schleife lief zu kurz) →
+   uninitialisierter Rahmen → Dreiecke mit 1e18 m.
+Beide sind behoben; die Regel "Ring einer Kette muss immer Punkt, Radius UND u/v
+bekommen" steht jetzt im Code, und die Ringe werden mit `memset` null-initialisiert.
+Kontrolle: **Gesamtfläche aller Baum-Röhren 7.385 m²** (vorher 7.070 m² — plausibel,
+etwas mehr durch dickere Astansätze und Kappen). Vor dem Fix waren es zeitweise
+4,4e5 bzw. 1e25 m².
+
+**Auswirkung im Bild:** braune (Baum-)Pixel 0,16 % → 0,16 % — die Bäume sehen aus wie
+zuvor, nur ohne Schlitze. VM-fps 1,87 (unverändert), Baum-Vertices 575.100 → 647.946.
 
 ## Session 2026-10-07, Runde 14 (TODO 3: Pflanzen-Vielfalt)
 
