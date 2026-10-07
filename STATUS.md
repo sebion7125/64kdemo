@@ -19,9 +19,14 @@ Himmel/Tageszeiten. Budget ist laut Nutzer zweitrangig.
 | 4 | Baum-Stämme: offene Nähte zu | ✅ Runde 15 (Gelenk-Lücke 11 mm → 0 mm, gemessen) |
 | 5 | Baum-Stämme: prozedurale Rinden-Textur | ✅ Runde 16 (Detail-Energie 0,05 → 2,11) |
 | 6 | Echtes Blattwerk nah + Krone fern als Textur auf Quads | ✅ Runde 18 (Atlas 8×8, 22,9 % Deckung/Kachel) |
-| 7 | Blätter im Wind | ⬜ |
+| 7 | Blätter im Wind | ✅ Runde 19 (Kronen-Bewegung 4,2 % → 19,0 %) |
 | 8 | Schattenwurf | ⬜ |
 | 9 | Himmel schöner, Wolken, Tageszeiten | ⬜ |
+| 10 | **Kronen-Redesign** (Nah: nur Einzelblätter, zahlreich; weicher LOD-Übergang; Blattsilhouette statt Quadrate; keine Polygonkanten fern) | ⬜ (Nutzer-Runde 20) |
+| 11 | Rinde auch an Abzweigungen (Oberflächenkoordinaten pro Rohr, nicht nur am Stamm) | ⬜ (Nutzer-Runde 20) |
+| 12 | Ast-Gerüst pro Baum unterschiedlich + Baumgrößen stärker streuen | ⬜ (Nutzer-Runde 20) |
+| 13 | Schilf: lichter, nicht kerzengerade, Farbe wie Baumblätter, vereinzelt dicke Halme mit Kolben | ⬜ (Nutzer-Runde 20) |
+| 14 | Blumen auf den Wiesen | ⬜ (Nutzer-Runde 20) |
 
 ### 2. Nebel/Sichtweite — „alles ein bisschen milchig"
 - `fog = 1 - exp(-t²·0.000015)` in `fragment.glsl` (3 Stellen: Zeilen ~229, 240,
@@ -395,6 +400,24 @@ aber separat gegenpruefen (in der VM nicht testbar).
   CPU-Tests und Host-Augen zaehlen.
 - `xdotool mousedown` erreicht das Demo-Fenster in der VM nicht -> Maus-UI nicht
   automatisierbar.
+
+## Session 2026-10-07, Runde 19 (TODO 7: Blätter im Wind)
+
+**Idee:** Gras, Äste, Einzelblätter und ferne Kronen müssen auf **dieselbe Böe**
+reagieren — sonst steht der Wald still, während das Gras weht. Das Böen-Feld aus
+`grass.vert` (`gp = xz*0.10 - (0.35,0.20)*uTime`,
+`gust = noise(gp*2.3)*smoothstep(.55,.85,noise(gp))`) ist jetzt identisch in
+`tree.vert`, `leaf.vert` und `crown.vert`.
+- `tree.vert`: Astspitzen (sw=1) bis ~0,17 m Ausschlag bei Böe.
+- `leaf.vert`: zwei getrennte Bewegungen — (a) Weltverschub wie der Ast (gleicher Ort,
+gleiche Phase → Blatt und Ast schwingen zusammen), (b) lokales Flattern mit hoher
+Frequenz, stärker bei Böen. Vorher wurde der Wind in der **lokalen** Blattachse
+addiert, also je nach Blattrotation in eine zufällige Welt-Richtung.
+- `crown.vert`: ferne Kronen bekommen denselben Ausschlag (bis 0,22 × Quad-Größe).
+
+**Messung** (zwei Läufe mit eingefrorener Shader-Zeit t=3,5 s vs. t=11 s, Diff > 8):
+`alter Wind: gesamt 6,20 % | Kronen 4,22 % | Gras 5,06 %`
+`neuer Wind: gesamt 13,08 % | Kronen 19,03 % | Gras 9,94 %`
 
 ## Session 2026-10-07, Runde 18 (TODO 6b: ferne Kronen als Textur)
 

@@ -1267,6 +1267,7 @@ int main(int argc, char **argv) {
   GLint locCCam    = p_glGetUniformLocation(progCrown, "uCamPos");
   GLint locCTgt    = p_glGetUniformLocation(progCrown, "uCamTgt");
   GLint locCFol    = p_glGetUniformLocation(progCrown, "uFoliage");
+  GLint locCTime   = p_glGetUniformLocation(progCrown, "uTime");
   GLint locLMVP    = p_glGetUniformLocation(progLeaf, "uMVP");
   GLint locLCam    = p_glGetUniformLocation(progLeaf, "uCamPos");
   GLint locLTime   = p_glGetUniformLocation(progLeaf, "uTime");
@@ -1850,6 +1851,7 @@ int main(int argc, char **argv) {
       p_glActiveTexture(GL_TEXTURE0);
       p_glBindTexture(GL_TEXTURE_2D, folTex);
       p_glUniform1i(locCFol, 0);
+      p_glUniform1f(locCTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
       p_glBindVertexArray(vaoCrown);
       p_glDrawArrays(GL_TRIANGLES, 0, nCrownVerts);
       p_glDisable(GL_BLEND);
