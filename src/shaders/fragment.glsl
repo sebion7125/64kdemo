@@ -285,23 +285,40 @@ uniform sampler2D uShadow;
 uniform mat4  uLightMVP;
 uniform float uShadowOn;
 uniform float uShadowPx;      // 1 / Aufloesung
+uniform float uShadowBias;    // Bias in Depth-Einheiten (CPU: 1,5 Texel in m umgerechnet)
+// Rueckgabe: 1 = in Sonne, 0 = voll im Schatten.
+// PCF: gefiltert werden die VERGLEICHSERGEBNISSE, nicht die Tiefen. GPU Gems 1
+// Ch. 12 (Fernando/Everitt): "the comparison is performed at the four
+// neighbouring shadow map samples, and the results are bilinearly filtered".
+// Der alte Code mittelte neun DEPTH-Werte und verglich einmal -> hart, verschmiert
+// und systematisch zu wenig Schatten.
 float shadowAt(vec3 wp, vec3 n){
   if(uShadowOn < 0.5) return 1.0;
-  if(uShadowOn > 1.5) return 0.0;   // DIAGNOSE: alles beschattet
-  vec3 lp = (uLightMVP * vec4(wp + n * 0.30, 1.0)).xyz;   // Normalen-Offset gegen Moire
-  // lp.z ist NDC im Bereich [-1,1]; die Depth-Textur enthaelt aber [0,1].
-  // Ohne diese Umrechnung vergleicht man zwei verschiedene Skalen und der Test
-  // faellt immer auf "beleuchtet" (gemessen: Schatten wirkungslos, Map zu 23 % gefuellt).
-  float z = lp.z * 0.5 + 0.5;
-  if(z >= 1.0) return 1.0;
+  if(uShadowOn > 1.5 && uShadowOn < 2.5) return 0.0;   // DIAGNOSE: alles beschattet
+  vec3 lp = (uLightMVP * vec4(wp + n * 0.04, 1.0)).xyz;
+  float z = lp.z * 0.5 + 0.5;                 // NDC [-1,1] -> Depth [0,1]
   vec2 uv = lp.xy * 0.5 + 0.5;
-  if(uv.x < 0.002 || uv.x > 0.998 || uv.y < 0.002 || uv.y > 0.998) return 1.0;
+  if(z >= 1.0 || uv.x < 0.001 || uv.x > 0.999 || uv.y < 0.001 || uv.y > 0.999) return 1.0;
+  float lit = 0.0;
+  for(int y = -1; y <= 1; y++)
+  for(int x = -1; x <= 1; x++)
+    lit += (z - uShadowBias <= textureLod(uShadow, uv + vec2(float(x), float(y)) * uShadowPx, 0.0).r) ? 1.0 : 0.0;
+  return lit * 0.1111111;
+}
+// DIAGNOSE (DEMO_SHADOWVIS=n, n>=0 -> uShadowOn = 3+n):
+//   0 = uv.x, 1 = uv.y, 2 = eigene Licht-Tiefe z, 3 = abgetastete Map-Tiefe s
+float shadowProbe(vec3 wp, vec3 n, int mode){
+  vec3 lp = (uLightMVP * vec4(wp + n * 0.04, 1.0)).xyz;
+  float z = lp.z * 0.5 + 0.5;
+  vec2 uv = lp.xy * 0.5 + 0.5;
+  if(mode == 0) return uv.x;
+  if(mode == 1) return uv.y;
+  if(mode == 2) return z;
   float s = 0.0;
   for(int y = -1; y <= 1; y++)
   for(int x = -1; x <= 1; x++)
     s += textureLod(uShadow, uv + vec2(float(x), float(y)) * uShadowPx, 0.0).r;
-  s /= 9.0;
-  return (z - 0.0025 > s) ? 0.38 : 1.0;      // im Schatten: Sonne auf 38 %
+  return s / 9.0;
 }
 
 vec3 shade(vec3 p, vec3 n, vec3 rd, float t, float matId){
@@ -311,8 +328,9 @@ vec3 shade(vec3 p, vec3 n, vec3 rd, float t, float matId){
   } else {
     return waterColor(p, n, rd, t);
   }
+  float sh = shadowAt(p, n);
   float dif = max(dot(n, SUN), 0.0);
-  dif = dif * 0.85 * shadowAt(p, n) + 0.15;   // nur der Sonnenanteil wird beschattet
+  dif = dif * 0.85 * sh + 0.15;   // nur der Sonnenanteil wird beschattet
   float ao = 1.0;
   {
     float oc = 0.0;
@@ -322,7 +340,10 @@ vec3 shade(vec3 p, vec3 n, vec3 rd, float t, float matId){
     }
     ao = clamp(1.0 - oc * 0.35, 0.35, 1.0);
   }
-  vec3 amb = vec3(0.40, 0.50, 0.68) * (0.45 + 0.55 * max(n.y, 0.0));
+  // Im Schatten faellt auch der Himmelsanteil (unter einer Krone kommt weniger
+  // Himmel durch) — ohne das blieb die Bildaenderung bei "alles beschattet" bei
+  // 5,6 % Mittelwert (gemessen) -> Schatten waren selbst korrekt nicht sichtbar.
+  vec3 amb = vec3(0.40, 0.50, 0.68) * (0.45 + 0.55 * max(n.y, 0.0)) * (0.62 + 0.38 * sh);
   vec3 col = albedo * (vec3(1.0, 0.92, 0.78) * dif * ao + amb);
   float fog = fogAmt(t);
   col = mix(col, skyColor(rd), fog);
@@ -346,6 +367,9 @@ void main(){
     vec3 p = ro + rd * t;
     vec3 n = calcNormal(p, matId);
     col = shade(p, n, rd, t, matId);
+    // DIAGNOSE (DEMO_SHADOWVIS=1 -> uShadowOn==3): Schatten-Term als Graustufen.
+    // Nach Tonemapping: beleuchtet 0.855, beschattet 0.646 (bei Faktor 0.38).
+    if(uShadowOn > 2.5) col = vec3(shadowProbe(p + n * 0.02, n, int(uShadowOn + 0.5) - 3));
   }
   // Projektionstiefe (exakt zu build_mvp) fuer den Depth-Test des Mesh-Passes.
   // +0.2m Bias: auf der Oberflaeche liegende Mesh-Geometrie (Gras-Basis,

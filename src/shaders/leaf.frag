@@ -51,22 +51,25 @@ uniform sampler2D uShadow;
 uniform mat4  uLightMVP;
 uniform float uShadowOn;
 uniform float uShadowPx;      // 1 / Aufloesung
+uniform float uShadowBias;    // Bias in Depth-Einheiten (CPU: 1,5 Texel in m umgerechnet)
+// Rueckgabe: 1 = in Sonne, 0 = voll im Schatten.
+// PCF: gefiltert werden die VERGLEICHSERGEBNISSE, nicht die Tiefen. GPU Gems 1
+// Ch. 12 (Fernando/Everitt): "the comparison is performed at the four
+// neighbouring shadow map samples, and the results are bilinearly filtered".
+// Der alte Code mittelte neun DEPTH-Werte und verglich einmal -> hart, verschmiert
+// und systematisch zu wenig Schatten.
 float shadowAt(vec3 wp, vec3 n){
   if(uShadowOn < 0.5) return 1.0;
-  vec3 lp = (uLightMVP * vec4(wp + n * 0.30, 1.0)).xyz;   // Normalen-Offset gegen Moire
-  // lp.z ist NDC im Bereich [-1,1]; die Depth-Textur enthaelt aber [0,1].
-  // Ohne diese Umrechnung vergleicht man zwei verschiedene Skalen und der Test
-  // faellt immer auf "beleuchtet" (gemessen: Schatten wirkungslos, Map zu 23 % gefuellt).
-  float z = lp.z * 0.5 + 0.5;
-  if(z >= 1.0) return 1.0;
+  if(uShadowOn > 1.5 && uShadowOn < 2.5) return 0.0;   // DIAGNOSE: alles beschattet
+  vec3 lp = (uLightMVP * vec4(wp + n * 0.04, 1.0)).xyz;
+  float z = lp.z * 0.5 + 0.5;                 // NDC [-1,1] -> Depth [0,1]
   vec2 uv = lp.xy * 0.5 + 0.5;
-  if(uv.x < 0.002 || uv.x > 0.998 || uv.y < 0.002 || uv.y > 0.998) return 1.0;
-  float s = 0.0;
+  if(z >= 1.0 || uv.x < 0.001 || uv.x > 0.999 || uv.y < 0.001 || uv.y > 0.999) return 1.0;
+  float lit = 0.0;
   for(int y = -1; y <= 1; y++)
   for(int x = -1; x <= 1; x++)
-    s += textureLod(uShadow, uv + vec2(float(x), float(y)) * uShadowPx, 0.0).r;
-  s /= 9.0;
-  return (z - 0.0025 > s) ? 0.38 : 1.0;      // im Schatten: Sonne auf 38 %
+    lit += (z - uShadowBias <= textureLod(uShadow, uv + vec2(float(x), float(y)) * uShadowPx, 0.0).r) ? 1.0 : 0.0;
+  return lit * 0.1111111;
 }
 
 void main(){
@@ -87,11 +90,11 @@ void main(){
   vec3 rd = normalize(uCamPos - vPos);
   // Blaetter sind duenn: beidseitig beleuchtet (kein "blaues" Ambient mehr)
   float sh = shadowAt(vPos, n);
-  float dif = abs(dot(n, SUN)) * mix(0.40, 1.0, sh);
+  float dif = abs(dot(n, SUN)) * mix(0.18, 1.0, sh);
   // Transluzenz: Licht durchs Blatt (gruenstichig, dominant)
-  float thru = pow(max(dot(-rd, SUN), 0.0), 1.5) * 0.8 * mix(0.35, 1.0, sh);
+  float thru = pow(max(dot(-rd, SUN), 0.0), 1.5) * 0.8 * mix(0.2, 1.0, sh);
   // weiches, warmes Ambient (weniger blau)
-  vec3 amb = vec3(0.35, 0.45, 0.40) * (0.5 + 0.5 * max(n.y, 0.0));
+  vec3 amb = vec3(0.35, 0.45, 0.40) * (0.5 + 0.5 * max(n.y, 0.0)) * (0.62 + 0.38 * sh);
   float pat = vnoise(vPos.xz * 16.0 + vPos.y * 9.0);
   vec3 albedo = vCol * (0.72 + 0.55 * pat);
   albedo *= 1.0 + midrib * 0.35 - vein * 0.10;          // Rippen heller, Adern dunkler

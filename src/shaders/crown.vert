@@ -6,6 +6,8 @@ uniform mat4 uMVP;
 uniform vec3 uCamPos;
 uniform vec3 uCamTgt;
 uniform float uTime;   // Wind (gleiches Boen-Feld wie Gras/Aeste/Blaetter)
+uniform float uLightFace; // 1 = Quad steht senkrecht auf der Blickrichtung des
+                          // Wurf-Betrachters (Sonne) — nur im Schatten-Pass.
 out vec2 vUV;
 out vec3 vPos;
 out float vSeed;
@@ -26,7 +28,16 @@ float vnoise(vec2 p){
 }
 void main(){
   // Kamera-Achsen exakt wie der Raymarcher
-  vec3 fwd = normalize(uCamTgt - uCamPos);
+  vec3 fwd;
+  if(uLightFace > 0.5){
+    // Schatten-Wurf: uCamPos ist das AUGE DER SONNE. Ein kamera-zugewandtes
+    // Billboard steht bei einer Sonne mit 24,6 Grad Erhebung fast kantig und
+    // wirft nur einen schmalen Streifen. Senkrecht auf die Sonnenrichtung
+    // wirft dasselbe Quad die volle Kronenflaeche.
+    fwd = normalize(uCamPos - aCenter);
+  } else {
+    fwd = normalize(uCamTgt - uCamPos);
+  }
   vec3 right = normalize(cross(fwd, vec3(0,1,0)));
   vec3 up = cross(right, fwd);
   // Quad in der Kameraebene, um rotY (aData.y) gedreht

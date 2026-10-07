@@ -534,13 +534,17 @@ static const float leafBase[6][2] = {
 #define FOL_VAR   4
 static GLuint folTex = 0, folFbo = 0, folDepth = 0, vboFol = 0, vaoFol = 0;
 // Shadow-Map: eine orthogliche Licht-Kaskade um die Kamera. Geworfen werden
-// Baum-Mesh, Kronen-Quads und (abschaltbar) Einzelblaetter — die Kronen sind der
+// Baum-Mesh, Kronen-Quads und Einzelblaetter — die Kronen sind der
 // Schattenwerfer, den man auf dem Boden sieht.
-#define SHADOW_SZ 1024
-#define SHADOW_HALF 70.0f
+// Aufloesung: 1024^2 ueber 140 m waren 13,7 cm pro Texel -> blockiges Flecken-
+// muster auf Staemmen und weichen Kanten (Nutzerbefund "schlecht aufgeloest").
+// 2048^2 ueber 90 m = 4,4 cm/Texel; die Nahe der Kamera ist auch der Bereich, in
+// dem Schatten ueberhaupt aufgelöst genug sind (dunst ab 60 m).
+#define SHADOW_SZ 2048
+#define SHADOW_HALF 45.0f
 static GLuint shadowTex = 0, shadowFbo = 0;
 static float  lightMVP[16];
-static int    shadowOn = 1, shadowLeafOn = 1, shadowSampleOn = 1, shadowForce = 0;
+static int    shadowOn = 1, shadowLeafOn = 1, shadowSampleOn = 1, shadowForce = 0, shadowVis = 0;
 static float folPatch[FOLIAGE_CAP * LEAF_FLOATS];
 
 // Orthografische MVP (quadratischer Viewport), fuer die Atlas-Aufnahme
@@ -563,12 +567,23 @@ static void ortho_mvp(const float cp[3], const float tg[3], float half, float ou
   out[3] = 0.0f; out[7] = 0.0f; out[11] = 0.0f; out[15] = 1.0f;
 }
 
-typedef struct { GLint tex, mvp, on, px; } ShadowLoc;
+typedef struct { GLint tex, mvp, on, px, bias; } ShadowLoc;
 static void fillShadowLoc(GLuint prog, ShadowLoc *sl){
   sl->tex = p_glGetUniformLocation(prog, "uShadow");
   sl->mvp = p_glGetUniformLocation(prog, "uLightMVP");
   sl->on  = p_glGetUniformLocation(prog, "uShadowOn");
   sl->px  = p_glGetUniformLocation(prog, "uShadowPx");
+  sl->bias = p_glGetUniformLocation(prog, "uShadowBias");
+}
+// Depth-Bias: GPU Gems 1 Ch. 12 verlangt polygon offset im Wurf (haben wir) und
+// einen kleinen Bias im Vergleich. Der alte Wert 0.0025 war in DEPTH-Einheiten
+// und entsprach bei 196 m Tiefenbereich 0,49 m — ein halber Meter, damit waren
+// alle flachen Schatten (Blatt ueber Halm) weg. Hier: 1,5 Texel, aus der
+// Texelgroesse in Metern in Depth-Einheiten umgerechnet.
+static float shadowBiasUnits(void){
+  float texelM = 2.0f * SHADOW_HALF / (float)SHADOW_SZ;   // m pro Texel
+  float dz     = 2.0f * SHADOW_HALF * 1.4f;               // Tiefenbereich der Ortho-Kiste
+  return 2.0f * (1.5f * texelM) / dz;
 }
 static void applyShadow(const ShadowLoc *sl, int on){
   if(sl->tex >= 0){ p_glActiveTexture(GL_TEXTURE3); p_glBindTexture(GL_TEXTURE_2D, shadowTex);
@@ -576,6 +591,7 @@ static void applyShadow(const ShadowLoc *sl, int on){
   if(sl->mvp >= 0) p_glUniformMatrix4fv(sl->mvp, 1, GL_FALSE, lightMVP);
   if(sl->on  >= 0) p_glUniform1f(sl->on, (float)on);
   if(sl->px  >= 0) p_glUniform1f(sl->px, 1.0f / (float)SHADOW_SZ);
+  if(sl->bias >= 0) p_glUniform1f(sl->bias, shadowBiasUnits());
   p_glActiveTexture(GL_TEXTURE0);
 }
 static void init_shadow(void){
@@ -598,6 +614,7 @@ static void init_shadow(void){
 static void build_foliage_atlas(GLuint progLeaf){
   GLint lMVP  = p_glGetUniformLocation(progLeaf, "uMVP");
   GLint lCam  = p_glGetUniformLocation(progLeaf, "uCamPos");
+  GLint lLod  = p_glGetUniformLocation(progLeaf, "uLodCam");
   GLint lTime = p_glGetUniformLocation(progLeaf, "uTime");
   GLint lAlb  = p_glGetUniformLocation(progLeaf, "uAlbedoOnly");
   GLint lMask = p_glGetUniformLocation(progLeaf, "uLeafMask");
@@ -664,6 +681,7 @@ static void build_foliage_atlas(GLuint progLeaf){
       p_glUseProgram(progLeaf);
       p_glUniformMatrix4fv(lMVP, 1, GL_FALSE, m);
       p_glUniform3f(lCam, cp[0], cp[1], cp[2]);
+      if(lLod >= 0) p_glUniform3f(lLod, cp[0], cp[1], cp[2]);
       p_glUniform1f(lTime, 0.0f);
       p_glUniform1f(lAlb, 1.0f);
       p_glUniform1f(lMask, 0.0f);
@@ -1319,8 +1337,10 @@ int main(int argc, char **argv) {
   GLint locCFol    = p_glGetUniformLocation(progCrown, "uFoliage");
   GLint locCTime   = p_glGetUniformLocation(progCrown, "uTime");
   GLint locCMask   = p_glGetUniformLocation(progCrown, "uCrownMask");
+  GLint locCLFace  = p_glGetUniformLocation(progCrown, "uLightFace");
   GLint locLMVP    = p_glGetUniformLocation(progLeaf, "uMVP");
   GLint locLCam    = p_glGetUniformLocation(progLeaf, "uCamPos");
+  GLint locLLod    = p_glGetUniformLocation(progLeaf, "uLodCam");
   GLint locLTime   = p_glGetUniformLocation(progLeaf, "uTime");
   GLint locLMask   = p_glGetUniformLocation(progLeaf, "uLeafMask");
 
@@ -1359,12 +1379,14 @@ int main(int argc, char **argv) {
   { const char *el = getenv("DEMO_SHADOWLEAF"); if (el) shadowLeafOn = atoi(el); }
   { const char *ez = getenv("DEMO_SHADOWSAMPLE"); if (ez) shadowSampleOn = atoi(ez); }
   { const char *ef = getenv("DEMO_SHADOWFORCE"); if (ef) shadowForce = atoi(ef); }
+  { const char *ev = getenv("DEMO_SHADOWVIS"); if (ev) shadowVis = atoi(ev) + 1; }
   { const char *ed = getenv("DEMO_SHADOWDUMP"); if (ed) envShadowDump = atoi(ed); }
   { const char *eg = getenv("DEMO_GLDBG"); if (eg) envGlDbg = atoi(eg); }
   { const char *ec = getenv("DEMO_CAM");
-    if (ec){ float cx=0, cz=0, cp=-0.30f; if(sscanf(ec, "%f %f %f", &cx, &cz, &cp) >= 2){
+    if (ec){ float cx=0, cz=0, cp=-0.30f, cy2=1e30f; if(sscanf(ec, "%f %f %f %f", &cx, &cz, &cp, &cy2) >= 2){
       flyPos[0] = cx; flyPos[2] = cz; flyPos[1] = c_terrainH(cx, cz) + 1.10f;
-      flyPitch = cp; printf("DEBUG Kamera gesetzt: (%.1f, %.2f, %.1f) Pitch %.2f\n", cx, flyPos[1], cz, cp); } } }
+      flyPitch = cp; if(cy2 < 1e29f) flyYaw = cy2;
+      printf("DEBUG Kamera gesetzt: (%.1f, %.2f, %.1f) Pitch %.2f Yaw %.2f\n", cx, flyPos[1], cz, cp, flyYaw); } } }
   envNoLeaf = getenv("DEMO_NOLEAF") ? 1 : 0;
   envLeafMask = getenv("DEMO_LEAFMASK") ? 1 : 0;
   if (envTreeJump) tree_jump();
@@ -1850,6 +1872,11 @@ int main(int argc, char **argv) {
         p_glUniform1i(locCFol, 0);
         p_glUniform1f(locCTime, tSh);
         p_glUniform1f(locCMask, 0.0f);
+        // Im Schatten-Wurf muessen die Kronen-Quads SENKRECHT zur Sonnenrichtung
+        // stehen. Kamera-zugewandte Billboards stehen bei einer Sonne mit 24,6°
+        // Erhebung fast kantig -> sie werfen nur schmale Streifen statt einer
+        // Kronenflaeche.
+        if(locCLFace >= 0) p_glUniform1f(locCLFace, 1.0f);
         applyShadow(&slCrown, 0);
         p_glBindVertexArray(vaoCrown);
         p_glDrawArrays(GL_TRIANGLES, 0, nCrownVerts);
@@ -1858,6 +1885,11 @@ int main(int argc, char **argv) {
         p_glUseProgram(progLeaf);
         p_glUniformMatrix4fv(locLMVP, 1, GL_FALSE, lightMVP);
         p_glUniform3f(locLCam, eye[0], eye[1], eye[2]);
+        // LOD-Auscull der Blaetter haengt an der KAMERA ab, nicht am Wurf-
+        // betrachter: mit uCamPos = Sonnenauge (63 m weg) waren alle 288800
+        // Blaetter weggecullt und haben EXAKT 0 Texel zur Shadow-Map
+        // beigetragen (gemessen: Map mit/ohne Blatt-Wurf bitgleich).
+        if(locLLod >= 0) p_glUniform3f(locLLod, camPos[0], camPos[1], camPos[2]);
         p_glUniform1f(locLTime, tSh);
         p_glUniform1f(locLMask, 0.0f);
         applyShadow(&slLeaf, 0);
@@ -1907,7 +1939,7 @@ int main(int argc, char **argv) {
       p_glUniform1f(locGTexAmt, (grassTexOn && capAmt > 0.0f) ? 1.0f : 0.0f);
       p_glUniform1f(locGFar0, grassTexFar0);
       p_glUniform1f(locGFar1, grassTexFar1);
-      applyShadow(&slScene, (shadowThis && shadowSampleOn) ? (shadowForce ? 2 : 1) : 0);
+      applyShadow(&slScene, (shadowThis && shadowSampleOn) ? (shadowVis ? 2 + shadowVis : (shadowForce ? 2 : 1)) : 0);
       if(envGlDbg) printf("DBG vor Szenen-Draw: err=0x%x tex3=%d\n", p_glGetError(),
                           (int)(slScene.tex >= 0));
       p_glDrawArrays(GL_TRIANGLES, 0, 3);
@@ -2008,6 +2040,7 @@ int main(int argc, char **argv) {
       p_glBindTexture(GL_TEXTURE_2D, folTex);
       p_glUniform1i(locCFol, 0);
       p_glUniform1f(locCMask, (float)envCrownMask);
+      if(locCLFace >= 0) p_glUniform1f(locCLFace, 0.0f);
       p_glUniform1f(locCTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
       p_glBindVertexArray(vaoCrown);
       p_glDrawArrays(GL_TRIANGLES, 0, nCrownVerts);
@@ -2022,6 +2055,7 @@ int main(int argc, char **argv) {
       p_glUseProgram(progLeaf);
       p_glUniformMatrix4fv(locLMVP, 1, GL_FALSE, mvp);
       p_glUniform3f(locLCam, camPos[0], camPos[1], camPos[2]);
+      if(locLLod >= 0) p_glUniform3f(locLLod, camPos[0], camPos[1], camPos[2]);
       p_glUniform1f(locLTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
       p_glUniform1f(locLMask, (float)envLeafMask);
       p_glBindVertexArray(vaoLeaf);

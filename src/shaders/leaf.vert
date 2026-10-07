@@ -5,6 +5,9 @@ layout(location=2) in vec4 iData;   // size, rotY, tilt, lod-Pad
 layout(location=3) in vec3 iCol;
 uniform mat4 uMVP;
 uniform vec3 uCamPos;
+uniform vec3 uLodCam;   // Referenzpunkt fuer den Entfernungs-LOD (IMMER die
+                        // echte Kamera — auch im Schatten-Wurf, sonst cullt der
+                        // Wurf sich selbst die Blaetter weg)
 uniform float uTime;
 out vec3 vNrm;
 out vec3 vPos;
@@ -26,7 +29,7 @@ float vnoise(vec2 p){
 void main(){
   float size = iData.x, rotY = iData.y, tilt = iData.z;
   float t = aBase.x, w = aBase.y;
-  float d = length(iPos - uCamPos);
+  float d = length(iPos - uLodCam);
   // LOD: die Kronen-Quads gibt es immer (fuelle die Krone), die echten Blätter
   // sterben in der Distanz statistisch aus — per Hash pro Blatt, damit die Dichte
   // sanft faellt und nicht schlagartig (Anzahl wechselt ja nur beim Rebuild).
