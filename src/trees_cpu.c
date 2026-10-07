@@ -97,7 +97,7 @@ static void ring_transport(Ring *out, const Ring *in,
 // Schreibt 6*sides Vertices nach treeVerts + eine Wireframe-Linie.
 static void emit_tube(const Ring *a, const Ring *b, int sides,
                       float sway0, float sway1,
-                      float cr, float cg, float cb, float cvar){
+                      float cr, float cg, float cb, float cvar, float v0){
   float px0[8][3], px1[8][3], nx[8][3];
   for(int k = 0; k < sides; k++){
     float ang = k * 6.2831853f / (float)sides;
@@ -112,6 +112,8 @@ static void emit_tube(const Ring *a, const Ring *b, int sides,
     float ez = b->u[2] * ca + b->v[2] * sa;
     px1[k][0] = b->p[0] + ex * b->r; px1[k][1] = b->p[1] + ey * b->r; px1[k][2] = b->p[2] + ez * b->r;
   }
+  float vdx = b->p[0] - a->p[0], vdy = b->p[1] - a->p[1], vdz = b->p[2] - a->p[2];
+  float v1 = v0 + sqrtf(vdx * vdx + vdy * vdy + vdz * vdz);
   for(int k = 0; k < sides; k++){
     int k2 = (k + 1) % sides;
     int idx[6]  = { k, k2, k,  k2, k2, k };
@@ -125,6 +127,8 @@ static void emit_tube(const Ring *a, const Ring *b, int sides,
       d[3] = nx[kk][0]; d[4] = nx[kk][1]; d[5] = nx[kk][2];
       d[6] = cr * cvar; d[7] = cg * cvar; d[8] = cb * cvar;
       d[9] = ring[m] ? sway1 : sway0;
+      d[10] = (float)kk / (float)sides;          // u: einmal rund um das Rohr
+      d[11] = ring[m] ? v1 : v0;                 // v: Bogenlaenge entlang des Rohrs
       nTreeVerts++;
     }
   }
@@ -143,7 +147,7 @@ static void emit_tube(const Ring *a, const Ring *b, int sides,
 // Geschlossener Deckel (Dreiecksfaecher) an einem Ring — ohne ihn ist das
 // Stamm-Oberteil ein offenes Loch (sichtbar von oben/in die Krone hinein).
 static void emit_cap(const Ring *a, int sides, float sway,
-                     float cr, float cg, float cb, float cvar){
+                     float cr, float cg, float cb, float cvar, float v0){
   for(int k = 0; k < sides; k++){
     int k2 = (k + 1) % sides;
     float ang0 = k * 6.2831853f / (float)sides, ang1 = k2 * 6.2831853f / (float)sides;
@@ -160,6 +164,8 @@ static void emit_cap(const Ring *a, int sides, float sway,
       d[3] = dx * 0.3f; d[4] = 0.9f; d[5] = dz * 0.3f;
       d[6] = cr * cvar; d[7] = cg * cvar; d[8] = cb * cvar;
       d[9] = sway;
+      d[10] = angs[m] / 6.2831853f;
+      d[11] = v0;
       nTreeVerts++;
     }
   }
@@ -300,11 +306,15 @@ static void gen_tree(float bx, float by, float bz, float s, float seed, int tier
     int nd = (k + 1 < 5) ? k + 1 : 4;
     ring_transport(&kn[k+1], &kn[k], sd[k][0], sd[k][1], sd[k][2], sd[nd][0], sd[nd][1], sd[nd][2]);
   }
-  for(int k = 0; k < 5; k++)
+  // v = Bogenlaenge entlang des Stamms (Rindenmuster laeuft mit dem Stamm hoch)
+  float vlen = 0.0f;
+  for(int k = 0; k < 5; k++){
     emit_tube(&kn[k], &kn[k+1], 8,
               0.05f + 0.05f * k, 0.05f + 0.05f * (k + 1),
-              0.30f * bTone, 0.22f * bTone, 0.14f * bTone, 0.85f + 0.3f * TH(2 + k));
-  emit_cap(&kn[5], 8, 0.30f, 0.28f * bTone, 0.21f * bTone, 0.13f * bTone, 0.9f);
+              0.30f * bTone, 0.22f * bTone, 0.14f * bTone, 0.85f + 0.3f * TH(2 + k), vlen);
+    vlen += s * H / 5.0f;
+  }
+  emit_cap(&kn[5], 8, 0.30f, 0.28f * bTone, 0.21f * bTone, 0.13f * bTone, 0.9f, vlen);
 
   // ---------- Aeste: nb1 Stueck, goldener Winkel, Laenge nach Kronenprofil ----------
   float tipx[16], tipy[16], tipz[16]; int nTip = 0;
@@ -340,9 +350,12 @@ static void gen_tree(float bx, float by, float bz, float s, float seed, int tier
     ring_basis(&br[0], dx, dy, dz);
     ring_transport(&br[1], &br[0], dx, dy, dz, dx2, dy2, dz2);
     ring_transport(&br[2], &br[1], dx2, dy2, dz2, dx2, dy2, dz2);
-    emit_tube(&br[0], &br[1], 6, 0.4f, 0.7f, 0.36f * bTone, 0.28f * bTone, 0.18f * bTone, 0.85f + 0.3f * TH(55 + i));
-    emit_tube(&br[1], &br[2], 6, 0.7f, 1.0f, 0.36f * bTone, 0.28f * bTone, 0.18f * bTone, 0.85f + 0.3f * TH(56 + i));
-    emit_cap(&br[2], 6, 1.0f, 0.34f * bTone, 0.27f * bTone, 0.17f * bTone, 0.9f);
+    float bv = 0.0f;
+    emit_tube(&br[0], &br[1], 6, 0.4f, 0.7f, 0.36f * bTone, 0.28f * bTone, 0.18f * bTone, 0.85f + 0.3f * TH(55 + i), bv);
+    bv += s * len * 0.55f;
+    emit_tube(&br[1], &br[2], 6, 0.7f, 1.0f, 0.36f * bTone, 0.28f * bTone, 0.18f * bTone, 0.85f + 0.3f * TH(56 + i), bv);
+    bv += s * len * 0.45f;
+    emit_cap(&br[2], 6, 1.0f, 0.34f * bTone, 0.27f * bTone, 0.17f * bTone, 0.9f, bv);
     if(nTip < 16){ tipx[nTip] = bx + s * t0x; tipy[nTip] = by + s * t0y; tipz[nTip] = bz + s * t0z; nTip++; }
 
     if(tier >= 3){
@@ -371,7 +384,7 @@ static void gen_tree(float bx, float by, float bz, float s, float seed, int tier
         tw[1].r = s * 0.006f * hf;
         ring_basis(&tw[0], d3x, d3y, d3z);
         ring_transport(&tw[1], &tw[0], d3x, d3y, d3z, d3x, d3y, d3z);
-        emit_tube(&tw[0], &tw[1], 4, 1.0f, 1.0f, 0.40f * bTone, 0.32f * bTone, 0.20f * bTone, 0.9f);
+        emit_tube(&tw[0], &tw[1], 4, 1.0f, 1.0f, 0.40f * bTone, 0.32f * bTone, 0.20f * bTone, 0.9f, 0.0f);
         float st[3] = { tw[0].p[0], tw[0].p[1], tw[0].p[2] };
         float dr[3] = { d3x, d3y, d3z };
         leaves_along(st, dr, tw[0].u, tw[0].v, s * len3, s * 0.012f * hf,

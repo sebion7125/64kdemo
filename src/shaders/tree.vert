@@ -1,13 +1,15 @@
 #version 330 core
 layout(location=0) in vec3 aPos;
 layout(location=1) in vec3 aNrm;
-layout(location=2) in vec4 aCol;   // rgb + sway-Faktor
+layout(location=2) in vec3 aCol;
+layout(location=3) in vec3 aSW;   // sway, u (um das Rohr), v (Bogenlaenge)
 uniform mat4 uMVP;
 uniform vec3 uCamPos;
 uniform float uTime;
 out vec3 vNrm;
 out vec3 vPos;
 out vec4 vCol;
+out vec2 vUV;
 float hash12(vec2 p){
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);
@@ -25,7 +27,7 @@ void main(){
   // Dasselbe Boen-Feld wie in grass.vert — Gras, Aeste, Blaetter und ferne
   // Kronen muessen auf dieselbe Boe reagieren, sonst wirkt der Wind falsch.
   float ph = hash12(floor(aPos.xz / 15.0)) * 6.283;
-  float sw = aCol.w;
+  float sw = aSW.x;
   vec2 gp = aPos.xz * 0.10 - vec2(0.35, 0.20) * uTime;
   float gust = vnoise(gp * 2.3 + 7.7) * smoothstep(0.55, 0.85, vnoise(gp));
   float wnd  = sin(uTime * 1.8 + ph + aPos.x * 0.35 + aPos.z * 0.27);
@@ -34,6 +36,7 @@ void main(){
   p.z += (wnd2 * 0.04 + gust * 0.11) * sw;
   vNrm = aNrm;
   vPos = p;
-  vCol = aCol;
+  vCol = vec4(aCol, aSW.x);
+  vUV  = aSW.yz;
   gl_Position = uMVP * vec4(p, 1.0);
 }

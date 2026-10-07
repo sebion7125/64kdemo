@@ -31,7 +31,7 @@ float c_terrainH(float px, float py);
 //   treeVerts:  pos(3) nrm(3) col(3) sway(1)             = 10 floats
 //   crownVerts: center(3) off(2) size(1) rotY(1) seed(1) pad(1) = 9 floats
 //   wireVerts:  pos(3)
-#define TREE_FLOATS  10
+#define TREE_FLOATS  12   // pos3, nrm3, col3, sway, u (um den Ring), v (Bogenlaenge)
 #define CROWN_FLOATS 9
 // Einzelblaetter an nahen Baeumen (leaf.vert): iPos(3), iData(4: size, rotY,
 // tilt, pad), iCol(3). Grundblatt ist ein statisches Quad (aBase = t, w).

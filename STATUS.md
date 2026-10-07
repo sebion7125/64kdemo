@@ -23,7 +23,7 @@ Himmel/Tageszeiten. Budget ist laut Nutzer zweitrangig.
 | 8 | Schattenwurf | ⬜ |
 | 9 | Himmel schöner, Wolken, Tageszeiten | ⬜ |
 | 10 | **Kronen-Redesign** (Nah: nur Einzelblätter, zahlreich; weicher LOD-Übergang; Blattsilhouette statt Quadrate; keine Polygonkanten fern) | 🔶 Runde 20: Silhouette + Zweige + 137,5° + 272k Blätter (Krone 8 % → 39 %); ferne Kachel-Optik noch offen |
-| 11 | Rinde auch an Abzweigungen (Oberflächenkoordinaten pro Rohr, nicht nur am Stamm) | ⬜ (Nutzer-Runde 20) |
+| 11 | Rinde auch an Abzweigungen (Oberflächenkoordinaten pro Rohr, nicht nur am Stamm) | ✅ Runde 21 (Detail 2,27 → 4,00, texturlos 57 % → 38 %) |
 | 12 | Ast-Gerüst pro Baum unterschiedlich + Baumgrößen stärker streuen | ✅ Runde 20 |
 | 13 | Schilf: lichter, nicht kerzengerade, Farbe wie Baumblätter, vereinzelt dicke Halme mit Kolben | ⬜ (Nutzer-Runde 20) |
 | 14 | Blumen auf den Wiesen | ⬜ (Nutzer-Runde 20) |
@@ -446,6 +446,27 @@ der alten Add-on-Datei sind tot (404), das Add-on ist seit Blender 4.2 eine Exte
 (geseed), Blätter entlang der Zweige mit 137,5°-Phyllotaxis, Blattsilhouette per
 Alpha-Test im Shader, Blatt-Laenge/Breite-Verhaeltnis ~2:1, Blattgroessen-Abstufung
 zum Zweigende hin, Kronenform ueber das Astlaengen-Profil.
+
+## Session 2026-10-07, Runde 21 (TODO 11: Rinde auf Ästen)
+
+**Ursache der „texturlosen“ Äste:** `atan(n.z, n.x)` ist nur für **senkrechte**
+Flächen die Umfangskoordinate. An einem waagerechten Ast zeigt die Normale nach
+oben → der Azimut wird zufällig, das Muster kollabiert zu einer Fläche.
+
+**Fix:** der Baum-Vertex trägt jetzt echte Rohr-Oberflächenkoordinaten
+(`TREE_FLOATS` 10 → 12: `u` = 0..1 einmal um den Ring, `v` = Bogenlänge in m),
+aus `emit_tube`/`emit_cap`. `barkH()` tastet Noise auf einem **Zylinder im Noiseraum**
+ab (`n3(cos u · r, sin u · r, v·f)`) → nahtlos um den Umfang, auf jedem Rohr korrekt.
+`circF` = Noiszellen **pro Umlauf**, deshalb skaliert die Rindenbreite automatisch mit
+dem Rohrdurchmesser (dünne Äste = feinere Rinde, wie in der Natur).
+
+**Messfehler auf dem Weg:** Attribut 3 war im VAO nie aktiviert
+(`glVertexAttribPointer` ohne `glEnableVertexAttribArray`) → `vUV` war konstant 0,
+die neue Rinde sah flach aus und verlor gegen die alte (Detail 1,09 vs 2,27). Nach dem
+Aktivieren: Detail **2,27 → 4,00**, texturlose Baum-Pixel **57 % → 38 %** (gemessen auf
+der exakten Baum-Maske ohne Blätter, Wind eingefroren).
+
+Kosten: fps 2,01 (Standard) / 1,96 (Baum-Nahsicht) — kein messbarer Unterschied.
 
 ## Session 2026-10-07, Runde 20 (Nutzer-Feedback: Kronen-Redesign, Baum-Individuen)
 

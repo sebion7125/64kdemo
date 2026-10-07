@@ -685,7 +685,9 @@ static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: t
   p_glEnableVertexAttribArray(1);
   p_glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, TREE_FLOATS * 4, (const void *)12);
   p_glEnableVertexAttribArray(2);
-  p_glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, TREE_FLOATS * 4, (const void *)24);
+  p_glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, TREE_FLOATS * 4, (const void *)24);
+  p_glEnableVertexAttribArray(3);
+  p_glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, TREE_FLOATS * 4, (const void *)36);  // sway,u,v
 
   // Kronen-Billboards: aCenter(3) aOff(2) aData(4)
   p_glGenVertexArrays(1, &vaoCrown);
