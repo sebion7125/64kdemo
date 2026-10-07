@@ -14,6 +14,8 @@ uniform float uAngS0;       // Blickwinkel-Duennung: sin(theta)-Referenz (0 = au
 uniform float uAngQ;        // Exponent der Winkel-Modulation
 uniform float uCapture;     // 1 = Top-Down-Einfang fuer die Ferntextur
 uniform float uFarFade;     // ab hier duennen die Halme zugunsten der Textur aus
+uniform float uReedDens;    // DIAGNOSE/TUNING (DEMO_REED): Dichte-Faktor Schilf
+uniform float uReedWide;    // DIAGNOSE/TUNING (DEMO_REED): Breiten-Faktor Schilf
 // Fade-GRUPPEN: (birth, death) pro Gruppe, death == 0 heisst "lebt". Birth und
 // Death sind Fakten pro Build, nicht pro Halm — der Halm traegt beide Indizes
 // gepackt in EINEM Float: iGrp = birthGrp + deathGrp * NGRP (deathGrp 0 = lebt).
@@ -80,7 +82,7 @@ float species(float x, float z, float y, out vec4 reg){
   float dh = y - WATER_Y;
   // Schilf deutlich lichter als vorher: es stand in dichten Teppichen
   // (Nutzer: "zu dicht"). 0.45 laesst Uferbu schel statt Riegel.
-  float wReed  = reedW(x, z, y) * 0.45;
+  float wReed  = reedW(x, z, y) * 0.45 * uReedDens;
   float wTall = 0.0, wLav = 0.0, wDaisy = 0.0, wPoppy = 0.0, wLupine = 0.0;
   if(dh >= 0.15){
     float nA = rgf(vec2(x * 0.011, z * 0.011));
@@ -142,7 +144,7 @@ void main(){
     float th = hash12(vec2(iPos.x * 3.11, iPos.z * 5.17));
     vThick = th > 0.90 ? 1.0 : 0.0;
     spH = 3.10 + 1.10 * vThick;
-    spW = 1.05 + 1.15 * vThick;
+    spW = (1.05 + 1.15 * vThick) * uReedWide;
     lean *= 1.30;
     bendPow = 1.55; bendK = 1.30;
   }

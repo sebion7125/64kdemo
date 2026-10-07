@@ -210,8 +210,20 @@ vec3 terrainColor(vec3 p, vec3 n, float h, vec3 rd){
     // Der Fetch liegt bewusst AUSserhalb jeder Bedingung: implizite Ableitungen
     // (und damit die Mip-Wahl) sind in nicht-uniformem Control-Flow undefiniert.
     vec2 uv = vec2(uGrassBox.x - p.z, p.x - uGrassBox.y) / uGrassSide;
-    vec3 ta = texture(uGrassTex, fract(uv)).rgb;
-    grass = mix(grass, ta, grassTexW);
+    // GESEIGELTE statt identischer Kacheln: das 16-m-Feld wurde mit fract()
+    // einfach nebeneinander gekachelt - dieselben Halme in jeder Kachel
+    // (Nutzer: "die Gras-Textur in der Ferne ist zu periodisch"). Die Spiegelung
+    // kehrt nur das VORZEICHEN der UV-Ableitung um, nicht seinen Betrag -> die
+    // Mip-Wahl bleibt unveraendert, keine Nahte.
+    vec2 f = abs(fract(uv * 0.5) * 2.0 - 1.0);
+    vec3 ta = texture(uGrassTex, f).rgb;
+    // Pro Kachel Helligkeit/Farbton variieren (UV-unabhaengig -> keine Nahte)
+    vec2 cell = floor(uv * 0.5);
+    ta *= (0.80 + 0.42 * hash12(cell * 1.37))
+        * vec3(1.0, 0.96 + 0.08 * hash12(cell + 3.1), 0.94 + 0.12 * hash12(cell + 9.7));
+    // Uebergang rauschgestoert statt flaechig: die Kachelgrenzen hoeren auf,
+    // als Muster erkennbar zu sein.
+    grass = mix(grass, ta, grassTexW * (0.45 + 0.55 * fbm(p.xz * 0.18)));
   }
   float rockM = max(smoothstep(0.45, 0.75, slope), smoothstep(9.0, 15.0, p.y));
   vec3 rock = mix(vec3(0.42, 0.38, 0.34), vec3(0.55, 0.52, 0.48), fbm(p.xz * 0.6));

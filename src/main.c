@@ -437,7 +437,7 @@ static int grassOnly = 0;     // 1 = TEST: nur Gras zeichnen (V-Taste), kein Ter
 static int hudMode = 2;       // H-Taste: 2 = Vollstats (2 Zeilen), 1 = reduziert (1 Zeile), 0 = aus
 float grassDensityScale = 1.0f;  // 0.2 - 8.0 (Slider unten im Fenster, extern in scene.h)
 float grassHeightScale = 1.0f;   // 0.3 - 3.0 (Halmhoehe-Slider)
-float grassMaxDist = 110.0f;     // 40 - 150m (max. Gras-Sichtweite, Slider)
+float grassMaxDist = 170.0f;     // 40 - 240m (max. Gras-Sichtweite, Slider)
 float gWorldTime = 0.0f;         // aktuelle Weltzeit (fuer Birth-Time der Halme)
 static int sliderDragging = 0;          // 1 = Slider wird per Maus gezogen
 // Slider-Fade: Slider+Labels blenden ein, wenn die Maus sich ueber sie
@@ -885,10 +885,12 @@ static float  capBox[2] = {0.0f, 0.0f};   // Welt-XZ der Unterencke
 static float  capAmt = 0.0f;
 static int    capRegion = -2147483647;
 static int    grassTexOn = 1;
-static float  grassTexFar0 = 25.0f, grassTexFar1 = 45.0f;
+static float  grassTexFar0 = 70.0f, grassTexFar1 = 115.0f;
+static float  reedDens = 1.0f, reedWide = 1.0f;   // DEMO_REED="<dens> <wide>" 
 // Uniform-Orte des Gras-Programms (auch fuer den Einfang-Pass noetig)
 typedef struct { GLuint prog; GLint mvp, cam, time, height, maxdist, fadedur,
-                 grp, cat, angS0, angQ, cap, farfade, albOnly; } GrassProg;
+                 grp, cat, angS0, angQ, cap, farfade, albOnly,
+                 reedDens, reedWide; } GrassProg;
 static GrassProg gpGrass;
 // Schraege Ortho-Kamera: Blick in +X mit Erhoehungswinkel e ueber dem Grund.
 // Bild-x <- Welt-Z, Bild-y <- Grundrichtung +X (um sin e foerziert), Tiefe
@@ -1080,7 +1082,7 @@ static void set_slider(int which, float pos){
   if (pos < 0.0f) pos = 0.0f; if (pos > 1.0f) pos = 1.0f;
   if (which == 1) grassDensityScale = 0.2f + pos * 5.4f;   // max 5.6x (staubt bei MD=120 am 5M-CAP)
   else if (which == 2) grassHeightScale = 0.3f + pos * 2.7f;
-  else grassMaxDist = 40.0f + pos * 110.0f;
+  else grassMaxDist = 40.0f + pos * 200.0f;
 }
 
 // Slider-Rendering (3 Slider: Dichte/Hoehe/Sichtweite). VBO muss gebunden
@@ -1296,6 +1298,8 @@ int main(int argc, char **argv) {
   GLint locGAngS0 = p_glGetUniformLocation(progGrass, "uAngS0");
   GLint locGAngQ  = p_glGetUniformLocation(progGrass, "uAngQ");
   GLint locGCap   = p_glGetUniformLocation(progGrass, "uCapture");
+  GLint locGReedD = p_glGetUniformLocation(progGrass, "uReedDens");
+  GLint locGReedW = p_glGetUniformLocation(progGrass, "uReedWide");
   GLint locGFarFade = p_glGetUniformLocation(progGrass, "uFarFade");
   GLint locGAlbOnly = p_glGetUniformLocation(progGrass, "uAlbedoOnly");
   gpGrass.prog = progGrass; gpGrass.mvp = locGMVP; gpGrass.cam = locGCam;
@@ -1303,6 +1307,7 @@ int main(int argc, char **argv) {
   gpGrass.fadedur = locGFade; gpGrass.grp = locGrp; gpGrass.cat = locGCat;
   gpGrass.angS0 = locGAngS0; gpGrass.angQ = locGAngQ; gpGrass.cap = locGCap;
   gpGrass.farfade = locGFarFade; gpGrass.albOnly = locGAlbOnly;
+  gpGrass.reedDens = locGReedD; gpGrass.reedWide = locGReedW;
   // Einfang-Textur + FBO (Laufzeit, keine Datei-Bytes)
   p_glGenTextures(1, &grassTex);
   p_glBindTexture(GL_TEXTURE_2D, grassTex);
@@ -1374,6 +1379,15 @@ int main(int argc, char **argv) {
   { const char *es = getenv("DEMO_SHOT"); if (es) envShotAt = (float)atof(es); }
   { const char *ef = getenv("DEMO_FREEZE"); if (ef) envFreeze = (float)atof(ef); }
   { const char *ea = getenv("DEMO_ARTEN"); if (ea) dbgGrassCat = atoi(ea); }
+  // DEMO_GRASSMD=<m>  : max. Gras-Sichtweite (statt Slider)
+  // DEMO_GRASSTEX="<far0> <far1>" : Uebergabe an die Einfangtextur, "0" = Textur aus
+  { const char *eg = getenv("DEMO_GRASSMD"); if (eg) grassMaxDist = (float)atof(eg); }
+  { const char *er = getenv("DEMO_REED");
+    if (er) { reedDens = 1.0f; reedWide = 1.0f;
+              sscanf(er, "%f %f", &reedDens, &reedWide); } }
+  { const char *et = getenv("DEMO_GRASSTEX");
+    if (et) { if (!atoi(et)) grassTexOn = 0;
+              else { sscanf(et, "%f %f", &grassTexFar0, &grassTexFar1); } } }
   { const char *em = getenv("DEMO_CROWNMASK"); if (em) envCrownMask = atoi(em); }
   { const char *es = getenv("DEMO_SHADOW"); if (es) shadowOn = atoi(es); }
   { const char *el = getenv("DEMO_SHADOWLEAF"); if (el) shadowLeafOn = atoi(el); }
@@ -1410,7 +1424,11 @@ int main(int argc, char **argv) {
 
   while (running) {
     double tNow = now_sec();
-    gWorldTime = (float)tNow;   // fuer Birth-Time der Halme (grass_cpu.c)
+    // Mit DEMO_FREEZE liegt die Birth-Zeit sonst in der echten Laufzeit, uTime
+    // ist aber eingefroren -> vFade bleibt 0 und das Gras verschwindet in jedem
+    // Freeze-Test. Ein Freeze soll die Fade-Animation abschalten, deshalb hier
+    // eine Birth-Zeit weit in der Vergangenheit (Fade-in fertig, Fade-out fertig).
+    gWorldTime = envFreeze >= 0.0f ? -1e6f : (float)tNow;
     double rawDt = tNow - tPrev;
     tPrev = tNow;
     // Erster Frame: rawDt ist nicht echt (tPrev wurde vor der Loop gesetzt).
@@ -1459,7 +1477,7 @@ int main(int argc, char **argv) {
             // Uebergabe-Abstand Gras-Geometrie -> Ferntextur
             if (grassTexOn && grassTexFar0 > 20.0f) { grassTexFar0 = 15.0f; grassTexFar1 = 30.0f; }
             else if (grassTexOn) { grassTexOn = 0; }
-            else { grassTexOn = 1; grassTexFar0 = 25.0f; grassTexFar1 = 45.0f; capRegion = -2147483647; }
+            else { grassTexOn = 1; grassTexFar0 = 70.0f; grassTexFar1 = 115.0f; capRegion = -2147483647; }
             printf("Ferne Gras-Textur: %s (Uebergabe %.0f..%.0fm)\n",
                    grassTexOn ? "AN" : "AUS", grassTexFar0, grassTexFar1);
           }
@@ -1979,6 +1997,8 @@ int main(int argc, char **argv) {
     p_glUniform1f(locGAngS0, dbgAngThin ? grassAngS0 : 0.0f);
     p_glUniform1f(locGAngQ, grassAngQ);
     p_glUniform1f(locGCap, 0.0f);
+    if(locGReedD >= 0) p_glUniform1f(locGReedD, reedDens);
+    if(locGReedW >= 0) p_glUniform1f(locGReedW, reedWide);
     p_glUniform1f(locGAlbOnly, 0.0f);
     // Halme duennen genau dort aus, wo die Textur uebernimmt (gleiches Band,
     // damit sich Uebergabe und Cull nicht gegenseitig wiedersprechen).
@@ -2176,7 +2196,7 @@ int main(int argc, char **argv) {
       }
       draw_sliders((grassDensityScale - 0.2f) / 5.4f,
                    (grassHeightScale - 0.3f) / 2.7f,
-                   (grassMaxDist - 40.0f) / 80.0f, winW, winH, locTint, sliderFade);
+                   (grassMaxDist - 40.0f) / 200.0f, winW, winH, locTint, sliderFade);
     }
     p_glDisable(GL_BLEND);
 

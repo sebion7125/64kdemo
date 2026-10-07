@@ -75,7 +75,7 @@ static int   gReqMode = 0;   // Build-Modus (0=POS 1=OUT 2=IN)
 // Zell-Index-Tabellen (eine pro Halm-Buffer): Start-Index und Halm-Anzahl
 // pro Weltzelle (ix,iz absolut -> 1:1-Mapping ueber Builds hinweg).
 // CT×CT deckt das groesste Build-Quadrat ab (MD=120 -> ~693 Zellen/Sseite).
-#define CT 1000
+#define CT 1400   // Raster 1400*0,30m = 420 m Kantenlaenge (war 1000 = 300 m):
 // Pro Zelle: Blockanfang, Gesamtzahl, davon LEBENDE (Blockanfang), und der
 // naechste freie b-Index. Letzteres macht die Intervall-Markierung moeglich:
 // die Generierung setzt bei cellNextB fort statt bei 0 neu anzufangen, also
@@ -204,10 +204,12 @@ static float densLutMD = -1.0f;
 #define DENS_R1 27.0f
 #define DENS_RB 2.0f
 #define DENS_EDGEW 12.0f   // = LOD-Band in grass.vert
-#define DENS_P 3.0f        // Sockel-Exponent: 1/r^3. Gemessen: bei gleichem
-                           // Budget (R1 nachloesen) bringt p=2->4 nur 8% weniger
-                           // Halme in der Shimmer-Zone; mit festem R1 sinkt die
-                           // Gesamtzahl von 0.97x (p=2) auf 0.67x (p=3).
+#define DENS_P 2.0f        // Sockel-Exponent: 1/r^2. Vorher 1/r^3 -> die Halmdichte
+                           // fiel mit der Reichweite viel schneller als ihre Bild-
+                           // bedeckung, ab ~50 m blieb fast nichts uebrig und die
+                           // Einfangtextur musste die ganze Ferne fuellen (Nutzer:
+                           // 'Gras deutlich weiter zeichnen'). 1/r^2 haelt die
+                           // Bildbedeckung naeherungsweise konstant.
 static float dens_at(float dist){
   float md = grassMaxDist;
   if (md != densLutMD) {

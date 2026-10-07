@@ -1,19 +1,28 @@
 # 64kDemo — Status
 
-Stand: 2026-10-07, Runde 22. **Blumen (Mohn/Lupine/Gänseblümchen) drin**, Shadow-Map
-**vorhanden aber im Bild unsichtbar** (TODO 20). Kennzahlen: Binary 117.472 Byte
-(Budget laut Nutzer zweitrangig), VM-fps ~1,9 bei 1280x720, Shadow-Map 23,25 % gefüllt.
-Himmel ist wieder intakt (zwei Shadow-Bugs behoben: `texture()` auf Depth-Textur ohne
-Mipmaps -> schwarz; `GL_LESS` statt `GL_LEQUAL` nach dem Schatten-Wurf).
-**Als nächstes (Nutzer-Reihenfolge aus Runde 22): TODO 15** ferne Kronen-Quads zeigen
-Atlas-Transparenz schwarz (Verdacht: `textureLod` mit lod>0 auf Atlas ohne Mipmaps),
-**16** Kronen-Billboards nahe der Kamera abschalten, **17** echtes Gras weiter zeichnen
-(Ferntextur ist periodisch), **18** volumetrische Krone (Sapling-Recherche: /tmp/sapling),
-**19** Schilf-Halme dicker/lichter, **20** Schatten sichtbar machen.
+Stand: 2026-10-07, Runde 23. Schattenwurf repariert (TODO 20 teilweise), ferne
+Kronen-Quads repariert (15/16), Krone volumetrisch (18), Gras weiter (17). Kennzahlen:
+Binary 117.480 Byte (Budget laut Nutzer zweitrangig), VM-fps ~1,1-1,7 bei 640x360
+(llvmpipe), Shadow-Map 2048², 18,3 % gefüllt, 13,7 cm/Texel.
+**Wichtigster Fund der Runde 23:** `DEMO_FREEZE` blendete das **gesamte Gras** aus.
+`gWorldTime` (Birth-Zeit der Halme) lief in echter Laufzeit (~14 000 s), die Shader
+bekamen `uTime = 3.5` -> `gf = smoothstep(0, uFadeDur, uTime - gbirth) = 0` ->
+`vFade = 0` -> `if(alpha < 0.02) discard;` wirft jedes Fragment. Beweis: Gras-Frag
+auf reines Magenta erzwungen = 0.00 % magenta mit Freeze, 9.83 % ohne. **Alle
+Gras-Messungen mit Freeze vor diesem Fix sind wertlos.** Fix: mit Freeze
+`gWorldTime = -1e6` (Fade-Animation aus).
+**Als nächstes (Nutzer-Feedback aus Runde 23):** Feinast-Gerüst (Bäume wirken wie
+Cheerleader, zu wenige feine Äste), Blattbuschel-Textur pro Blattfarbe für das
+mittlere LOD, **ganzer Baum als Billboard im gröbsten LOD** (sonst ferne Äste ohne
+Blätter), LOD-Überblendung als sauberer Alpha-Blend statt Krisselig-Discard,
+Schatten: ganzer Baum statt Stumpf + höhere Auflösung, Schilf (19, läuft).
 Budget ist laut Nutzer zweitrangig. Test-Hygiene: Timeout <=120 s, nach jedem Test
 `pkill -9 -x 64kdemo`. Deterministische Hooks statt X-Tastendrücken: `DEMO_TREE`,
-`DEMO_CAM="x z [pitch]"`, `DEMO_FREEZE`, `DEMO_SHOT`, `DEMO_ARTEN=2`, `DEMO_TREEMASK`,
-`DEMO_LEAFMASK`, `DEMO_CROWNMASK`, `DEMO_SHADOW*`.
+`DEMO_CAM="x z [pitch] [yaw]"`, `DEMO_FREEZE`, `DEMO_SHOT`, `DEMO_ARTEN=2`,
+`DEMO_TREEMASK`, `DEMO_LEAFMASK`, `DEMO_CROWNMASK`, `DEMO_SHADOW*`,
+`DEMO_GRASSMD=<m>`, `DEMO_GRASSTEX="<far0> <far1>"` (0 = aus), `DEMO_REED="<dens> <wide>"`.
+**Gras braucht `DEMO_FREEZE`-Fix oder laufende Zeit** — ohne Fix ist das Gras im
+Screenshot unsichtbar (siehe oben).
 
 ## TODO-Liste (Nutzer-Aufträge 2026-10-07, der Reihe nach abarbeiten)
 
@@ -35,12 +44,17 @@ Budget ist laut Nutzer zweitrangig. Test-Hygiene: Timeout <=120 s, nach jedem Te
 | 12 | Ast-Gerüst pro Baum unterschiedlich + Baumgrößen stärker streuen | ✅ Runde 20 |
 | 13 | Schilf: lichter, nicht kerzengerade, Farbe wie Baumblätter, vereinzelt dicke Halme mit Kolben | ✅ Runde 21 (Anteil 59,9 % → 7,7 %) |
 | 14 | Blumen auf den Wiesen | ✅ Runde 21c (Mohn 13,8 %, Lupine 14,2 % der Pflanzen-Pixel in einer Blumenfläche) |
-| 15 | **Ferne Kronen-Quads: transparenter Bereich der Atlas-Textur bleibt SCHWARZ** (Nutzer, Runde 22) | ⬜ |
-| 16 | **Kronen-Billboards abschalten, wenn die Kamera direkt davor steht** (sieht immer unecht aus) (Nutzer, Runde 22) | ⬜ |
-| 17 | **Echtes Gras viel weiter zeichnen** — Übergang auf Boden-/Ferntextur sieht schlecht aus, Textur ist auffällig periodisch (Nutzer, Runde 22) | ⬜ |
-| 18 | **Baumkrone volumetrisch aufbauen** — jetzt: grobe Äste mit zig kleinen Blättern direkt daran, wirkt wie Tannennadeln, keine Volumenkrone. Gründlich recherchieren (Nutzer, Runde 22) | ⬜ |
-| 19 | **Schilf: Halme zu dünn, teils zu dicht gewachsen** (Nutzer, Runde 22) | ⬜ |
-| 20 | Schattenwurf: Map funktioniert rechnerisch, aber **im Bild nicht sichtbar** (Nutzer, Runde 22) | 🔶 Runde 22 (Map 23 % gefüllt, NDC-Bug behoben, 6,2 % Bildänderung — sichtbar ist noch nichts) |
+| 15 | **Ferne Kronen-Quads: transparenter Bereich der Atlas-Textur bleibt SCHWARZ** (Nutzer, Runde 22) | ✅ Runde 23 (`a05f34a`: `if(a < thr*vFade)` ließ bei `vFade=0` alle `a=0`-Texel durch; 12 751 Pixel (5,5 %) heller) |
+| 16 | **Kronen-Billboards abschalten, wenn die Kamera direkt davor steht** (sieht immer unecht aus) (Nutzer, Runde 22) | ✅ Runde 23 (`smoothstep(20,28,d)` wie beim Blatt-LOD, darunter Cull) |
+| 17 | **Echtes Gras viel weiter zeichnen** — Übergang auf Boden-/Ferntextur sieht schlecht aus, Textur ist auffällig periodisch (Nutzer, Runde 22) | 🔶 Runde 23 (170 m, `CT 1400`, `DENS_P=2`: 14,37 % Bildänderung ggü. 40 m. Ferntextur gespiegelt + Kachel-Variation: 0,26 % Bildanteil, Autokorrelation ohne Periodizitäts-Peak) |
+| 18 | **Baumkrone volumetrisch aufbauen** — jetzt: grobe Äste mit zig kleinen Blättern direkt daran, wirkt wie Tannennadeln, keine Volumenkrone. Gründlich recherchieren (Nutzer, Runde 22) | 🔶 Runde 23 (`fbc2599`: Buschel an Zweigspitzen, Blattfläche 10,3 % → 52,4 %. **Nutzer: zu wenig Feinast, „Cheerleader“**) |
+| 19 | **Schilf: Halme zu dünn, teils zu dicht gewachsen** (Nutzer, Runde 22) | 🔄 Runde 23 (Hook `DEMO_REED` wirkt jetzt messbar: 0× = 6,97 %, 100× = 21,76 % Bildänderung) |
+| 20 | Schattenwurf: Map funktioniert rechnerisch, aber **im Bild nicht sichtbar** (Nutzer, Runde 22) | 🔶 Runde 23 (`063daad`: Blatt-Wurf lief nie ein, PCF filterte Tiefen statt Vergleiche. 22,30 % Bildänderung an/aus. **Nutzer: immer noch nur Stumpf-Schatten, mäßig aufgelöst**) |
+| 21 | **Feinast-Gerüst**: zu wenige feine Äste, Krone zu klein („Cheerleader“) (Nutzer, Runde 23) | ⬜ |
+| 22 | **Buschel-Textur pro Blattfarbe** fürs mittlere LOD (statt Atlas-Fremdoptik) (Nutzer, Runde 23) | ⬜ |
+| 23 | **Ganzer Baum als Billboard im gröbsten LOD** — sonst ferne Äste ohne Blätter (Nutzer, Runde 23) | ⬜ |
+| 24 | **LOD-Überblendung krisselig** → sauberer Alpha-Blend (Nutzer, Runde 23) | ⬜ |
+| 25 | **Schatten: ganzer Baum statt Stumpf**, bessere Auflösung (Nutzer, Runde 23) | ⬜ |
 
 ### 2. Nebel/Sichtweite — „alles ein bisschen milchig"
 - `fog = 1 - exp(-t²·0.000015)` in `fragment.glsl` (3 Stellen: Zeilen ~229, 240,
