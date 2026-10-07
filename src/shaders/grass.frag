@@ -107,7 +107,7 @@ void main(){
   base = mix(base, base * vec3(0.86, 0.94, 0.78), wTall * 0.55);   // Hochgras-Zone
   base = mix(base, vec3(0.34, 0.36, 0.50), wLav * 0.30);           // Lavendel-Schimmer
   base = mix(base, vec3(0.30, 0.44, 0.18), wDaisy * 0.35);         // Gaeensebluemchen-Wiese
-  base = mix(base, vec3(0.13, 0.31, 0.11), wReed * 0.70);          // Schilfguertel
+  base = mix(base, vec3(0.06, 0.23, 0.06), wReed * 0.75);          // Schilfguertel
   // Art-Farben (vSp): Spitze bzw. Bluetenstand anders als der Halm
   if(vSp > 1.5 && vSp < 2.5){            // Lavendel: graugruener Stiel, violetter Stand
     base = mix(base, vec3(0.30, 0.36, 0.24), 0.45);
@@ -116,10 +116,10 @@ void main(){
     tip  = mix(tip, vec3(0.93, 0.93, 0.88), smoothstep(0.55, 0.82, vT));
   } else if(vSp > 3.5){                  // Schilf: Culm und Blatt sind verschieden
     if(vReedRole > 1.5){                 // Blatt: graugruen (echt: glaucous green)
-      base = mix(base, vec3(0.11, 0.30, 0.09), 0.78);
-      tip  = mix(tip,  vec3(0.16, 0.36, 0.12), 0.82);
+      base = mix(base, vec3(0.04, 0.20, 0.03), 0.85);
+      tip  = mix(tip,  vec3(0.07, 0.26, 0.05), 0.88);
     } else {                             // Culm: gruen-gelb, oben brauner Kolben
-      base = mix(base, vec3(0.16, 0.33, 0.12), 0.68);
+      base = mix(base, vec3(0.07, 0.24, 0.06), 0.75);
       tip  = mix(tip,  vec3(0.44, 0.42, 0.30), smoothstep(0.45, 0.66, vT));
       tip  = mix(tip,  vec3(0.46, 0.40, 0.30), smoothstep(0.66, 0.86, vT));
     }

@@ -886,7 +886,8 @@ static float  capAmt = 0.0f;
 static int    capRegion = -2147483647;
 static int    grassTexOn = 1;
 static float  grassTexFar0 = 70.0f, grassTexFar1 = 115.0f;
-static float  reedDens = 1.0f, reedWide = 1.0f;   // DEMO_REED="<dens> <wide>" 
+static float  reedDens = 1.0f, reedWide = 1.0f;   // DEMO_REED="<dens> <wide>"
+static float  reedH = 1.0f;                        // DEMO_REEDH=<f>: Schilf-Hoehe 
 // Uniform-Orte des Gras-Programms (auch fuer den Einfang-Pass noetig)
 typedef struct { GLuint prog; GLint mvp, cam, time, height, maxdist, fadedur,
                  grp, cat, angS0, angQ, cap, farfade, albOnly,
@@ -1300,6 +1301,7 @@ int main(int argc, char **argv) {
   GLint locGCap   = p_glGetUniformLocation(progGrass, "uCapture");
   GLint locGReedD = p_glGetUniformLocation(progGrass, "uReedDens");
   GLint locGReedW = p_glGetUniformLocation(progGrass, "uReedWide");
+  GLint locGReedH = p_glGetUniformLocation(progGrass, "uReedH");
   GLint locGFarFade = p_glGetUniformLocation(progGrass, "uFarFade");
   GLint locGAlbOnly = p_glGetUniformLocation(progGrass, "uAlbedoOnly");
   gpGrass.prog = progGrass; gpGrass.mvp = locGMVP; gpGrass.cam = locGCam;
@@ -1382,6 +1384,7 @@ int main(int argc, char **argv) {
   // DEMO_GRASSMD=<m>  : max. Gras-Sichtweite (statt Slider)
   // DEMO_GRASSTEX="<far0> <far1>" : Uebergabe an die Einfangtextur, "0" = Textur aus
   { const char *eg = getenv("DEMO_GRASSMD"); if (eg) grassMaxDist = (float)atof(eg); }
+  { const char *eh = getenv("DEMO_REEDH"); if (eh) reedH = (float)atof(eh); }
   { const char *er = getenv("DEMO_REED");
     if (er) { reedDens = 1.0f; reedWide = 1.0f;
               sscanf(er, "%f %f", &reedDens, &reedWide); } }
@@ -1999,6 +2002,7 @@ int main(int argc, char **argv) {
     p_glUniform1f(locGCap, 0.0f);
     if(locGReedD >= 0) p_glUniform1f(locGReedD, reedDens);
     if(locGReedW >= 0) p_glUniform1f(locGReedW, reedWide);
+    if(locGReedH >= 0) p_glUniform1f(locGReedH, reedH);
     p_glUniform1f(locGAlbOnly, 0.0f);
     // Halme duennen genau dort aus, wo die Textur uebernimmt (gleiches Band,
     // damit sich Uebergabe und Cull nicht gegenseitig wiedersprechen).

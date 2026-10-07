@@ -16,6 +16,7 @@ uniform float uCapture;     // 1 = Top-Down-Einfang fuer die Ferntextur
 uniform float uFarFade;     // ab hier duennen die Halme zugunsten der Textur aus
 uniform float uReedDens;    // DIAGNOSE/TUNING (DEMO_REED): Dichte-Faktor Schilf
 uniform float uReedWide;    // DIAGNOSE/TUNING (DEMO_REED): Breiten-Faktor Schilf
+uniform float uReedH;       // Schilf-Hoehe: EIGENE Skala, nicht der Gras-Slider
 // Fade-GRUPPEN: (birth, death) pro Gruppe, death == 0 heisst "lebt". Birth und
 // Death sind Fakten pro Build, nicht pro Halm — der Halm traegt beide Indizes
 // gepackt in EINEM Float: iGrp = birthGrp + deathGrp * NGRP (deathGrp 0 = lebt).
@@ -132,7 +133,7 @@ void main(){
   // verschiedenen Arten gehoert.
   float sp = species(iPos.x, iPos.z, iPos.y, vReg);
   float spH = 1.0, spW = 1.0, bendPow = 2.0, bendK = 1.0;
-  float reedBase = 0.0, reedOff = 0.0, culmH = 0.0;
+  float reedBase = 0.0, reedOff = 0.0, culmH = 0.0, reedHMul = 1.0;
   vReedRole = 0.0;
   vThick = 0.0;
   if(sp > 0.5 && sp < 1.5){ spH = 1.75; spW = 1.35; lean *= 0.85; }   // Hochgras
@@ -154,14 +155,18 @@ void main(){
     float th = hash12(vec2(iPos.x * 3.11, iPos.z * 5.17));
     float rr = hash12(vec2(iPos.z * 2.13 + 5.5, iPos.x * 4.37));
     vReedRole = rr < 0.30 ? 1.0 : 2.0;
+    // Pflanzenweise Hoehenstreuung (Nutzer: Hoehe der Schilfpflanzen variiert zu
+    // wenig). Wirkt auf Culm UND Blaetter, damit eine Pflanze eine Groesse hat.
+    float hh = hash12(vec2(iPos.x * 0.91 + 7.7, iPos.z * 1.33));
+    reedHMul = 0.55 + 1.05 * hh;
     if(vReedRole < 1.5){
-      spH = 4.00;                              // Culm-Hoehe: 0.9-2.6 m
-      spW = 0.95 * uReedWide;   // echt 5-10 mm, aber dann praktisch unsichtbar
-                                                 // duenn (Nutzer: Halm nicht sichtbar)
-      lean = 0.12; bendPow = 2.60; bendK = 0.70;  // fast gerade, nur leichte Biegung
+      spH = 3.20 * reedHMul;     // Culm-Hoehe 0.4-3.3 m (echt 1.5-4 m)
+      spW = 1.30 * uReedWide;    // 3.4-6.2 cm Grundbreite
+      // Nahe vertikal, aber mit Streuung bis ~12 Grad (Nutzer: ~10 Grad).
+      lean = 0.02 + 0.20 * th; bendPow = 2.20; bendK = 1.00;
       vThick = 1.0;                            // jeder Culm traegt einen Kolben
     } else {
-      spH = 0.50 + 0.22 * th;                  // Blattlaenge: 0.11-0.46 m (kuerzer)
+      spH = (0.50 + 0.22 * th) * reedHMul;     // Blattlaenge 0.06-0.74 m, mit der Pflanze
       spW = (1.90 + 0.70 * th) * uReedWide;    // 4.9-12.4 cm: breiter, nicht laenger
       lean = 0.90 + 0.45 * th;                 // steht ab und ueberhaengt
       bendPow = 0.80; bendK = 1.55;            // Kruemmung schwerpunktmaessig oben
@@ -196,8 +201,10 @@ void main(){
   // 'sizeLod' ist nur die Groessenkurve: 1.0 vorn bis 2.8 in der Ferne.
   float sizeLod = pow(1.0 - smoothstep(8.0, uMaxDist, d), 1.6);
   float sizeScale = 1.0 + 1.8 * (1.0 - sizeLod);
-  float h = iData.x * uHeightScale * sizeScale * spH, w = iData.y * sizeScale * spW;
-  if(vReedRole > 1.5) culmH = iData.x * uHeightScale * sizeScale * 4.00;
+  // Schilf skaliert NICHT mit dem Gras-Hoehenslider (eigene Skala uReedH).
+  float hscale = (sp > 3.5) ? uReedH : uHeightScale;
+  float h = iData.x * hscale * sizeScale * spH, w = iData.y * sizeScale * spW;
+  if(vReedRole > 1.5) culmH = iData.x * hscale * sizeScale * 3.20 * reedHMul;
   // LOD: Halme wachsen in der Distanz zurueck (Terrain-Grasfarbe uebernimmt).
   // Der Uebergabe-Abstand kommt von uFarFade: ab dort uebernimmt die eingefangene
   // Top-Down-Textur, weil ein Halm unter ~2 px Bildbreite nur noch flackert.
@@ -240,6 +247,12 @@ void main(){
     // Schilf-Blatt hat NICHT die Trichterform des Grashalms (unten am breitesten),
     // sondern schmale Basis, Maximum bei ~1/3, dann spitz auslaufend.
     taper = max(taper * 0.30, sin(3.14159 * pow(t, 0.62)) * 1.45);
+  } else if(vReedRole < 1.5){
+    // Culm ist ein Zylinder, kein Trichter. Die Grastrichter-Form (unten am
+    // breitesten, zur Spitze auf 0.06 auslaufend) macht den Halm zu einem kaum
+    // sichtbaren Dreieck — deshalb hier fast konstante Breite, Auslaufen erst
+    // ganz oben.
+    taper = max(taper, 0.95 - 0.85 * smoothstep(0.72, 1.0, t));
   }
   // Bluetenstand / Schilf-Kolben: am oberen Ende wird der Halm wieder breiter
   // (Lavendel-Aehre, Gaensebluemchen-Koerbchen, Schilf-Kolben).
