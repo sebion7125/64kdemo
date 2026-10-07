@@ -33,7 +33,8 @@ out float vSide;   // Schritt 2: Breitenposition (ww: -0.5..0.5)
 out vec3 vR;       // Schritt 2: Breitenrichtung (Halm-"rechts")
 out float vSp;
 out vec2 vHead;   // x = 0..1 Kopf-Anteil, y = 0..1 entlang des Kopfes
-out float vThick;   // 1 = dicker Schilfhalm mit grossem Kolben     // Pflanzen-Typ (0 Wiese, 1 Hochgras, 2 Lavendel,
+out float vThick;
+out float vReedRole;   // 0 = kein Schilf, 1 = Schilf-Culm, 2 = Schilf-Blatt   // 1 = dicker Schilfhalm mit grossem Kolben     // Pflanzen-Typ (0 Wiese, 1 Hochgras, 2 Lavendel,
                    // 3 Gaensebluemchen, 4 Schilf) — siehe species() unten
 out vec4 vReg;     // Deckungsgrade der Region (Hochgras, Lavendel, Gaensebl.,
                    // Schilf) als Varying — grass.frag rechnet sie nicht selbst
@@ -131,6 +132,8 @@ void main(){
   // verschiedenen Arten gehoert.
   float sp = species(iPos.x, iPos.z, iPos.y, vReg);
   float spH = 1.0, spW = 1.0, bendPow = 2.0, bendK = 1.0;
+  float reedBase = 0.0, reedOff = 0.0, culmH = 0.0;
+  vReedRole = 0.0;
   vThick = 0.0;
   if(sp > 0.5 && sp < 1.5){ spH = 1.75; spW = 1.35; lean *= 0.85; }   // Hochgras
   else if(sp > 1.5 && sp < 2.5){ spH = 1.35; spW = 0.55; lean *= 0.45; } // Lavendel
@@ -138,15 +141,32 @@ void main(){
   else if(sp > 4.5 && sp < 5.5){ spH = 1.55; spW = 0.42; lean *= 1.15; }  // Mohn: duenner Stiel
   else if(sp > 5.5){            spH = 1.45; spW = 0.50; lean *= 0.55; }  // Lupine: standfest
   else if(sp > 3.5){
-    // Schilf: hoch, aber NICHT kerzengerade. Der Oberkopf neigt sich (bendPow < 2
-    // verlagert die Krueimmung nach oben), und vereinzelt stehen dicke Halme mit
-    // grossem Kolben.
+    // Schilf (Phragmites australis). Recherche (Wikipedia, Beschreibung):
+    //   Culm    : unverzweigter, gerader Halm, 1.5-4 m hoch, NUR 5-10 mm dick
+    //   Blaetter: 18-60 cm lang, 1-3 cm breit, graugruen, setzen am oberen
+    //             Halmdrittel an, stehen ab und ueberhaengen
+    //   Kolben  : 15-50 cm langer, buschiger Stand ganz oben
+    // Ein Instanz = ein Quad, also zwei Rollen pro Halm (per Hash):
+    //   vReedRole = 1 -> Culm (duenn, gerade, hoch, Kolben oben)
+    //   vReedRole = 2 -> Blatt (breit, kurz, erhoeht am Culm ansetzend, bogig)
+    // Demo-Blattbreite ist gegen echtes Gras ~3x ueberhoeht (2.6-4.8 cm pro
+    // Grashalm); Culm und Blatt werden relativ dazu angesetzt.
     float th = hash12(vec2(iPos.x * 3.11, iPos.z * 5.17));
-    vThick = th > 0.72 ? 1.0 : 0.0;          // mehr dicke Halme (vorher 0.90)
-    spH = 3.10 + 1.10 * vThick;
-    spW = (1.55 + 1.45 * vThick) * uReedWide;   // dicker (vorher 1.05 + 1.15)
-    lean *= 1.30;
-    bendPow = 1.55; bendK = 1.30;
+    float rr = hash12(vec2(iPos.z * 2.13 + 5.5, iPos.x * 4.37));
+    vReedRole = rr < 0.30 ? 1.0 : 2.0;
+    if(vReedRole < 1.5){
+      spH = 4.00;                              // Culm-Hoehe: 0.9-2.6 m
+      spW = 0.42 * uReedWide;                  // 1.1-2.0 cm (echt 5-10 mm)
+      lean = 0.12; bendPow = 2.60; bendK = 0.70;  // fast gerade, nur leichte Biegung
+      vThick = 1.0;                            // jeder Culm traegt einen Kolben
+    } else {
+      spH = 0.75 + 0.35 * th;                  // Blattlaenge: 0.17-0.70 m
+      spW = (1.30 + 0.50 * th) * uReedWide;    // 3.4-7.7 cm: breiter als ein Grashalm
+      lean = 0.90 + 0.45 * th;                 // steht ab und ueberhaengt
+      bendPow = 0.80; bendK = 1.55;            // Kruemmung schwerpunktmaessig oben
+      reedBase = 0.45 + 0.35 * th;             // Ansatz: oberes Halmdrittel
+      reedOff  = (th - 0.5) * 0.20;            // seitlich neben dem Culm
+    }
   }
   // Blickwinkel-Duennung. Ein senkrechter Halm wird NICHT foerziert, eine
   // Wiese schon (Faktor sin theta). Flaechige Bedeckung = n*h*w/sin(theta),
@@ -172,6 +192,7 @@ void main(){
   float sizeLod = pow(1.0 - smoothstep(8.0, uMaxDist, d), 1.6);
   float sizeScale = 1.0 + 1.8 * (1.0 - sizeLod);
   float h = iData.x * uHeightScale * sizeScale * spH, w = iData.y * sizeScale * spW;
+  if(vReedRole > 1.5) culmH = iData.x * uHeightScale * sizeScale * 4.00;
   // LOD: Halme wachsen in der Distanz zurueck (Terrain-Grasfarbe uebernimmt).
   // Der Uebergabe-Abstand kommt von uFarFade: ab dort uebernimmt die eingefangene
   // Top-Down-Textur, weil ein Halm unter ~2 px Bildbreite nur noch flackert.
@@ -187,6 +208,11 @@ void main(){
   p.x += cy * lo;
   p.z += sy * lo;
   p.y += t * h * lod * (1.0 - 0.3 * lean);
+  if(vReedRole > 1.5){
+    p.y += reedBase * culmH * lod;      // Blatt sitzt am oberen Culm, nicht am Boden
+    p.x += cy * reedOff;
+    p.z += sy * reedOff;
+  }
   // Wind: Basis-Brise (zwei Frequenzen) + wandernde Boen.
   // Boen = Noise-Feld im mitbewegten Koordinatensystem (Muster driftet in
   // Windrichtung) * sparsame Front (smoothstep) -> Boen ziehen ueber das
@@ -205,6 +231,11 @@ void main(){
   p.z += wz * t * t * lod;
   // Breite: zulaeufig zur Spitze, Ebene um yaw rotiert
   float taper = (1.0 - t) * (1.0 - t) * 0.5 + 0.06;
+  if(vReedRole > 1.5){
+    // Schilf-Blatt hat NICHT die Trichterform des Grashalms (unten am breitesten),
+    // sondern schmale Basis, Maximum bei ~1/3, dann spitz auslaufend.
+    taper = max(taper * 0.30, sin(3.14159 * pow(t, 0.62)) * 1.25);
+  }
   // Bluetenstand / Schilf-Kolben: am oberen Ende wird der Halm wieder breiter
   // (Lavendel-Aehre, Gaensebluemchen-Koerbchen, Schilf-Kolben).
   float headOn = 0.0, headW = 0.0, headT0 = 1.0;
@@ -221,7 +252,7 @@ void main(){
   else if(sp > 2.5 && sp < 3.5)  hampl = 2.00f;                 // Gaensebluemchen (~2,5 cm)
   else if(sp > 4.5 && sp < 5.5)  hampl = 4.40f;                 // Mohn-Napf (~7 cm)
   else if(sp > 5.5)              hampl = 2.60f;                 // Lupinen-Stand (~4 cm)
-  else if(sp > 3.5 && sp < 4.5)  hampl = 0.90f + 1.10f * vThick;// Schilf-Kolben
+  else if(sp > 3.5 && sp < 4.5)  hampl = (vReedRole < 1.5) ? 7.00f : 0.0f; // Kolben 15-50 cm
   if(hampl > 0.0){
     headT0 = HT0;
     float ht = clamp((t - HT0) / (1.0 - HT0), 0.0, 1.0);

@@ -10,7 +10,8 @@ in float vSide;   // Schritt 2: Breitenposition (-0.5..0.5)
 in vec3 vR;       // Schritt 2: Breitenrichtung
 in float vSp;
 in vec2 vHead;    // x = Kopf-Anteil dieses Punkts, y = 0..1 entlang des Kopfes
-in float vThick;     // Pflanzen-Typ aus grass.vert (0 Wiese, 1 Hochgras,
+in float vThick;
+in float vReedRole;   // 0 = kein Schilf, 1 = Culm, 2 = Blatt     // Pflanzen-Typ aus grass.vert (0 Wiese, 1 Hochgras,
                   // 2 Lavendel, 3 Gaensebluemchen, 4 Schilf)
 in vec4 vReg;     // Deckungsgrade der Region aus grass.vert
                   // (x Hochgras, y Lavendel, z Gaensebluemchen, w Schilf)
@@ -113,12 +114,15 @@ void main(){
     tip  = mix(tip, vec3(0.44, 0.26, 0.64), smoothstep(0.40, 0.72, vT));
   } else if(vSp > 2.5 && vSp < 3.5){     // Gaensebluemchen: weisser Koerbchen-Rand
     tip  = mix(tip, vec3(0.93, 0.93, 0.88), smoothstep(0.55, 0.82, vT));
-  } else if(vSp > 3.5){                  // Schilf: gruen wie die Baumblaetter,
-    // Kolben ein weicher braenlich-gruenlicher Stand (kein strohiges Gelb)
-    base = mix(base, vec3(0.16, 0.33, 0.13), 0.60);
-    tip  = mix(tip, vec3(0.26, 0.38, 0.18), smoothstep(0.45, 0.66, vT));
-    tip  = mix(tip, mix(vec3(0.40, 0.36, 0.24), vec3(0.50, 0.44, 0.30), vThick),
-               smoothstep(0.66, 0.86, vT));
+  } else if(vSp > 3.5){                  // Schilf: Culm und Blatt sind verschieden
+    if(vReedRole > 1.5){                 // Blatt: graugruen (echt: glaucous green)
+      base = mix(base, vec3(0.26, 0.38, 0.22), 0.72);
+      tip  = mix(tip,  vec3(0.33, 0.43, 0.25), 0.80);
+    } else {                             // Culm: gruen-gelb, oben brauner Kolben
+      base = mix(base, vec3(0.30, 0.40, 0.22), 0.62);
+      tip  = mix(tip,  vec3(0.44, 0.42, 0.30), smoothstep(0.45, 0.66, vT));
+      tip  = mix(tip,  vec3(0.46, 0.40, 0.30), smoothstep(0.66, 0.86, vT));
+    }
   } else if(vSp > 0.5 && vSp < 1.5){     // Hochgras: dunkler + gesaettigter
     base = base * vec3(0.88, 0.96, 0.80);
     tip  = mix(tip, vec3(0.26, 0.52, 0.10), 0.65);
