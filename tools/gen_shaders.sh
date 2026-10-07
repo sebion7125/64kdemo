@@ -23,3 +23,4 @@ emit GRASS_VS_SRC src/shaders/grass.vert
 emit GRASS_FS_SRC src/shaders/grass.frag
 emit CROWN_VS_SRC src/shaders/crown.vert
 emit CROWN_FS_SRC src/shaders/crown.frag
+emit DEPTH_FS_SRC src/shaders/depth.frag

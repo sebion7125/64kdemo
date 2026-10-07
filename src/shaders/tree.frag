@@ -75,6 +75,31 @@ float barkH(float u, float v, float circF, float lenF){
   float c = 1.0 - abs(n3(qr) * 2.0 - 1.0);      // ridged -> tiefe Risse
   return a * 0.75 + c * c * 0.45;
 }
+
+// ---------- Schattenwurf (Shadow-Map, eine orthogliche Licht-Kaskade) ----------
+uniform sampler2D uShadow;
+uniform mat4  uLightMVP;
+uniform float uShadowOn;
+uniform float uShadowPx;      // 1 / Aufloesung
+float shadowAt(vec3 wp, vec3 n){
+  if(uShadowOn < 0.5) return 1.0;
+  if(uShadowOn > 1.5) return 0.0;   // DIAGNOSE: alles beschattet
+  vec3 lp = (uLightMVP * vec4(wp + n * 0.30, 1.0)).xyz;   // Normalen-Offset gegen Moire
+  // lp.z ist NDC im Bereich [-1,1]; die Depth-Textur enthaelt aber [0,1].
+  // Ohne diese Umrechnung vergleicht man zwei verschiedene Skalen und der Test
+  // faellt immer auf "beleuchtet" (gemessen: Schatten wirkungslos, Map zu 23 % gefuellt).
+  float z = lp.z * 0.5 + 0.5;
+  if(z >= 1.0) return 1.0;
+  vec2 uv = lp.xy * 0.5 + 0.5;
+  if(uv.x < 0.002 || uv.x > 0.998 || uv.y < 0.002 || uv.y > 0.998) return 1.0;
+  float s = 0.0;
+  for(int y = -1; y <= 1; y++)
+  for(int x = -1; x <= 1; x++)
+    s += textureLod(uShadow, uv + vec2(float(x), float(y)) * uShadowPx, 0.0).r;
+  s /= 9.0;
+  return (z - 0.0025 > s) ? 0.38 : 1.0;      // im Schatten: Sonne auf 38 %
+}
+
 void main(){
   if(uTreeMask > 0.5){ O = vec4(1.0, 0.0, 0.0, 1.0); return; }
   vec3 n = normalize(vNrm);
@@ -106,7 +131,7 @@ void main(){
   albedo = mix(albedo, vec3(0.18, 0.28, 0.12), moss * 0.55);
   // duenne Aeste: eigener Ton, aber mit derselben Rindenstruktur
   albedo = mix(albedo, vCol.rgb * (0.85 + 0.3 * coarse) * (0.55 + 0.9 * h), 1.0 - onTrunk);
-  float dif = max(dot(nb, SUN), 0.0) * 0.85 + 0.15;
+  float dif = max(dot(nb, SUN), 0.0) * 0.85 * shadowAt(vPos, nb) + 0.15;
   vec3 amb = vec3(0.40, 0.50, 0.68) * (0.45 + 0.55 * max(nb.y, 0.0));
   vec3 col = albedo * (vec3(1.0, 0.92, 0.78) * dif + amb);
   float s = length(vPos - uCamPos) - 60.0;   // Dunst wie fogAmt() in fragment.glsl

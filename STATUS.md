@@ -27,6 +27,12 @@ Himmel/Tageszeiten. Budget ist laut Nutzer zweitrangig.
 | 12 | Ast-Gerüst pro Baum unterschiedlich + Baumgrößen stärker streuen | ✅ Runde 20 |
 | 13 | Schilf: lichter, nicht kerzengerade, Farbe wie Baumblätter, vereinzelt dicke Halme mit Kolben | ✅ Runde 21 (Anteil 59,9 % → 7,7 %) |
 | 14 | Blumen auf den Wiesen | ✅ Runde 21c (Mohn 13,8 %, Lupine 14,2 % der Pflanzen-Pixel in einer Blumenfläche) |
+| 15 | **Ferne Kronen-Quads: transparenter Bereich der Atlas-Textur bleibt SCHWARZ** (Nutzer, Runde 22) | ⬜ |
+| 16 | **Kronen-Billboards abschalten, wenn die Kamera direkt davor steht** (sieht immer unecht aus) (Nutzer, Runde 22) | ⬜ |
+| 17 | **Echtes Gras viel weiter zeichnen** — Übergang auf Boden-/Ferntextur sieht schlecht aus, Textur ist auffällig periodisch (Nutzer, Runde 22) | ⬜ |
+| 18 | **Baumkrone volumetrisch aufbauen** — jetzt: grobe Äste mit zig kleinen Blättern direkt daran, wirkt wie Tannennadeln, keine Volumenkrone. Gründlich recherchieren (Nutzer, Runde 22) | ⬜ |
+| 19 | **Schilf: Halme zu dünn, teils zu dicht gewachsen** (Nutzer, Runde 22) | ⬜ |
+| 20 | Schattenwurf: Map funktioniert rechnerisch, aber **im Bild nicht sichtbar** (Nutzer, Runde 22) | 🔶 Runde 22 (Map 23 % gefüllt, NDC-Bug behoben, 6,2 % Bildänderung — sichtbar ist noch nichts) |
 
 ### 2. Nebel/Sichtweite — „alles ein bisschen milchig"
 - `fog = 1 - exp(-t²·0.000015)` in `fragment.glsl` (3 Stellen: Zeilen ~229, 240,
@@ -446,6 +452,48 @@ der alten Add-on-Datei sind tot (404), das Add-on ist seit Blender 4.2 eine Exte
 (geseed), Blätter entlang der Zweige mit 137,5°-Phyllotaxis, Blattsilhouette per
 Alpha-Test im Shader, Blatt-Laenge/Breite-Verhaeltnis ~2:1, Blattgroessen-Abstufung
 zum Zweigende hin, Kronenform ueber das Astlaengen-Profil.
+
+## Session 2026-10-07, Runde 22 (Shadow-Map + Nutzer-Feedback)
+
+**Shadow-Map eingebaut** (1024², eine orthogonale Licht-Kaskade, 3×3-PCF, Wirft
+Baum-Mesh + Kronen-Quads + Einzelblätter). Drei echte Fehler dabei:
+
+1. **`texture()` auf einer Depth-Textur ohne Mipmaps liefert auf llvmpipe Schwarz** —
+   das ganze Bild war schwarz (nur HUD sichtbar). `textureLod(uShadow, uv, 0.0)`
+   funktioniert. Umgestellt auf 16-bit-Depth + explizite Lod.
+2. **Depth-Funktion nicht zurückgesetzt:** der Schatten-Wurf setzt `GL_LESS`, der
+   Szenen-Pass braucht `GL_LEQUAL` (Himmel schreibt `gl_FragDepth = 1.0` gegen
+   gecleartes 1.0). Folge: Himmel schwarz, Rest intakt. Jetzt `GL_LEQUAL` nach dem
+   Wurf wiederhergestellt.
+3. **NDC vs. Depth-Bereich:** `lp.z` aus der Licht-Matrix liegt in [-1,1], die
+   Depth-Textur enthält [0,1]. Ohne `z = lp.z*0.5+0.5` vergleicht man zwei Skalen →
+   der Test fiel immer auf „beleuchtet“. Behoben.
+
+**Messung nach Fix:** Shadow-Map zu 23,25 % gefüllt (Tiefen 0,0005…1,0),
+Bildänderung durch Schatten 6,19 % der Pixel, mittlere Differenz 8,8.
+**Aber: im Bild ist kein Schatten erkennbar** (Nutzer bestätigt) → TODO 20.
+
+**Diagnose-Werkzeuge neu:** `DEMO_SHADOW=0/1`, `DEMO_SHADOWLEAF`, `DEMO_SHADOWFORCE=1`
+(alles beschattet, prüft die Verkabelung), `DEMO_SHADOWDUMP=1` (Depth-Map als PPM),
+`DEMO_CAM="x z [pitch]"` (Kamera exakt setzen), `DEMO_GLDBG=1`.
+Fallen beim Messen: `glReadPixels` aus einem MSAA-FBO ist verboten (0x502) und hat
+zwei Runden lang eine falsche Ursache vorgetäuscht; `glGetError()` löscht den Fehler,
+man darf ihn nicht an zwei Stellen gleichzeitig abfragen.
+
+**Nutzer-Feedback Runde 22 (wörtlich festgehalten, Reihenfolge der Abarbeitung):**
+- „Das Schilf sieht noch nicht gut aus: zu dünne Halme und teilweise etwas zu dicht
+  gewachsen.“ → TODO 19
+- „Deine Optimierung der Gras-Sichtweite mit Übergang auf Bodentextur sieht nicht gut
+  aus. Das echte Gras sollte viel weiter gezeichnet werden, weil es trotz AA-Artefakten
+  viel besser als die Textur aussieht, die letztlich sehr auffällig periodisch ist.“
+  → TODO 17
+- „Deine Bäume: da musst du noch mal richtig recherchieren. Du hast recht grobe Äste und
+  direkt an den Ästen zig kleine Blätter. Das erzeugt überhaupt keine volumetrische
+  Baumkrone, sieht eher wie Tannennadeln aus.“ → TODO 18
+- „Billboards der Baumkrone dürfen nicht mehr genutzt werden, wenn die Kamera direkt
+  davor ist. Das sieht immer unecht aus.“ → TODO 16
+- „Bei den ganz weit entfernten Bäumen ist der transparente Bereich der Textur
+  weiterhin schwarz statt durchsichtig.“ → TODO 15
 
 ## Session 2026-10-07, Runde 21c (TODO 14: Blumen auf den Wiesen)
 

@@ -102,6 +102,8 @@ static void (*p_glBindTexture)(GLenum target, GLuint texture);
 static void (*p_glTexImage2D)(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const void *pixels);
 static void (*p_glGetTexImage)(GLenum target, GLint level, GLenum format, GLenum type, void *pixels);
 static void (*p_glScissor)(GLint x, GLint y, GLsizei width, GLsizei height);
+static void (*p_glColorMask)(GLboolean r, GLboolean g, GLboolean b, GLboolean a);
+static void (*p_glPolygonOffset)(GLfloat factor, GLfloat units);
 static void (*p_glTexParameteri)(GLenum target, GLenum pname, GLint param);
 static void (*p_glActiveTexture)(GLenum texture);
 static void (*p_glGenFramebuffers)(GLsizei n, GLuint *framebuffers);
@@ -209,6 +211,8 @@ static void load_libs(void) {
   LOADGL2(glTexImage2D);
   LOADGL2(glGetTexImage);
   LOADGL2(glScissor);
+  LOADGL2(glColorMask);
+  LOADGL2(glPolygonOffset);
   LOADGL2(glTexParameteri);
   LOADGL2(glActiveTexture);
   LOADGL2(glGenFramebuffers);
@@ -410,6 +414,9 @@ static float envFreeze = -1.0f;
 static int envNoLeaf = 0;
 //   DEMO_LEAFMASK=1    Einzelblaetter in reinem Rot (Maske fuer Blatt-Messungen)
 static int envLeafMask = 0;
+static int envCrownMask = 0;
+static int envGlDbg = 0;
+static int envShadowDump = 0;
 //   Y = Alpha-to-Coverage im Gras-Pass. Alpha wird dann in eine MSAA-Sample-
 //       Maske uebersetzt statt gemischt: ein halbtransparenter Halm schreibt
 //       Tiefe nur noch fuer die Samples, die er abdeckt. Loesst den Reveal-Pop
@@ -526,6 +533,14 @@ static const float leafBase[6][2] = {
 #define FOL_AZ    16
 #define FOL_VAR   4
 static GLuint folTex = 0, folFbo = 0, folDepth = 0, vboFol = 0, vaoFol = 0;
+// Shadow-Map: eine orthogliche Licht-Kaskade um die Kamera. Geworfen werden
+// Baum-Mesh, Kronen-Quads und (abschaltbar) Einzelblaetter — die Kronen sind der
+// Schattenwerfer, den man auf dem Boden sieht.
+#define SHADOW_SZ 1024
+#define SHADOW_HALF 70.0f
+static GLuint shadowTex = 0, shadowFbo = 0;
+static float  lightMVP[16];
+static int    shadowOn = 1, shadowLeafOn = 1, shadowSampleOn = 1, shadowForce = 0;
 static float folPatch[FOLIAGE_CAP * LEAF_FLOATS];
 
 // Orthografische MVP (quadratischer Viewport), fuer die Atlas-Aufnahme
@@ -546,6 +561,38 @@ static void ortho_mvp(const float cp[3], const float tg[3], float half, float ou
   out[2] = 2.0f * fx / dz; out[6] = 2.0f * fy / dz; out[10] = 2.0f * fz / dz;
   out[14] = -2.0f * df / dz - 1.0f;
   out[3] = 0.0f; out[7] = 0.0f; out[11] = 0.0f; out[15] = 1.0f;
+}
+
+typedef struct { GLint tex, mvp, on, px; } ShadowLoc;
+static void fillShadowLoc(GLuint prog, ShadowLoc *sl){
+  sl->tex = p_glGetUniformLocation(prog, "uShadow");
+  sl->mvp = p_glGetUniformLocation(prog, "uLightMVP");
+  sl->on  = p_glGetUniformLocation(prog, "uShadowOn");
+  sl->px  = p_glGetUniformLocation(prog, "uShadowPx");
+}
+static void applyShadow(const ShadowLoc *sl, int on){
+  if(sl->tex >= 0){ p_glActiveTexture(GL_TEXTURE3); p_glBindTexture(GL_TEXTURE_2D, shadowTex);
+                    p_glUniform1i(sl->tex, 3); }
+  if(sl->mvp >= 0) p_glUniformMatrix4fv(sl->mvp, 1, GL_FALSE, lightMVP);
+  if(sl->on  >= 0) p_glUniform1f(sl->on, (float)on);
+  if(sl->px  >= 0) p_glUniform1f(sl->px, 1.0f / (float)SHADOW_SZ);
+  p_glActiveTexture(GL_TEXTURE0);
+}
+static void init_shadow(void){
+  p_glGenTextures(1, &shadowTex);
+  p_glBindTexture(GL_TEXTURE_2D, shadowTex);
+  p_glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT16, SHADOW_SZ, SHADOW_SZ, 0,
+                 GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, NULL);
+  p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  p_glGenFramebuffers(1, &shadowFbo);
+  p_glBindFramebuffer(GL_FRAMEBUFFER, shadowFbo);
+  p_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, shadowTex, 0);
+  printf("Shadow-Map %dx%d: FBO 0x%x\n", SHADOW_SZ, SHADOW_SZ,
+         p_glCheckFramebufferStatus(GL_FRAMEBUFFER));
+  p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 static void build_foliage_atlas(GLuint progLeaf){
@@ -1271,6 +1318,7 @@ int main(int argc, char **argv) {
   GLint locCTgt    = p_glGetUniformLocation(progCrown, "uCamTgt");
   GLint locCFol    = p_glGetUniformLocation(progCrown, "uFoliage");
   GLint locCTime   = p_glGetUniformLocation(progCrown, "uTime");
+  GLint locCMask   = p_glGetUniformLocation(progCrown, "uCrownMask");
   GLint locLMVP    = p_glGetUniformLocation(progLeaf, "uMVP");
   GLint locLCam    = p_glGetUniformLocation(progLeaf, "uCamPos");
   GLint locLTime   = p_glGetUniformLocation(progLeaf, "uTime");
@@ -1306,14 +1354,29 @@ int main(int argc, char **argv) {
   { const char *es = getenv("DEMO_SHOT"); if (es) envShotAt = (float)atof(es); }
   { const char *ef = getenv("DEMO_FREEZE"); if (ef) envFreeze = (float)atof(ef); }
   { const char *ea = getenv("DEMO_ARTEN"); if (ea) dbgGrassCat = atoi(ea); }
+  { const char *em = getenv("DEMO_CROWNMASK"); if (em) envCrownMask = atoi(em); }
+  { const char *es = getenv("DEMO_SHADOW"); if (es) shadowOn = atoi(es); }
+  { const char *el = getenv("DEMO_SHADOWLEAF"); if (el) shadowLeafOn = atoi(el); }
+  { const char *ez = getenv("DEMO_SHADOWSAMPLE"); if (ez) shadowSampleOn = atoi(ez); }
+  { const char *ef = getenv("DEMO_SHADOWFORCE"); if (ef) shadowForce = atoi(ef); }
+  { const char *ed = getenv("DEMO_SHADOWDUMP"); if (ed) envShadowDump = atoi(ed); }
+  { const char *eg = getenv("DEMO_GLDBG"); if (eg) envGlDbg = atoi(eg); }
   { const char *ec = getenv("DEMO_CAM");
-    if (ec){ float cx=0, cz=0; if(sscanf(ec, "%f %f", &cx, &cz) == 2){
+    if (ec){ float cx=0, cz=0, cp=-0.30f; if(sscanf(ec, "%f %f %f", &cx, &cz, &cp) >= 2){
       flyPos[0] = cx; flyPos[2] = cz; flyPos[1] = c_terrainH(cx, cz) + 1.10f;
-      flyPitch = -0.30f; printf("DEBUG Kamera gesetzt: (%.1f, %.2f, %.1f)\n", cx, flyPos[1], cz); } } }
+      flyPitch = cp; printf("DEBUG Kamera gesetzt: (%.1f, %.2f, %.1f) Pitch %.2f\n", cx, flyPos[1], cz, cp); } } }
   envNoLeaf = getenv("DEMO_NOLEAF") ? 1 : 0;
   envLeafMask = getenv("DEMO_LEAFMASK") ? 1 : 0;
   if (envTreeJump) tree_jump();
   build_foliage_atlas(progLeaf);   // Atlas braucht vboLeafBase (build_tree_lines) + progLeaf
+  init_shadow();
+  ShadowLoc slScene, slTree, slGrass, slLeaf, slCrown;
+  fillShadowLoc(progScene, &slScene); fillShadowLoc(progTMesh, &slTree);
+  fillShadowLoc(progGrass, &slGrass); fillShadowLoc(progLeaf,  &slLeaf);
+  fillShadowLoc(progCrown, &slCrown);
+  printf("DBG Shadow-Loc scene tex=%d mvp=%d on=%d px=%d | tree tex=%d mvp=%d on=%d px=%d\n",
+         slScene.tex, slScene.mvp, slScene.on, slScene.px,
+         slTree.tex, slTree.mvp, slTree.on, slTree.px);
 
   // ---------- Hauptloop ----------
   double tPrev = now_sec();
@@ -1748,6 +1811,87 @@ int main(int argc, char **argv) {
     // LEQUAL, damit Himmel (FragDepth=1.0) gegen gecleartes 1.0 durchkommt.
     p_glEnable(GL_DEPTH_TEST);
     p_glDepthFunc(GL_LEQUAL);
+    // ---------- Schatten-Wurf: alles aus Sicht der Sonne ----------
+    // Farbmaske aus -> es landet nur Tiefe in shadowTex. Die echten Programme
+    // werden wiederverwendet, weil ihre discard()s (Blattsilhouette, Atlas-Alpha)
+    // den Schatten richtig loechern. uShadowOn ist in diesem Durchlauf AUS,
+    // sonst wurde die eigene Tiefen-Textur waehrend des Schreibens gelesen.
+    int shadowThis = shadowOn && !grassOnly && shadowFbo != 0;
+    if (shadowThis){
+      float sl2 = sqrtf(0.55f*0.55f + 0.38f*0.38f + 0.62f*0.62f);
+      float S[3] = { 0.55f/sl2, 0.38f/sl2, -0.62f/sl2 };   // wie SUN in allen Shadern
+      float ctr[3] = { camPos[0], camPos[1], camPos[2] };
+      float D = 1.4f * SHADOW_HALF;
+      float eye[3] = { ctr[0] - S[0]*D, ctr[1] - S[1]*D, ctr[2] - S[2]*D };
+      ortho_mvp(eye, ctr, SHADOW_HALF, lightMVP);
+      p_glBindFramebuffer(GL_FRAMEBUFFER, shadowFbo);
+      p_glViewport(0, 0, SHADOW_SZ, SHADOW_SZ);
+      p_glClear(GL_DEPTH_BUFFER_BIT);
+      p_glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+      p_glEnable(GL_DEPTH_TEST); p_glDepthFunc(GL_LESS);
+      p_glDepthMask(GL_TRUE);
+      p_glDisable(GL_BLEND);
+      p_glEnable(GL_POLYGON_OFFSET_FILL); p_glPolygonOffset(1.5f, 2.0f);
+      float tSh = envFreeze >= 0.0f ? envFreeze : (float)tNow;
+      p_glUseProgram(progTMesh);
+      p_glUniformMatrix4fv(locTMVP, 1, GL_FALSE, lightMVP);
+      p_glUniform3f(locTCam, eye[0], eye[1], eye[2]);
+      p_glUniform1f(locTTime, tSh);
+      p_glUniform1f(locTMask, 0.0f);
+      applyShadow(&slTree, 0);
+      p_glBindVertexArray(vaoTree);
+      p_glDrawArrays(GL_TRIANGLES, 0, nTreeVerts);
+      if(nCrownVerts > 0){
+        p_glUseProgram(progCrown);
+        p_glUniformMatrix4fv(locCMVP, 1, GL_FALSE, lightMVP);
+        p_glUniform3f(locCCam, eye[0], eye[1], eye[2]);
+        p_glUniform3f(locCTgt, ctr[0], ctr[1], ctr[2]);
+        p_glActiveTexture(GL_TEXTURE0); p_glBindTexture(GL_TEXTURE_2D, folTex);
+        p_glUniform1i(locCFol, 0);
+        p_glUniform1f(locCTime, tSh);
+        p_glUniform1f(locCMask, 0.0f);
+        applyShadow(&slCrown, 0);
+        p_glBindVertexArray(vaoCrown);
+        p_glDrawArrays(GL_TRIANGLES, 0, nCrownVerts);
+      }
+      if(shadowLeafOn && nLeafInst > 0 && !envNoLeaf){
+        p_glUseProgram(progLeaf);
+        p_glUniformMatrix4fv(locLMVP, 1, GL_FALSE, lightMVP);
+        p_glUniform3f(locLCam, eye[0], eye[1], eye[2]);
+        p_glUniform1f(locLTime, tSh);
+        p_glUniform1f(locLMask, 0.0f);
+        applyShadow(&slLeaf, 0);
+        p_glBindVertexArray(vaoLeaf);
+        p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInst);
+      }
+      p_glDisable(GL_POLYGON_OFFSET_FILL);
+      p_glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+      if(envShadowDump){
+        unsigned short *db = (unsigned short *)malloc((size_t)SHADOW_SZ * SHADOW_SZ * 2);
+        p_glBindTexture(GL_TEXTURE_2D, shadowTex);
+        p_glGetTexImage(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, db);
+        FILE *fp = fopen("/tmp/64kdemo_shadow.ppm", "wb");
+        fprintf(fp, "P5\n%d %d\n65535\n", SHADOW_SZ, SHADOW_SZ);
+        for(int i = SHADOW_SZ*SHADOW_SZ - 1; i >= 0; i--){
+          unsigned char v[2] = { (unsigned char)(db[i]>>8), (unsigned char)(db[i]&255) };
+          fwrite(v, 1, 2, fp);
+        }
+        fclose(fp); free(db);
+        printf("DBG Shadow-Map gedumpt -> /tmp/64kdemo_shadow.ppm (err=0x%x)\n", p_glGetError());
+      }
+      // Zurueck zum Szenen-FBO — NICHT zu Framebuffer 0: das Demo rendert in
+      // fbo/fboMS und blittet danach. Wer hier 0 bindet, zeichnet die Szene ins
+      // Nirwana und sieht ein schwarzes Bild.
+      p_glBindFramebuffer(GL_FRAMEBUFFER, useMSAA ? fboMS : fbo);
+      p_glViewport(0, 0, fboW, fboH);
+      // Depth-Funktion zurueck auf LEQUAL: der Szenen-Pass zwingend braucht, weil
+      // der Himmel gl_FragDepth = 1.0 gegen den geclearten Depth-Wert 1.0
+      // bestehen muss. Mit GL_LESS aus dem Schatten-Wurf faellt jeder Himmel-
+      // Fragment durch -> schwarzer Himmel bei sonst intaktem Bild.
+      p_glDepthFunc(GL_LEQUAL);
+      if(envGlDbg) printf("DBG nach Shadow-Pass: err=0x%x fb=0x%x vp=%d,%d\n",
+                          p_glGetError(), p_glCheckFramebufferStatus(GL_FRAMEBUFFER), fboW, fboH);
+    }
     if (!grassOnly) {
       p_glUseProgram(progScene);
       p_glBindVertexArray(vaoTri);
@@ -1763,6 +1907,9 @@ int main(int argc, char **argv) {
       p_glUniform1f(locGTexAmt, (grassTexOn && capAmt > 0.0f) ? 1.0f : 0.0f);
       p_glUniform1f(locGFar0, grassTexFar0);
       p_glUniform1f(locGFar1, grassTexFar1);
+      applyShadow(&slScene, (shadowThis && shadowSampleOn) ? (shadowForce ? 2 : 1) : 0);
+      if(envGlDbg) printf("DBG vor Szenen-Draw: err=0x%x tex3=%d\n", p_glGetError(),
+                          (int)(slScene.tex >= 0));
       p_glDrawArrays(GL_TRIANGLES, 0, 3);
     }
 
@@ -1777,6 +1924,7 @@ int main(int argc, char **argv) {
       p_glUniform3f(locTCam, camPos[0], camPos[1], camPos[2]);
       p_glUniform1f(locTTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
       p_glUniform1f(locTMask, (float)dbgTreeMask);
+      applyShadow(&slTree, (shadowThis && shadowSampleOn) ? (shadowForce ? 2 : 1) : 0);
       p_glBindVertexArray(vaoTree);
       p_glDrawArrays(GL_TRIANGLES, 0, nTreeVerts);
     }
@@ -1859,6 +2007,7 @@ int main(int argc, char **argv) {
       p_glActiveTexture(GL_TEXTURE0);
       p_glBindTexture(GL_TEXTURE_2D, folTex);
       p_glUniform1i(locCFol, 0);
+      p_glUniform1f(locCMask, (float)envCrownMask);
       p_glUniform1f(locCTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
       p_glBindVertexArray(vaoCrown);
       p_glDrawArrays(GL_TRIANGLES, 0, nCrownVerts);
