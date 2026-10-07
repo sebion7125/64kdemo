@@ -631,13 +631,19 @@ static void ez_norm3(float *x, float *y, float *z){
 static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
                     float seed, int tier, float btone){
   int S = P->sections[lvl], G = P->segments[lvl];
-  // Detailstufen: fern weniger Abschnitte/Segmente und flachere Hierarchie
-  if(tier == 2){ S = (S + 1) / 2; G = (G * 3) / 4; }
-  else if(tier == 0){ S = (lvl == 0) ? 3 : 1; G = 4; }
-  if(S < 1) S = 1;
-  if(S > 12) S = 12;
+  // Detail wie bei EZ-Tree: NUR die Vernetzung aendert sich, nie die Struktur.
+  // sectionStride = jeden N-ten Ring vernetzen (erster/letzter bleibt),
+  // segmentFactor = radiale Segmente. Ganzz Leveln wegzuwerfen (unser altes
+  // tier-System) erzeugt den Sprung in der Aststruktur, den der Nutzer sah.
+  int stride = (tier >= 3) ? 1 : (tier == 2 ? 3 : 6);
+  if(tier == 2) G = (G * 3) / 4;
+  else if(tier == 0) G = (G * 2) / 5;
   if(G < 3) G = 3;
   if(G > 8) G = 8;
+  // Kinderzahl fern reduziert: deren Presets (bis 82 Aeste) sind fuer wenige
+  // Baeume gerechnet, unser Wald hat 646. Das duennt die Struktur aus, statt sie
+  // gegen eine andere Repraesentation zu tauschen.
+  int kidPct = (tier >= 3) ? 100 : (tier == 2 ? 85 : 60);
 
   // Kronenlevel-Laengen sind extra skalierbar: ihre Presets sind schlanker als
   // unsere Kronen proportioniert (Breite/Hoehe ~0,4 statt ~0,85).
@@ -645,6 +651,8 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
   float sl = len / (float)S;
   Sec sec[13];
   sec[0] = *base;
+  int keep[13]; int nkeep = 0;          // vernetzte Ringe (sectionStride)
+  keep[nkeep++] = 0;
 
   for(int i = 1; i <= S; i++){
     sec[i] = sec[i-1];
@@ -674,6 +682,7 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
       }
     }
     ez_norm3(&dx, &dy, &dz);
+    if(i % stride == 0 || i == S) keep[nkeep++] = i;
     sec[i].d[0] = dx; sec[i].d[1] = dy; sec[i].d[2] = dz;
     sec[i].rg.p[0] = sec[i-1].rg.p[0] + dx * sl;
     sec[i].rg.p[1] = sec[i-1].rg.p[1] + dy * sl;
@@ -696,11 +705,23 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
   }
 
   // ---- Kinder: geschichtet entlang der Achse, Radial-Slots vertauscht ----
-  int maxKid = (tier >= 3) ? P->levels : (tier == 2 ? P->levels - 1 : 0);
+  // Ansatzpunkte fuellen IMMER auf den vernetzten Ringen liegen: die sichtbare
+  // Roehre ist die Sehne zwischen keep-Ringen, der Abschnittspfad dazwischen ist
+  // durch Gnarliness gebogen. Wuerden Kinder/Laub auf den gebogenen Pfad gesetzt,
+  // wuerden Zweige in der Luft haengen (gemeldet in Runde 24).
+  #define EZSEG(tt) do{ \
+    float _ts = (tt) * (float)S; int _k = 0; \
+    while(_k < nkeep - 2 && (float)keep[_k+1] < _ts) _k++; \
+    si = keep[_k]; si2 = keep[_k+1]; \
+    al = (float)si2 > (float)si ? (_ts - (float)si) / ((float)si2 - (float)si) : 0.0f; \
+    if(al < 0.0f) al = 0.0f; \
+    if(al > 1.0f) al = 1.0f; \
+  }while(0)
+
+  int maxKid = P->levels;               // Struktur in ALLEN Stufen gleich
   Sec kids[96]; int nkid = 0;
   if(lvl < maxKid){
-    int cnt = P->children[lvl];
-    if(tier == 2) cnt = (cnt * 3) / 4;
+    int cnt = (P->children[lvl] * kidPct) / 100;
     if(cnt < 1) cnt = 1;
     if(cnt > 96) cnt = 96;
     float startMin = P->start[lvl + 1];
@@ -717,21 +738,20 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
     for(int i = 0; i < cnt; i++){
       float t = startMin + (i + TH(320 + i)) * stp;
       if(t > 1.0f) t = 1.0f;
-      float fs = t * (float)S; int si = (int)fs; if(si > S - 1) si = S - 1;
-      float al = fs - (float)si;
+      int si, si2; float al; EZSEG(t);
       Sec cb;
       for(int k = 0; k < 3; k++)
-        cb.rg.p[k] = sec[si].rg.p[k] + (sec[si+1].rg.p[k] - sec[si].rg.p[k]) * al;
+        cb.rg.p[k] = sec[si].rg.p[k] + (sec[si2].rg.p[k] - sec[si].rg.p[k]) * al;
       // Kinder-Radius IMMER aus dem Elternast abgeleitet
-      float rp = sec[si].rg.r + (sec[si+1].rg.r - sec[si].rg.r) * al;
+      float rp = sec[si].rg.r + (sec[si2].rg.r - sec[si].rg.r) * al;
       cb.rg.r = rp * P->radius[lvl + 1];
       // Elternrahmen bei t (u/v interpolieren, dann orthonormieren)
-      float ux = sec[si].rg.u[0] + (sec[si+1].rg.u[0] - sec[si].rg.u[0]) * al;
-      float uy = sec[si].rg.u[1] + (sec[si+1].rg.u[1] - sec[si].rg.u[1]) * al;
-      float uz = sec[si].rg.u[2] + (sec[si+1].rg.u[2] - sec[si].rg.u[2]) * al;
-      float px = sec[si].d[0] + (sec[si+1].d[0] - sec[si].d[0]) * al;
-      float py = sec[si].d[1] + (sec[si+1].d[1] - sec[si].d[1]) * al;
-      float pz = sec[si].d[2] + (sec[si+1].d[2] - sec[si].d[2]) * al;
+      float ux = sec[si].rg.u[0] + (sec[si2].rg.u[0] - sec[si].rg.u[0]) * al;
+      float uy = sec[si].rg.u[1] + (sec[si2].rg.u[1] - sec[si].rg.u[1]) * al;
+      float uz = sec[si].rg.u[2] + (sec[si2].rg.u[2] - sec[si].rg.u[2]) * al;
+      float px = sec[si].d[0] + (sec[si2].d[0] - sec[si].d[0]) * al;
+      float py = sec[si].d[1] + (sec[si2].d[1] - sec[si].d[1]) * al;
+      float pz = sec[si].d[2] + (sec[si2].d[2] - sec[si].d[2]) * al;
       ez_norm3(&px, &py, &pz);
       float dd = ux * px + uy * py + uz * pz;
       ux -= px * dd; uy -= py * dd; uz -= pz * dd;
@@ -748,25 +768,30 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
     }
   }
 
-  if(lvl == 0){                       // Messbank: Stammradien pro Abschnitt
-    ezDbgNSec = S;
-    for(int i = 0; i <= S && i < 13; i++) ezDbgR[i] = sec[i].rg.r;
-  }
-  // ---- Roehren senden ----
+  // ---- Roehren senden: nur an den gehaltenen Ringen (sectionStride) ----
   float tone = btone * (0.86f + 0.05f * (float)lvl);
   float cr = (0.30f - 0.03f * (float)lvl) * tone;
   float cg = (0.24f + 0.03f * (float)lvl) * tone;
   float cb2 = (0.15f - 0.02f * (float)lvl) * tone;
   float sw = 0.20f + 0.30f * (float)lvl;
-  for(int i = 1; i <= S; i++)
-    emit_tube(&sec[i-1].rg, &sec[i].rg, G, sw, sw, cr, cg, cb2, 0.9f, (float)i * sl);
+  {
+    int prev = 0;
+    for(;;){
+      int cur = prev + stride; if(cur > S) cur = S;
+      emit_tube(&sec[prev].rg, &sec[cur].rg, G, sw, sw, cr, cg, cb2, 0.9f,
+                (float)cur * sl);
+      prev = cur;
+      if(cur == S) break;
+    }
+  }
 
   if(lvl >= maxKid){
     // Terminalast: Laub geschichtet entlang des Astes (deren Laub-Schema).
     // Laubpositionen werden in ALLEN Stufen gesammelt — die Atlas-Karten sind
     // bei fern die einzige Laubdarstellung. Nur die Einzelblaetter entfallen.
     int lc = (int)P->leafCount;
-    if(tier == 0) lc = lc / 2;
+    int leafStride = (tier >= 3) ? 1 : 2;          // deren leafStride
+    float leafScale = (tier >= 3) ? 1.0f : (tier == 2 ? 1.25f : 1.3f);
     if(ezNTip < EZ_TIPCAP){              // Spitze fuer die Distanz-Quads merken
       ezTipx[ezNTip] = sec[S].rg.p[0];
       ezTipy[ezNTip] = sec[S].rg.p[1];
@@ -780,17 +805,16 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
       float st = (1.0f - P->leafStart) / (float)lc;
       float t = P->leafStart + (i + TH(400 + i)) * st;
       if(t > 1.0f) t = 1.0f;
-      float fs = t * (float)S; int si = (int)fs; if(si > S - 1) si = S - 1;
-      float al = fs - (float)si;
-      float cx = sec[si].rg.p[0] + (sec[si+1].rg.p[0] - sec[si].rg.p[0]) * al;
-      float cy = sec[si].rg.p[1] + (sec[si+1].rg.p[1] - sec[si].rg.p[1]) * al;
-      float cz = sec[si].rg.p[2] + (sec[si+1].rg.p[2] - sec[si].rg.p[2]) * al;
+      int si, si2; float al; EZSEG(t);
+      float cx = sec[si].rg.p[0] + (sec[si2].rg.p[0] - sec[si].rg.p[0]) * al;
+      float cy = sec[si].rg.p[1] + (sec[si2].rg.p[1] - sec[si].rg.p[1]) * al;
+      float cz = sec[si].rg.p[2] + (sec[si2].rg.p[2] - sec[si].rg.p[2]) * al;
       if(ezNSprig < EZ_SPRIGCAP){       // Karte fuer den Atlas-Quad
         ezSx[ezNSprig] = cx; ezSy[ezNSprig] = cy; ezSz[ezNSprig] = cz;
-        ezSsize[ezNSprig] = lsz * (1.6f + 0.9f * TH(430 + i));
+        ezSsize[ezNSprig] = lsz * (1.6f + 0.9f * TH(430 + i)) * leafScale;
         ezNSprig++;
       }
-      if(tier >= 3){                    // Nahstufe: Einzelblaetter zusaetzlich
+      if(tier >= 3 && (i % leafStride) == 0){   // Nahstufe: Einzelblaetter
         float rr = lsz * (0.30f + 0.25f * TH(430 + i));
         leaf_cluster(cx, cy, cz, rr, 5, lsz * 0.45f, 0.85f, 0.55f,
                      seed + (float)i * 7.3f, 500 + i * 3, lcr, lcgg, lcb);
@@ -799,6 +823,10 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
     return;
   }
 
+  if(lvl == 0){                       // Messbank: Stammradien pro Abschnitt
+    ezDbgNSec = S;
+    for(int i = 0; i <= S && i < 13; i++) ezDbgR[i] = sec[i].rg.r;
+  }
   for(int i = 0; i < nkid; i++)
     ez_grow(lvl + 1, &kids[i], P, unit,
             seed + (float)lvl * 17.0f + (float)i * 3.13f, tier, btone);
