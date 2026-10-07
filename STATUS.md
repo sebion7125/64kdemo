@@ -54,7 +54,35 @@ Screenshot unsichtbar (siehe oben).
 | 22 | **Buschel-Textur pro Blattfarbe** fürs mittlere LOD (statt Atlas-Fremdoptik) (Nutzer, Runde 23) | ⬜ |
 | 23 | **Ganzer Baum als Billboard im gröbsten LOD** — sonst ferne Äste ohne Blätter (Nutzer, Runde 23) | ⬜ |
 | 24 | **LOD-Überblendung krisselig** → sauberer Alpha-Blend (Nutzer, Runde 23) | ⬜ |
-| 25 | **Schatten: ganzer Baum statt Stumpf**, bessere Auflösung (Nutzer, Runde 23) | ⬜ |
+| 25 | **Schatten: ganzer Baum statt Stumpf**, bessere Auflösung (Nutzer, Runde 23) | ⬜ — Ist-Zustand und Wurzel-Analyse siehe „Schatten: Ist-Zustand“ unten |
+| 26 | **Eigener Schilf-Pass** (Entwurf steht fest, siehe „Plan: eigener Schilf-Pass“ unten) | ⬜ — Nutzer hat die Umsetzung freigegeben, aber **nach** den Bäumen |
+
+## Plan: eigener Schilf-Pass (Runde 23e, vom Nutzer als Ziel festgelegt)
+
+**Warum nötig:** eine Schilf-Instanz ist ein einziges Quad (5 Vertices TRIANGLE_STRIP).
+Damit sind „Halm“ und „Blatt“ dasselbe Primitiv. Vier Anläufe (Runde 23b–23d) sind genau
+daran gescheitert: Halm dicker + zylindrisch = fettes Grasblatt; Blatt am Halm hochlaufen
+lassen = Grasblatt mit Knick. Eine Pflanze aus Halm **mit mehreren sitzenden Blättern** ist
+mit einem Quad nicht darstellbar. Rückgängig gemacht in `466bfa4` (Stand von „deutlich besser“).
+
+**Ziel-Architektur:**
+1. **Eigener Instance-Buffer** (nicht der Gras-Buffer): pro Pflanze `pos(3), hoehe, yaw, phase, variante` —
+   damit ist auch die Dichte unabhängig vom Gras-Grid und es gibt kein Gras-LOD.
+2. **Eigene Geometrie pro Pflanze**, prozedural im Vertex-Shader aus einer Streifen-Vorlage:
+   1 Culm-Streifen (zylindrisch, oben Kolben) + 4 Blatt-Streifen an den Knoten-Etagen,
+   in **einem** `glDrawArraysInstanced` (Streifen über entartete Ecken verbunden, ~5×5 Vertices).
+3. **Platzierung weiterhin über das Shader-Feld** `reedW(x,z,y) * uReedDens`, sonst stimmt die
+   Pflanzung nicht mit der Boden-Tönung in `fragment.glsl` überein. Der CPU-Teil liefert nur das
+   Gelände-Höhen-Filtern (0,13–0,75 m) auf einem Grid (~0,5 m) im Umkreis um die Kamera.
+4. **Kein `sizeScale`** (Gras hochskaliert in der Ferne, `1 + 1,8·(1-sizeLod)`) — Schilf behält
+   echte Größe, eigener Cull-Abstand, ab dem die Boden-Tönung übernimmt.
+5. **Schattenwurf** direkt mit: Culm + Blätter in den Shadow-Pass (löst TODO 25 für Schilf gleich mit).
+6. Später: eigene Menü-Einträge für Höhe/Dichte (Hooks existieren schon: `DEMO_REEDH`, `DEMO_REED`).
+
+**Betroffene Dateien:** neu `src/reed_cpu.c`, `src/shaders/reed.vert`, `src/shaders/reed.frag`;
+`src/main.c` (VAO/VBO, Draw, Region-Neubau, Shadow-Pass), `src/scene.h` (Caps),
+`src/shaders/grass.vert` (Schilf-Zweig dort entfernen), `Makefile`.
+
 
 ### 2. Nebel/Sichtweite — „alles ein bisschen milchig"
 - `fog = 1 - exp(-t²·0.000015)` in `fragment.glsl` (3 Stellen: Zeilen ~229, 240,
@@ -167,6 +195,41 @@ Screenshot unsichtbar (siehe oben).
 - Budget zurück unter 64 KB (zweitrangig).
 - Optional: vorbestehende Hash-Kollision (Zelle 83,9, b=11 vs b=12) fixen —
   2 Halme von ~850k, im Original schon vorhanden.
+
+## Schatten: Ist-Zustand (Runde 23e, gemessen — Antwort auf Nutzer-Frage)
+
+**Werfen** (in die Map gezeichnet, `src/main.c` Zeile ~1857): Baum-Mesh (Stamm + Äste,
+`progTMesh`, Welt-Mesh pro Region), Kronen-Quads (`progCrown`, im Wurf-Pass senkrecht zur
+Sonne via `uLightFace=1`), Einzelblätter (`progLeaf`, `DEMO_SHADOWLEAF=1` ist Standard).
+**Gras und Gelände werfen nichts** — im Wurf-Pass gibt es keinen Grass-/Terrain-Draw.
+
+**Empfangen** (samplen `shadowAt`): alle fünf Shader — `fragment.glsl` (Boden), `tree.frag`,
+`grass.frag`, `crown.frag`, `leaf.frag`. **Gras empfängt also Schatten**, wirft aber keinen.
+
+**Map-Parameter:** 2048², ±45 m um die Kamera → 13,7 cm/Texel, Bias 6,6 cm, 5×5-PCF.
+
+**Messung** (Kamera 31,9 | 0,78 | 28,0; Baum bei 31,91 | 34,17, 6,2 m voraus, 3,69 m hoch;
+Shadow-Map per `DEMO_SHADOWDUMP` exportiert und Weltkoordinaten rekonstruiert):
+
+| Befund | Zahl |
+|---|---|
+| Map gefüllt | 18,3 % |
+| Beitrag der **Blätter** zur Map | **0,68 %** der Texel (28 509 von 4,2 M) |
+| Map am Lichtraum-Platz **dieses Baums**, Fenster 5,6 m | **0 % gefüllt — der Baum wirft nicht** |
+| Werfer-Entfernung zur Kamera | 0–10 m: 13 867 Texel · 20–30 m: 162 835 · 50–60 m: 106 164 |
+| Bodenraster 41×41 m um den Baum beschattet | **9 von 1681** Punkten |
+
+**Schluss:** der Baum direkt vor der Kamera erscheint gar nicht in der Map, während Bäume in
+10–60 m Werfer sind. Die sichtbaren Schatten gehören also zu **anderen** Bäumen — das erklärt
+beide Nutzer-Beobachtungen exakt: „nur simple Stumpf-Schatten“ **und** „Schattenwurf passt nicht
+zum Sonnenstand“. Die Sonnenrichtung selbst ist konsistent: `SUN = normalize(0.55,0.38,-0.62)`
+in allen fünf Shadern, der Wurf-Pass nutzt denselben Vektor (verifiziert per Code-Abgleich).
+
+**Noch nicht belegt:** warum der nahe Baum fehlt. Ausgeschlossen: Baum-Mesh enthält ihn
+(Sortierung nah→fern, `TREE_VERT_CAP 700000` bei 590 658 Vertex — Cap nicht erreicht),
+`tree.vert` cullt nicht nach Distanz, `crown.vert`-Cull ist im Wurf-Pass deaktiviert,
+Blatt-Cull läuft über `uLodCam`. Nächster Test: `DEMO_SHADOWVIS`-Modi an einem Punkt direkt am
+Baum und Map-Dump mit/ohne Baum-Mesh-Draw.
 
 ## ⚡ SOFORT NÄCHSTER SCHRITT (nächster Chat)
 
