@@ -1,65 +1,151 @@
 # 64kDemo — Status
 
-Stand: 2026-10-07, Runde 11. **Issue A GELÖST** (Alpha-to-Coverage, vom Nutzer
-auf dem Host bestätigt). Danach Dichte-/Entfernungsverhalten umgebaut und die
-**ferne Gras-Textur** gebaut (Engine fängt ein echtes Grasstück schräg ein).
-**BUG OFFEN: diese Textur wird im Bild SCHWARZ — Fehler noch nicht gefunden.**
-Kennzahlen jetzt: 551.268 Halme bei grassMaxDist=110 (0,65× von früher),
-POS-Build 1 m 186 ms, Initial-Build 920 ms, Binary 80.536 Byte.
+Stand: 2026-10-07, Runde 12. **Issue A GELÖST** (Alpha-to-Coverage, vom Nutzer
+bestätigt). **BUG schwarze Ferntextur GELÖST** (fehlende Mipmaps, Ursache
+nachgemessen). Kennzahlen: 551.268 Halme bei grassMaxDist=110, POS-Build 1 m
+186 ms, Initial-Build 920 ms, Binary 80.536 Byte.
 **Fade-Dauer Standard 1 s. Issue A/B/C und R-Reset erledigt.**
-Aussehen (Dichte/Halmbreite/Farben), Baum-Schatten und Budget sind offen;
-Budget ist laut Nutzer zweitrangig.
+Jetzt: Pflanzen-Vielfalt, Baum-Optik (Rinde/Blattwerk/Nähte), Schatten,
+Himmel/Tageszeiten, Nebel weniger milchig. Budget ist laut Nutzer zweitrangig.
+
+## TODO-Liste (Nutzer-Aufträge 2026-10-07, der Reihe nach abarbeiten)
+
+**Reihenfolge und Status** (⬜ offen, 🔄 läuft, ✅ fertig, ⛔ blockiert):
+
+| # | Aufgabe | Status |
+|---|---|---|
+| 1 | Ferne Gras-Textur wird schwarz | ✅ Runde 12 |
+| 2 | Nebel weniger milchig, Sichtweite größer | ⬜ |
+| 3 | Pflanzen-Vielfalt (Höhen, Sorten, Blumen, Schilf, Regionen) | ⬜ |
+| 4 | Baum-Stämme: offene Nähte zu | ⬜ |
+| 5 | Baum-Stämme: prozedurale Rinden-Textur | ⬜ |
+| 6 | Echtes Blattwerk nah + Krone fern als Textur auf Quads | ⬜ |
+| 7 | Blätter im Wind | ⬜ |
+| 8 | Schattenwurf | ⬜ |
+| 9 | Himmel schöner, Wolken, Tageszeiten | ⬜ |
+
+### 2. Nebel/Sichtweite — „alles ein bisschen milchig"
+- `fog = 1 - exp(-t²·0.000015)` in `fragment.glsl` (3 Stellen: Zeilen ~229, 240,
+  264) und identisch in `tree.frag`, `grass.frag`, `crown.frag`, `leaf.frag`.
+  Mischungs-Ziel ist `skyColor(rd)` — **auch** der helle Horizont → alles wirkt
+  milchig-weiß. Gegenmaßnahmen: Koeffizient runter, Nebel-Farbe unabhängig vom
+  Horizont machen (eigene Haze-Farbe), und `exp(-t·k)` statt `exp(-t²·k)`-Nähe
+  prüfen, damit Nebel **erst ab großer Entfernung** kommt.
+- `grassMaxDist` (Standard 110, Slider 40..150) und `CAM_FAR = 300` hochsetzen;
+  Dichteprofil `DENS_R1`/`DENS_EDGEW` mitmessen (Runde 11: Randband muss mit dem
+  LOD-Band in `grass.vert` identisch bleiben, sonst kommt die harte Graskante
+  bei lod≈1 zurück). Baum-Cull-Entfernung und `vFade` in `crown.vert`
+  (120..160 m) mitziehen.
+
+### 3. Pflanzen-Vielfalt, botanisch sinnvoll und regional verschieden
+- **Regionen:** ein weltfester Regions-Hash (z. B. `c_hash12(ix*0.011, iz*0.007)`
+  auf ~150-m-Blöcken) wählt pro Region: Gras-Art(en), Grundhöhe, Farbton,
+  Blumen-Anteil, Schilf-Anteil. Alles deterministisch aus (Zelle, b) — sonst
+  sterben/geboren Halme bei jedem Build neu (Issue A!).
+- **Unterschiedliche Grashöhen:** `hoehe` ist pro Halm im Puffer (grass_cpu.c)
+  → Regionsfaktor + Höhen-Band pro Art. Wasser-/Hangabhaengig (Steilhang- und Wasser-Cull existieren schon).
+- **Gras-Arten:** unterscheiden sich in Höhe, Halmbreite, Blattform (Anzahl der
+  Dreiecke/Keile in `grassBase`), Biegeprofil (Lean) und Blüte. Umsetzung: eine
+  „Art"-ID pro Halm (im Puffer, CPU-seitig) → Vertex-Shader wählt Profil.
+- **Blumen:** Lavendel (hoher Stängel + Blütenstand, violett, eher trocken/
+  sonnig), Gänseblümchen (niedrig, weiß/gelb, überall), plus existierende
+  Gelb/Weiß-Punkte im Terrain (`terrainColor` in `fragment.glsl`, Zeile ~155).
+  Als eigene Instanz-Klasse oder als Variante im Gras-Shader (Blüten-Quad an der
+  Spitze). **Terrain-Punkte müssen mit den echten Blumen korrespondieren**,
+  sonst sieht man Blumen doppelt/versetzt.
+- **Schilf in Wassernähe:** Halme am Ufer (h ≈ WATER_Y..WATER_Y+0.6) hoch
+  (1,5–2,5 m), breit, gelblich-grün, mit braunem Kolben. Selektion über
+  `c_terrainH`-Abstand zum Wasser in `build_cell` (grass_cpu.c).
+- Referenz für Wind-Animation der Halme/Blätter: GPU Gems 3, Kap. 16
+  „Vegetation Procedural Animation and Shading in Crysis" (Main Bending =
+  ganze Pflanze, Detail Bending = Blätter; Windvektor pro Instanz).
+
+### 4. Offene Nähte in den Baumröhren
+- **Ursache (geprüft):** `emit_tube()` in `src/trees_cpu.c:36` baut die
+  orthogonale Basis pro Segment neu aus der Achse (`if(fabsf(ay)<0.9f) ... else
+  ...`). Zwei aneinandergrenzende Segmente haben verschiedene Achsen → die
+  Ringe am gemeinsamen Knoten haben **unterschiedliche Winkel** → Lücke/
+  Überlappung = sichtbare Naht.
+- **Fix:** Frame **parallel transportieren** entlang der Ast-Kette: Startbasis
+  wie jetzt, dann für jedes folgende Segment `u` durch Rotation von der alten
+  Achse zur neuen mitnehmen (Rotation um `cross(a0,a1)`). Ringe am Knoten sind
+  dann identisch. `sides` ist für alle Segmente eines Astes gleich (6/8), also
+  reicht das Mitnehmen von (u,v) pro Knoten.
+
+### 5. Stamm-Texturen (prozedural)
+- Ist ansatzweise da: `tree.frag` nutzt `atan(vPos.x, vPos.z)` + 2×`vnoise` für
+  vertikale Riefen. Schwächen: `atan`-Sprung bei ±π (harte Naht), keine
+  Rinden-Struktur in der Fläche, keine Ast-/Stamm-Unterscheidung, keine
+  Moos-/Flecken-Variation pro Baum.
+- Plan: Zylinder-UV sauber aufbauen (Winkel aus der **lokalen** Astachse, pro
+  Segment stetig), fbm-gestreckt in Y (Riefen), Riss-Maske
+  (`1-smoothstep` auf fbm), Alters-/Moos-Tonung über `vCol`-Seed, und für Äste
+  andere Frequenz. Alles prozedural im Shader, keine Textur-Bytes.
+
+### 6. Blattwerk
+- **Nah:** echte Blätter statt prozeduraler Punkttextur — eigene Instanz-Klasse
+  „Leaf": gekrümmtes Quad (2–3 Segmente), Blattform per Alpha-Test aus
+  prozeduraler Masur (Mittelrippe + Blattrand), normalorientiert am Ast
+  (Position/Rotung kommt von `trees_cpu.c`). Budget: Blätter nur im Nahbereich
+  (< ~25 m) erzeugen, pro Baum begrenzt.
+- **Fern:** Krone in eine Textur rendern und auf die bestehenden Crown-Quads
+  verteilen. Vorgehen wie bei der Gras-Ferntextur (Runde 11): eigenes FBO,
+  Nah-Blattwerk aus mehreren Blickrichtungen einfangen, pro Baum-Region
+  cachen. **Auf die Mipmap-Falle aus Runde 12 achten.**
+- Referenzen: GPU Gems 3 Kap. 16 (Crysis: Leaf-Cards + Distant Sprite
+  Generation), Crytek/„vegetation LOD".
+
+### 7. Blätter im Wind
+- Im Vertex-Shader der Blätter: Main Bending (Ast-Biegung, existiert schon als
+  `sway0/sway1` in `trees_cpu.c` d[9]) + Detail Bending (pro Blatt-Phase
+  fluttern, Amplitude ∝ Abstand zur Blattbasis). Windvektor global aus `uTime`
+  + `vnoise`, Böen wie in `grass.frag` (wanderndes Koordinatensystem).
+
+### 8. Schattenwurf
+- Ziel: Baum-Schatten auf Terrain **und** Gras, Gras-Schatten angedeutet.
+- Weg für diese Hybrid-Pipeline: **ein Richtungsschatten (Sonne) als Depth-Map**
+  (Richtungs-Ortho von der Sonne, Bäume + Gras als Depth), dann im Raymarch
+  (`fragment.glsl`) am Treepunkt samplen und in `tree/grass/crown/leaf.frag`
+  ebenfalls (World→Shadow-UV). PCF 3×3 oder 4×4 gegen Kantenflimmern.
+- Billig-Variante als Zwischenschritt: Baum-Schatten analytisch als
+  „Zylinder-Nähe"-Test im Terrain-SDF (nur Stämme + Hauptäste, grobe Radien).
+- Nach dem Schatten: `uFarFade`/LOD-Bänder neu abstimmen (Schatten machen die
+  Gras-Kante sichtbarer).
+
+### 9. Himmel, Wolken, Tageszeiten
+- `skyColor(rd)` ist in 5 Shadern dupliziert (fragment/tree/grass/crown/leaf) —
+  vor Tageszeiten **erst zentralisieren** (gemeinsamer GLSL-String, z. B. über
+  `tools/gen_shaders.sh`-Concat), sonst fünf Orte zum Pflegen.
+- Sonne `const vec3 SUN = normalize(vec3(0.55,0.38,-0.62))` → Uniform
+  `uSunDir` + `uSunColor`, aus einer Tageszeit-Uniform abgeleitet (Höhe/Azimut).
+  Himmelsmodell: Rayleigh/Mie-Ansatz (Preetham/Hosek sind die Referenzen; für
+  64k eher handgetunter Farbverlauf + Sonnen-Scheibe + Dämmerungs-Rotanteil).
+- Wolken: existieren als 2D-fbm im Sky-Shader. Besser: eigene Wolken-Schicht im
+  Raymarch (Höhenschicht, fbm-Dichte, Selbstverschattung, Sonnen-Glow) —
+  kostet Laufzeit, keine Bytes.
+- Tageszeit beeinflusst: `SUN` in allen Shadern, Nebelfarbe, Terrain- und
+  Gras-Beleuchtung, Wasser-Reflexion.
+
+### 10. Dauerhaft offen
+- **Fix nach `main` bringen** (Branch `dbg-gras-fade`, jetzt 13 Commits vor
+  `main` = `666de2c`). Nur die Sachteile: Fade-Gruppen + Intervall-Markierung,
+  A2C-ohne-Blending, neues Dichteprofil, Winkeldünnung, Ferntextur + Mipmap-Fix.
+  Debug-Schalter C/J/K/L/Y/I/U/Z, Farbmodus und Debug-Dumps bleiben draußen.
+- **Wahrnehmung:** 1 s Fade ist laut Nutzer gut.
+- Budget zurück unter 64 KB (zweitrangig).
+- Optional: vorbestehende Hash-Kollision (Zelle 83,9, b=11 vs b=12) fixen —
+  2 Halme von ~850k, im Original schon vorhanden.
 
 ## ⚡ SOFORT NÄCHSTER SCHRITT (nächster Chat)
 
-**BUG: die ferne Gras-Textur erscheint schwarz.** Der Einfang selbst ist geprüft
-und in Ordnung: FBO komplett, **48 % Bildabdeckung**, 12.704 Farbwerte,
-Streifenstruktur — nachzusehen in `/tmp/64kdemo_grasstex.ppm` (Taste P).
-Der Fehler steckt im **Sampling oder Mapping** in `fragment.glsl`.
+**Punkt 2 der TODO-Liste: Nebel/Sichtweite.** Dann 3, 4, 5 … (Tabelle oben).
 
-**Diagnose-Reihenfolge — jede Stufe ist eine Zeile Code und trennt was:**
-1. **Shader-Quelle prüfen:** `grep uGrassTex src/shaders_gen.c` — der generierte
-   Shader enthält die neuen Uniforms nur, wenn make die .glsl neu übersetzt hat.
-2. **Uniform-Orte ausgeben:** `printf("%d %d %d %d\n", locGTex, locGBox,
-   locGTexAmt, locGFar0)` — `-1` heißt Name vertippt oder vom Compiler entfernt.
-3. **Textur direkt ausgeben:** in `terrainColor` temporär
-   `return vec4(texture(uGrassTex, uv).rgb, 1.0);` (uv wie unten).
-   Schwarz = Sampling kaputt, Grasfarbe = Mapping/Blend kaputt.
-4. **Mips ausschließen:** `textureLod(uGrassTex, uv, 0.0)` — wenn das farbig
-   ist, sind die generierten Mipmaps kaputt.
-5. **UV ausschließen:** temporär `vec2 uv = vec2(0.5);` — feste Farbe =
-   Mapping falsch, Inhalt richtig.
-6. **Gewicht ausschließen:** temporär `grassTexW = 1.0;` — prüft, ob
-   `smoothstep(uGrassFar0, uGrassFar1, d) * uGrassTexAmt` überhaupt > 0 wird.
-
-**Verdächtige Stellen, in dieser Reihenfolge:**
-- **UV-Mapping** in `fragment.glsl`:
-  `vec2 uv = vec2(uGrassBox.x - p.z, p.x - uGrassBox.y) / uGrassSide;`
-  mit `capBox[0] = pz + CAP_M/2` (Welt-Z an u=0, weil Bild-x = **−Z**) und
-  `capBox[1] = x0`. Die Achsen sind gegenüber dem ersten Versuch getauscht und
-  eine ist negiert — sehr wahrscheinlich sitzt der Fehler genau hier.
-- **Textureinheit:** `p_glActiveTexture(GL_TEXTURE0)` + Bind nur im Szene-Pass.
-  Prüfen, ob spätere Pässe (HUD, Crown, Gras) Einheit 0 überschreiben.
-- **FBO-/ReadBuffer-Zustand:** `save_grass_tex_ppm()` und die Einrichtung
-  binden FBO 0 und lassen `p_glReadBuffer(GL_COLOR_ATTACHMENT0)` als Zustand stehen.
-
-**Danach, Punkt 2:** Übergabeband (25..45 m) und Blickwinkel-Dünnung (U)
-schneiden sich gerade gegenseitig — wenn die Halme bei 45 m ausdünnen, muss die
-Textur längst voll da sein. Erst den Bug fixen, dann das Band gemeinsam abstimmen.
+**Nach dem Ferntextur-Fix noch abzustimmen:** Übergabeband (25..45 m) und
+Blickwinkel-Dünnung (U) schneiden sich — wenn die Halme bei 45 m ausdünnen, muss
+die Textur längst voll da sein. Zusammen mit der Nebel-Änderung probieren.
 
 **Weitere offene Punkte:**
-1. **Fix nach `main` bringen** (Branch `dbg-gras-fade`, jetzt 12 Commits vor
-   `main` = `666de2c`). Nur die Sachteile: Fade-Gruppen + Intervall-Markierung,
-   A2C-ohne-Blending, neues Dichteprofil, Winkeldünnung, Ferntextur.
-   Debug-Schalter C/J/K/L/Y/I/U/Z, Farbmodus und Debug-Dumps bleiben draußen.
-2. **Wahrnehmung:** sind 1 s Fade lang genug? (Nutzer: ja, 1 s ist gut)
-3. **Aussehen:** noch satteres Grün, Grasarten/Blumen (Lavendel, Gänseblümchen)
-   in verschiedenen Regionen, Schilf in Wassernähe, unterschiedliche
-   Grashöhen nach Bereich. **Noch nicht angefangen.**
-4. **Baum-Schatten.**
-5. **Budget** zurück unter 64 KB (laut Nutzer zweitrangig).
-6. Optional: vorbestehende Hash-Kollision (Zelle 83,9, b=11 vs b=12) fixen —
-   2 Halme von ~850k, im Original schon vorhanden.
+(siehe TODO-Tabelle oben)
 
 ## ISSUES (Nutzer-Beobachtungen 2026-10-05, nach Pop-Fix)
 
@@ -311,7 +397,62 @@ aber separat gegenpruefen (in der VM nicht testbar).
 - `xdotool mousedown` erreicht das Demo-Fenster in der VM nicht -> Maus-UI nicht
   automatisierbar.
 
+## Session 2026-10-07, Runde 12 (BUG schwarze Ferntextur GEFUNDEN + FIX)
+
+### WURZEL: `grassTex` hatte NIE Mipmaps -> mipmap-incomplett -> Sample = schwarz
+`glGenerateMipmap(target)` wirkt auf die **aktuell gebundene Textur**. In
+`grass_capture()` war das die letzte von `ensure_fbo()` gebundene Textur
+(**`texDepth`**), nicht `grassTex`. `grassTex` hat nur Level 0
+(`glTexImage2D(..., 0, ...)`), aber `MIN_FILTER = GL_LINEAR_MIPMAP_LINEAR`
+-> Textur ist **mipmap-incomplett**. Spec GL 4.6 §8.13.1: incomplett -> der
+Sample liefert **(0,0,0,1)**, ohne GL-Fehler. Mesa/llvmpipe ist in diesem Pfad
+nachsichtig (deshalb in der VM nie schwarz), NVIDIA nicht -> auf dem Host schwarz.
+
+### Messkette (jede Stufe trennt was)
+1. `grep uGrassTex src/shaders_gen.c` -> alle 6 Uniforms im generierten Shader.
+2. Uniform-Orte: `tex=4 box=5 side=6 amt=7 far0=8 far1=9` — kein -1.
+3. Textur direkt ausgeben (`return texture(...).rgb`): **nicht schwarz** in der VM
+   (0 schwarze Pixel) -> Mesa toleriert, also kein VM-Repro.
+4. Gewicht `grassTexW = 1` als Rote Ausgabe: rotes Band sichtbar (y=90..120 bei
+   640x360) -> Mapping/Band in Ordnung, UV-Hypothese aus Runde 11 war falsch.
+5. `/tmp/mipinc.c` (eigener GL-Test, 64x64, eine Textur mit / eine ohne Mips):
+   `INCOMPLETT 1:1 = 0 0 0`, `INCOMPLETT minifiziert = 0 0 0`,
+   `COMPLETT = 200 255 60`, **GL-Err 0x0 in allen Fällen**. llvmpipe ist also
+   doch streng -> incomplett ist ein echter Defekt, er war nur nicht der Grund
+   des VM-Bildes.
+6. Beweis im Demo: Mip-Level 1 von `grassTex` an ein FBO hängen ->
+   `status=0x8cd6` (`GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT`). Nach dem Fix:
+   `status=0x8cd5` (`GL_FRAMEBUFFER_COMPLETE`).
+
+### FIX (main.c, `grass_capture`)
+Vor `glGenerateMipmap`: `glBindFramebuffer(GL_FRAMEBUFFER, 0)` +
+`glBindTexture(GL_TEXTURE_2D, grassTex)`. (FBO weg, damit die Textur nicht
+während der Mip-Erzeugung als Farb-Anhänger hängt.)
+
+### FIX 2 (fragment.glsl, `terrainColor`)
+Der `texture()`-Fetch lag in einem `if (grassTexW > 0.002)` — implizite
+Ableitungen (Mip-Wahl) sind in **nicht-uniformem Control-Flow undefiniert**.
+Jetzt ausserhalb jeder Bedingung geholt und per `mix(grass, ta, grassTexW)`
+gemischt (w=0 ist identisch zum alten Weg, der Fetch ist billiger als ein
+defekter Mip). Das ist die zweite host-relevante Fehlerquelle.
+
+### Verifikation
+- Mip-Probe nach dem Fix: `0x8cd5` = COMPLETE (vorher `0x8cd6`).
+- `/tmp/tex1.sh` (1280x720, 6 s vorwärts, Screenshot TEX an / aus / an): läuft
+durch, Einfang 37.194 Halme im 16-m-Feld (145 Halme/m²), Textur-PPM mean
+(72,147,31), 0 schwarze Pixel im Bild.
+- **Visuelle Bestätigung auf dem Host nötig** (NVIDIA war der schwarze Fall).
+
+### Neue Mess-Infrastruktur
+- `/tmp/mipinc.c` — Mipmap-Vollständigkeits-Repro (baut mit
+  `-Ithird_party/include -l:libGL.so.1 -l:libX11.so.6`, läuft ohne Fenster-Show).
+- `/tmp/tex1.sh` —Screenshot-Serie TEX an/aus/an bei 1280x720.
+- `/tmp/an.py` — Bildstatistik (Mittelwerte, schwarze Pixel, Zeilenprofil).
+- **Wichtig:** dieses Modell kann keine Bilder sehen -> visuell nur numerisch
+  (Mittelwerte/Differenzen) plus Augen auf dem Host.
+
 ## Session 2026-10-07, Runde 11 (Dichte-Neubau, Winkeldünnung, ferne Gras-Textur)
+
 
 ### `1884fb0` — neues Dichteprofil
 `dens(r) = (Sockel + Boost) · Ausschnitt`

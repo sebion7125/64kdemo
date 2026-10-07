@@ -691,6 +691,14 @@ static void grass_capture(float cx, float cz){
   p_glBindVertexArray(vaoGrass);
   p_glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 9, (GLuint)nGrass, 0);
   p_glBindVertexArray(0);
+  // Mips erzeugen: zwingend mit grassTex GEBUNDEN und ohne gebundenes FBO.
+  // Der Aufruf wirkt auf die aktuell gebundene Textur - vorher war das die
+  // Depth-Textur aus ensure_fbo(), grassTex bekam NIE Mipmaps und war damit
+  // mipmap-incomplett (MIN_FILTER ist LINEAR_MIPMAP_LINEAR). Spec 8.13.1:
+  // incomplette Textur -> Sample liefert (0,0,0,1), also SCHWARZ. Mesa ist in
+  // dem Pfad nachsichtig, NVIDIA nicht -> auf dem Host war die Ferntextur schwarz.
+  p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  p_glBindTexture(GL_TEXTURE_2D, grassTex);
   p_glGenerateMipmap(GL_TEXTURE_2D);
   capAmt = 1.0f;
   {

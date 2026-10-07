@@ -166,14 +166,14 @@ vec3 terrainColor(vec3 p, vec3 n, float h, vec3 rd){
   // Uebergabe an die eingefangene Textur. Getachelt ueber Welt-XZ; die Maske
   // ist dieselbe, die auch das Gras-LOD steuert (Fels/Sand/Schnee raus).
   float grassTexW = 0.0;
-  if (uGrassTexAmt > 0.002) {
+  {
     float d = length(p - uCamPos);
     grassTexW = smoothstep(uGrassFar0, uGrassFar1, d) * uGrassTexAmt;
-    if (grassTexW > 0.002) {
-      vec2 uv = vec2(uGrassBox.x - p.z, p.x - uGrassBox.y) / uGrassSide;
-      vec3 ta = texture(uGrassTex, fract(uv)).rgb;
-      grass = mix(grass, ta, grassTexW);
-    }
+    // Der Fetch liegt bewusst AUSserhalb jeder Bedingung: implizite Ableitungen
+    // (und damit die Mip-Wahl) sind in nicht-uniformem Control-Flow undefiniert.
+    vec2 uv = vec2(uGrassBox.x - p.z, p.x - uGrassBox.y) / uGrassSide;
+    vec3 ta = texture(uGrassTex, fract(uv)).rgb;
+    grass = mix(grass, ta, grassTexW);
   }
   float rockM = max(smoothstep(0.45, 0.75, slope), smoothstep(9.0, 15.0, p.y));
   vec3 rock = mix(vec3(0.42, 0.38, 0.34), vec3(0.55, 0.52, 0.48), fbm(p.xz * 0.6));
