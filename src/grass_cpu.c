@@ -204,21 +204,29 @@ static float densLutMD = -1.0f;
 #define DENS_R1 27.0f
 #define DENS_RB 2.0f
 #define DENS_EDGEW 12.0f   // = LOD-Band in grass.vert
+#define DENS_P 3.0f        // Sockel-Exponent: 1/r^3. Gemessen: bei gleichem
+                           // Budget (R1 nachloesen) bringt p=2->4 nur 8% weniger
+                           // Halme in der Shimmer-Zone; mit festem R1 sinkt die
+                           // Gesamtzahl von 0.97x (p=2) auf 0.67x (p=3).
 static float dens_at(float dist){
   float md = grassMaxDist;
   if (md != densLutMD) {
     for (int i = 0; i < DENS_LUT_N; i++){
       float r = i * 0.5f;
       float s = r / DENS_R1, b = r / DENS_RB;
-      float sockel = 1.0f / (1.0f + s*s);
+      float sockel = 1.0f / (1.0f + powf(s, DENS_P));
       float boost  = 3.0f / (1.0f + b*b*b*b);
       densLut[i] = (sockel + boost) * (1.0f - c_smoothstep(md - DENS_EDGEW, md, r));
     }
     densLutMD = md;
   }
-  int i = (int)(dist * 2.0f);
-  if (i >= DENS_LUT_N) i = DENS_LUT_N - 1;
-  return densLut[i];
+  // LINEAR interpoliert. Vorher stand hier (int)(dist*2.0f) ohne Interpolation
+  // -> die Dichte war eine Treppe mit 0,5m-Stufen, also konzentrische Ringe.
+  float fi = dist * 2.0f;
+  int i = (int)fi;
+  if (i >= DENS_LUT_N - 1) return densLut[DENS_LUT_N - 1];
+  float t = fi - (float)i;
+  return densLut[i] + (densLut[i + 1] - densLut[i]) * t;
 }
 
 // Sortierte Walk-Ordnung (DEBUG-Vergleich, I-Taste): Zellen von FERN nach NAH

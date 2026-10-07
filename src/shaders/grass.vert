@@ -10,6 +10,8 @@ uniform float uTime;
 uniform float uHeightScale; // Halmhoehe-Skala (Slider)
 uniform float uMaxDist;     // max. Gras-Sichtweite (Slider)
 uniform float uFadeDur;     // Fade-Dauer (musz gleich grassFadeDur sein, L-Taste)
+uniform float uAngS0;       // Blickwinkel-Duennung: sin(theta)-Referenz (0 = aus)
+uniform float uAngQ;        // Exponent der Winkel-Modulation
 // Fade-GRUPPEN: (birth, death) pro Gruppe, death == 0 heisst "lebt". Birth und
 // Death sind Fakten pro Build, nicht pro Halm — der Halm traegt beide Indizes
 // gepackt in EINEM Float: iGrp = birthGrp + deathGrp * NGRP (deathGrp 0 = lebt).
@@ -42,6 +44,22 @@ void main(){
   float yaw = iData2.x, lean = iData2.y;
   float t = aBase.x, ww = aBase.y;
   float d = length(iPos - uCamPos);
+  // Blickwinkel-Duennung. Ein senkrechter Halm wird NICHT foerziert, eine
+  // Wiese schon (Faktor sin theta). Flaechige Bedeckung = n*h*w/sin(theta),
+  // konstante Pixeldichte verlangt also n ~ sin(theta). Gemessen ohne diese
+  // Modulation: Coverage faellt von 9.4 (Blick -2 Grad) auf 4.9 (Blick -89
+  // Grad), Halme/Pixel von 0.31 auf 0.001. Mit (sin/s0)^q, s0=0.35 q=0.7:
+  // Coverage 5.1..5.2 ueber ALLE Blickwinkel, senkrechter Blick unveraendert.
+  // Der Schwellwert ist pro Halm stabil aus seiner Position gehasht: beim
+  // Kameradrehen duennen vorhandene Halme aus, es ploppen keine nach.
+  float angFade = 1.0;
+  if (uAngS0 > 0.0) {
+    float st = (uCamPos.y - iPos.y) / max(d, 1e-3);   // sin(Erhebungswinkel)
+    float P = pow(clamp(st / uAngS0, 0.0, 1.0), uAngQ);
+    float rnd = fract(sin(dot(iPos.xz, vec2(12.9898, 78.233))) * 43758.5453);
+    angFade = clamp((P + 0.15 - rnd) / 0.30, 0.0, 1.0);
+    if (angFade <= 0.0) { gl_Position = vec4(2.0, 0.0, 0.0, 1.0); return; }
+  }
   // Distanz-Skalierung (war CPU-seitig pro Build -> sprang beim Rebuild):
   // kontinuierlich zur AKTUELLEN Kameradistanz. Bewusst NICHT das Dichte-
   // Profil aus grass_cpu.c: das hat jetzt einen engen 4x-Nahfeld-Boost, und
@@ -111,6 +129,6 @@ void main(){
   // 0 = KEIN Override (normale Grasfarbe). Ein Halm ist also nur waehrend des
   // laufenden Fades gefaerbt; ist der Fade durch, ist er normales Gras.
   vCat = (death > 0.0) ? 2.0 : ((age < uFadeDur) ? 1.0 : 0.0);
-  vFade = f;
+  vFade = f * angFade;
   gl_Position = uMVP * vec4(p, 1.0);
 }

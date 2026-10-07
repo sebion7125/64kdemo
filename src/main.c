@@ -393,6 +393,11 @@ static int dbgAlpha2Cov = 1;
 //       echte Hinten-nach-Vorn-Zeichenreihenfolge (statt Diamond-Order um das
 //       Build-Zentrum). Zum Vergleich, ob sich Sortieren aufs AA-Rauschen lohnt.
 static int dbgSortOrder = 0;
+//   U = Blickwinkel-Duennung: Halme in flachem Blickwinkel werden pro Halm
+//       wegduenniert (alpha), senkrechter Blick bleibt voll. Begruendung und
+//       Messwerte in grass.vert.
+static int dbgAngThin = 1;
+static float grassAngS0 = 0.35f, grassAngQ = 0.7f;
 static float gCX = 0, gCZ = 0;   // letztes Gras-Build-Zentrum (auch fuer R-Reset)
 static int grassOnly = 0;     // 1 = TEST: nur Gras zeichnen (V-Taste), kein Terrain/Baeume/Blattdach
 static int hudMode = 2;       // H-Taste: 2 = Vollstats (2 Zeilen), 1 = reduziert (1 Zeile), 0 = aus
@@ -861,6 +866,8 @@ int main(int argc, char **argv) {
   GLint locGFade = p_glGetUniformLocation(progGrass, "uFadeDur");
   GLint locGrp = p_glGetUniformLocation(progGrass, "uFadeGrp");
   GLint locGCat = p_glGetUniformLocation(progGrass, "uDbgCat");
+  GLint locGAngS0 = p_glGetUniformLocation(progGrass, "uAngS0");
+  GLint locGAngQ  = p_glGetUniformLocation(progGrass, "uAngQ");
   GLint locCMVP    = p_glGetUniformLocation(progCrown, "uMVP");
   GLint locCCam    = p_glGetUniformLocation(progCrown, "uCamPos");
   GLint locCTgt    = p_glGetUniformLocation(progCrown, "uCamTgt");
@@ -943,6 +950,9 @@ int main(int argc, char **argv) {
             grassSetDensCut(dbgGrassEdge ? 0.01f : 0.0f);
             printf("DEBUG Dichte-Kante: %s (neuer Build noetig: G aus/ein oder 1m bewegen)\n",
                    dbgGrassEdge ? "AN (CUT 0.01)" : "AUS (CUT 0)"); }
+          if (ks == XK_u) { dbgAngThin = !dbgAngThin;
+            printf("DEBUG Blickwinkel-Duennung: %s (s0=%.2f q=%.2f)\n",
+                   dbgAngThin ? "AN" : "AUS", grassAngS0, grassAngQ); }
           if (ks == XK_i) { dbgSortOrder = !dbgSortOrder;
             grassSetSortOrder(dbgSortOrder);
             printf("DEBUG Zeichenreihenfolge: %s (neuer Build noetig: G aus/ein oder 1m bewegen)\n",
@@ -1337,6 +1347,8 @@ int main(int argc, char **argv) {
     // nur am Swap, der Upload ist 4 KB und damit gegen 37 MB Halmpuffer frei.
     p_glUniform2fv(locGrp, GRASS_NGRP, grassGrp);
     p_glUniform1f(locGCat, dbgGrassCat ? 1.0f : 0.0f);
+    p_glUniform1f(locGAngS0, dbgAngThin ? grassAngS0 : 0.0f);
+    p_glUniform1f(locGAngQ, grassAngQ);
     // Transparenz des Grases: ZWEI sich ausschliessende Wege.
     //  A) Alpha-to-Coverage: Alpha wird in eine MSAA-Sample-Maske uebersetzt.
     //     Die Abdeckung stellt die Transparenz her -> KEIN Blending, sonst
@@ -1444,6 +1456,7 @@ int main(int argc, char **argv) {
     if (dbgGrassCat) strncat(hud2, " CAT", sizeof(hud2) - (int)strlen(hud2) - 1);
     if (dbgAlpha2Cov) strncat(hud2, " A2C", sizeof(hud2) - (int)strlen(hud2) - 1);
     if (dbgSortOrder) strncat(hud2, " SORT", sizeof(hud2) - (int)strlen(hud2) - 1);
+    if (dbgAngThin) strncat(hud2, " WINK", sizeof(hud2) - (int)strlen(hud2) - 1);
     if (grassFadeDur != 1.0f) strncat(hud2, " FADE", sizeof(hud2) - (int)strlen(hud2) - 1);
     snprintf(hud3, sizeof hud3, "POS %d %d %d%s%s",
              (int)camPos[0], (int)camPos[1], (int)camPos[2],
