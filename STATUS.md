@@ -401,6 +401,52 @@ aber separat gegenpruefen (in der VM nicht testbar).
 - `xdotool mousedown` erreicht das Demo-Fenster in der VM nicht -> Maus-UI nicht
   automatisierbar.
 
+## Recherche: Blender „Sapling Tree Gen“ (Add-on-Quelle v0.3.7, 2026-10-07)
+
+Quelle: Extension-Registry `extensions.blender.org` -> `sapling_tree_gen` v0.3.7,
+`utils.py` (2003 Zeilen) + 9 Baum-Presets. Gefunden über die Registry-API
+(`https://extensions.blender.org/api/v1/extensions/?search=tree`); die GitHub-Pfade
+der alten Add-on-Datei sind tot (404), das Add-on ist seit Blender 4.2 eine Extension.
+
+**Was Sapling anders macht als unser jetziger Baum — und was wir übernehmen:**
+
+1. **Drei Hierarchie-Ebenen** (`levels = 3`): Stamm -> Aeste -> **Zweige**.
+   `branches = (0, 60, 30, 10)` pro Ebene, `length = (1.0, 0.33, 0.375, 0.45)` relativ,
+   `curve = (0, -30, -25)` (Aeste biegen erst nach unten, dann wieder hoch),
+   `attractUp`/`attractOut` steuern Wuchsrichtung. -> Unser Baum hat nur EINE Astebene.
+2. **Blaetter sitzen auf den Zweigen, nicht in einem Kronenvolumen.**
+   `childStems = leaves * (0.1 + 0.9*(branchL/maxbL)) * shapeRatio(leafDist, 1-offset)`:
+   Anzahl pro Zweig skaliert mit der relativen Zweiglaenge und einer Verteilungs-
+   kurve entlang des Mutterasts. -> Genau das fehlt: unsere Blätter sind Zufallspunkte
+   in einem Ellipsoid, deshalb „vereinzelt begrünte Zweige“.
+3. **Blattstellung = golden angle**: alle Presets nutzen `leafRotate = 137.5°`
+   (auch `rotate` der Astebenen). Aufeinanderfolgende Blätter werden um 137,5°
+   versetzt -> gleichmaessige Besetzung ohne Klumpen/Abschirmung. Billig und grosser
+   Effekt.
+4. **Blatt-Orientierung**: `leafDownAngle = 45°` (Variation `leafDownAngleV = 10°`,
+   und `downV = -downAngleV * offset`: blaetter zur Zweigspitze liegen flacher am Ast),
+   `horzLeaves`, `bend` (Verdrehung abhaengig vom Azimut, damit ein haengendes Blatt
+   immer nach unten haengt).
+5. **Blatt-Form**: `leafScaleX = 0.2…0.65` — Blätter sind **in die Laenge gestreckt,
+   nie quadratisch**. `leafScaleT` = Skalierung entlang des Zweigs (zur Spitze kleiner),
+   `leafScaleV` = Zufallsstreuung. Silhouette kommt aus der Textur (Alpha), nicht aus
+   der Geometrie.
+6. **Blattgroessen real**: `leafScale = 0.18…0.25` der Baumhoehen (Birke 12 m ->
+   0,2 -> Blatt ~24 cm inkl. Stiel, reales Blatt 5-8 cm).
+7. **Blattmengen real**: Birke 30*10 Zweige * 16 Blätter = 4.800; Weide 35*15 * 150 =
+   **78.750**. Die 100.000 des Nutzers sind also fuer grosse Bäume realistisch.
+8. **Kronenform = Astlaengen-Profil entlang des Stamms** (`shape` 0…10, z.B.
+   `0.5 + 0.5*ratio/0.7` dann abfallend). Verschiedene Arten = verschiedene Profile,
+   nicht verschiedene Grundgeometrien.
+9. **Wind**: pro Bone ein Noise-Modifier (`gustF = 0.075`), Blätter bekommen eigene
+   Bones -> hierarchisches Schwingen (Ast schwingt, Blatt flattert darauf). Bestaetigt
+   unseren Ansatz aus Runde 19.
+
+**Umsetzung fuer uns (TODO 10/11/12):** dreistufige Ast-Hierarchie pro Baum individuell
+(geseed), Blätter entlang der Zweige mit 137,5°-Phyllotaxis, Blattsilhouette per
+Alpha-Test im Shader, Blatt-Laenge/Breite-Verhaeltnis ~2:1, Blattgroessen-Abstufung
+zum Zweigende hin, Kronenform ueber das Astlaengen-Profil.
+
 ## Session 2026-10-07, Runde 19 (TODO 7: Blätter im Wind)
 
 **Idee:** Gras, Äste, Einzelblätter und ferne Kronen müssen auf **dieselbe Böe**
