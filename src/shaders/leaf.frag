@@ -102,11 +102,24 @@ void main(){
   albedo *= 1.0 + midrib * 0.35 - vein * 0.10;          // Rippen heller, Adern dunkler
   albedo *= 1.0 - 0.18 * smoothstep(0.75, 1.0, e);      // Rand etwas dunkler
   if(uLeafMask > 1.5){ O = vec4(albedo, 1.0); return; } // DIAGNOSE: nur Albedo
+  // DIAGNOSE (uLeafMask = 3): die Beleuchtungsfaktoren als Farbe, um Blätter und
+  // Karten direkt vergleichen zu koennen: R = Sonne, G = Ambient, B = Transluzenz
+  if(uLeafMask > 2.5){
+    O = vec4(dif * 0.7 + 0.3, amb.g, thru, 1.0);
+    return;
+  }
   if(uAlbedoOnly > 0.5){ O = vec4(albedo, 1.0); return; }
   vec3 col = albedo * (vec3(1.0, 0.95, 0.80) * (dif * 0.7 + 0.3) + amb + vec3(0.8, 1.0, 0.5) * thru);
   col *= 0.85 + 0.15 * vT;
   float s = length(vPos - uCamPos) - 60.0;   // Dunst wie fogAmt() in fragment.glsl
   float fog = s <= 0.0 ? 0.0 : 1.0 - exp(-s * s * 0.000012);
   col = mix(col, skyColor(rd), fog);
+  // Tonemapping + Gamma — wie in fragment.glsl, grass.frag, tree.frag und
+  // crown.frag. Dieser Blatt-Shader war der EINZIGE ohne: dadurch waren die
+  // Einzelblaetter systematisch dunkler als dieselbe Krone in der Distanzstufe
+  // (gemessen am selben Baum, 16 m, Zeit eingefroren, identische Pixelmenge
+  // 2268: Blaetter (39,82,11) gegen Karten (74,104,42) bei gleicher Albedo).
+  col = 1.0 - exp(-col * 1.25);
+  col = pow(col, vec3(0.4545));
   O = vec4(col, 1.0);
 }

@@ -119,6 +119,10 @@ void main(){
   // Baum aus der Instanz, vorher steckte eine zufaellige Fremdfarbe in der Textur.
   vec3 albedo = tx.rgb * vCol;
   if(uCrownMask > 1.5){ O = vec4(albedo, 1.0); return; }   // DIAGNOSE: nur Albedo
+  if(uCrownMask > 2.5){   // DIAGNOSE: R = Sonne, G = Ambient, B = Transluzenz
+    O = vec4(dif, amb.g, thru, 1.0);
+    return;
+  }
   vec3 col = albedo * (vec3(1.0, 0.95, 0.80) * dif + amb + vec3(0.8, 1.0, 0.5) * thru);
   float s = length(vPos - uCamPos) - 60.0;   // Dunst wie fogAmt() in fragment.glsl
   float fog = s <= 0.0 ? 0.0 : 1.0 - exp(-s * s * 0.000012);

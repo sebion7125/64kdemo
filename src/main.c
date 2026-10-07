@@ -1397,6 +1397,10 @@ int main(int argc, char **argv) {
   GLint locLLod    = p_glGetUniformLocation(progLeaf, "uLodCam");
   GLint locLTime   = p_glGetUniformLocation(progLeaf, "uTime");
   GLint locLMask   = p_glGetUniformLocation(progLeaf, "uLeafMask");
+  // uAlbedoOnly steht in der Atlas-Kapture auf 1 und wird pro Programm NICHT
+  // zurueckgesetzt — ohne dieses 0 hier lief die komplette Blatt-Rendrierung mit
+  // roher Albedo (unbeleuchtet), waehrend die Kronen-Karten beleuchtet wurden.
+  GLint locLAlb    = p_glGetUniformLocation(progLeaf, "uAlbedoOnly");
 
   // Fullscreen-Dreieck
   static const float tri[6] = { -1,-1, 3,-1, -1,3 };
@@ -1994,6 +1998,7 @@ int main(int argc, char **argv) {
         if(locLLod >= 0) p_glUniform3f(locLLod, camPos[0], camPos[1], camPos[2]);
         p_glUniform1f(locLTime, tSh);
         p_glUniform1f(locLMask, 0.0f);
+        if(locLAlb >= 0) p_glUniform1f(locLAlb, 0.0f);
         applyShadow(&slLeaf, 0);
         p_glBindVertexArray(vaoLeaf);
         p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInst);
@@ -2163,6 +2168,7 @@ int main(int argc, char **argv) {
       if(locLLod >= 0) p_glUniform3f(locLLod, camPos[0], camPos[1], camPos[2]);
       p_glUniform1f(locLTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
       p_glUniform1f(locLMask, (float)envLeafMask);
+      if(locLAlb >= 0) p_glUniform1f(locLAlb, 0.0f);
       p_glBindVertexArray(vaoLeaf);
       p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInst);
     }

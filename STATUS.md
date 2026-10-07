@@ -568,6 +568,45 @@ der alten Add-on-Datei sind tot (404), das Add-on ist seit Blender 4.2 eine Exte
 Alpha-Test im Shader, Blatt-Laenge/Breite-Verhaeltnis ~2:1, Blattgroessen-Abstufung
 zum Zweigende hin, Kronenform ueber das Astlaengen-Profil.
 
+## Session 2026-10-08, Runde 25 (LOD-Farbe: drei Fehler gefunden und gemessen)
+
+Nutzerbefund: Stufen besser, aber Karten weiterhin falsch gefärbt; ferner Baum ohne
+Stamm; **in der fertigen Version starke Abweichungen zwischen den LODs**.
+
+Messbank (neu):
+- `DEMO_NOTERRAIN=1` — Terrain/Himmel/Gras aus, schwarzer Hintergrund
+- `DEMO_LODRSCALE=<f>` — Schaltweiten skalieren, damit an EINEM Standort beide
+  Repräsentationen vergleichbar sind
+- `DEMO_TREEDIST` sucht jetzt die hindernisfreie Blickrichtung (vorher lag der
+  Baum bei 80 m hinter einem Hügel -> Messung zählte 0 Gerüst-Pixel)
+- `DEMO_FREEZE=2` ist Pflicht: ohne Zeitfreeze liegen Blätter/Karten pro Lauf
+  leicht anders -> Pixelmengen und Farben nicht vergleichbar
+- Masken-Diagnose (LEAFMASK/CROWNMASK) greift erst NACH dem Discard; vorher
+  zählte sie auch verworfene Texel -> alle früheren Farbmessungen waren falsch
+
+Gefunden und behoben (jeweils gemessen):
+1. **Karten wurden nur für beim Bau ferne Bäume gebaut**
+   (`wantCards = (d >= R1*0.9) ? ... : 0`). Die Stufe gilt aber nur bis zum
+   nächsten Baum-Bau (alle 12 m Kameraweg) -> ein nah gebauter Baum verliert beim
+   Entfernen alles Laub, weil nichts übergibt. Jetzt Karten in JEDER Stufe
+   (tier-3-Bäume: 0 -> 51096 Karten, gesamt 275142 -> 300000).
+2. **Atlas-Kachel war eine ganze Referenzkrone mit eigener Zufallsfarbe**; jetzt
+   ein Blattbüschel (9..13 unserer Blätter, Deckung median 27 %) und FARBNORMAL
+   (gemittelt 241/241/241). Die Blattfarbe DIESES Baumes steckt in der
+   Karten-Instanz (CROWN_FLOATS 10 -> 13) und wird in crown.frag multipliziert.
+3. **Hauptfund: `uAlbedoOnly` blieb nach der Atlas-Kapture auf 1 stehen** (Uniform
+   bleibt pro Programm erhalten, nie zurückgesetzt) -> die GESAMTE Blatt-
+   Rendrierung lief unbeleuchtet als rohe Albedo, während die Kronen-Karten
+   beleuchtet wurden. Deshalb sprang die Helligkeit am Stufenwechsel.
+   Gemessen am selben Baum, 16 m, Zeit eingefroren, identische 2268 Laub-Pixel:
+   vorher Blätter (39,82,11) gegen Karten (74,104,42); nachher (94,130,48) gegen
+   (74,104,42). Abstandsdurchgang nachher: 16 m (94,130,48), 40 m (87,124,46),
+   60 m (87,124,47), 100 m (87,121,60) — Farbe hält jetzt über alle Stufen.
+
+Offen: Ganzbaum-Billboard (TODO 23) — der fehlende Stamm in großer Entfernung ist
+noch nicht blindenfrei gemessen (40 m: 142 Gerüst-Pixel, 80/160 m: 0, aber die
+80/160-m-Läufe waren vermutlich Hügel-OKklusion).
+
 ## Session 2026-10-08, Runde 24 (EZ-Tree-Port, LOD-Semantik, Referenzbilder)
 
 ### Commits
