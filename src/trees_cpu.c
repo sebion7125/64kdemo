@@ -221,38 +221,54 @@ static void hsv2rgb(float h, float s, float v, float *r, float *g, float *b){
   }
 }
 
-// Blaetter entlang eines geraden Aests/Zweigs. dir = Achse, (u,v) = mitgefuehrte
-// Querbasis (parallel transportiert, damit die Blaetter nicht an der Achse
-// "umklappen"), cnt = Anzahl, size = Blattlaenge in Metern, aspect = Breite/Laenge.
-static void leaves_along(const float ax[3], const float dir[3],
-                         const float u[3], const float v[3],
-                         float len, float rad, int cnt, float size, float aspect,
-                         float tiltBase, float seed, int sb,
+// Blatt-Orientierung aus der FLAECHENNORMALen.
+// leaf.vert baut die Blattlaengsachse als (cos(t)*cos(r), -sin(t), -cos(t)*sin(r))
+// und die Flaechennormale als (sin(t)*cos(r), cos(t), -sin(t)*sin(r)).
+// Aufgeloest nach tilt/rotY: tilt = acos(ny), rotY = atan2(-nz, nx).
+static void leaf_orient(const float n[3], float *tilt, float *rotY){
+  float ny = fmaxf(-1.0f, fminf(1.0f, n[1]));
+  float t = acosf(ny);
+  float st = sinf(t);
+  *tilt = t;
+  *rotY = (st > 0.05f) ? atan2f(-n[2], n[0]) : 0.0f;
+}
+
+// ---------- Blattbuschel (Volumenkrone) ----------
+// Nutzerbefund Runde 22: "grobe Aeste und direkt an den Aesten zig kleine
+// Blaetter. Das erzeugt ueberhaupt keine volumetrische Baumkrone, sieht eher
+// wie Tannennadeln aus."  Genau das war der Fall: leaves_along() setzte bis zu
+// 700 Blaetter mit ~2 cm Radialabstand ENTLANG einer Zweigachse — eine
+// Nadelbuerste.
+// Vorbild (Space Colonization, Stall et al. EGWN 2007, und Crysis Leaf-Cards,
+// GPU Gems 3 Kap. 16): die Krone ist eine Menge von Endpunkten im
+// Kronenvolumen, und an jedem Endpunkt sitzt ein BUSCHEL, dessen Blaetter auf
+// der Schale liegen und mit der Flaechennormalen nach aussen zeigen. Dann ist
+// die Krone von jeder Seite geschlossen, und die Silhouette ist geproft.
+static void leaf_cluster(float cx, float cy, float cz, float r, int cnt,
+                         float size, float aspect, float upBias, float seed, int sb,
                          float lcr, float lcgg, float lcb){
   for(int i = 0; i < cnt; i++){
     if(nLeafInst >= LEAF_CAP) return;
-    float h1 = c_hash12(seed * 0.731f + (sb + i) * 13.7f, seed * 1.173f + (sb + i) * 7.9f);
-    float h2 = c_hash12(seed * 0.731f + (sb + i) * 17.3f, seed * 1.173f + (sb + i) * 11.1f);
-    float uu = (i + 0.5f) / (float)cnt;
-    float ph = i * GOLD + sb * 0.37f;
-    float ca = cosf(ph), sa = sinf(ph);
-    float rx = u[0] * ca + v[0] * sa, ry = u[1] * ca + v[1] * sa, rz = u[2] * ca + v[2] * sa;
-    // Sapling: leafDownAngle ~45° gegenueber dem Mutterast, zur Spitze flacher
-    float da = tiltBase - 0.35f * uu + (h1 - 0.5f) * 0.55f;
-    float cd = cosf(da), sd = sinf(da);
-    float lx = dir[0] * cd + rx * sd, ly = dir[1] * cd + ry * sd - 0.22f, lz = dir[2] * cd + rz * sd;
-    float ll = sqrtf(lx * lx + ly * ly + lz * lz); if(ll < 1e-6f) ll = 1e-6f;
-    lx /= ll; ly /= ll; lz /= ll;
-    // leaf.vert baut die Blattlaangsachse als (cos(tilt)*cos(rotY), -sin(tilt),
-    // -cos(tilt)*sin(rotY)) -> aus der Zielrichtung zurueckgerechnet:
-    float tilt = -asinf(fmaxf(-1.0f, fminf(1.0f, ly)));
-    float ct = cosf(tilt); if(ct < 1e-3f) ct = 1e-3f;
-    float rotY = atan2f(-lz, lx);
-    float sz = size * (0.75f + 0.45f * h2) * (1.0f - 0.30f * uu);   // leafScaleT
-    add_leaf(ax[0] + dir[0] * len * uu + rx * rad,
-             ax[1] + dir[1] * len * uu + ry * rad,
-             ax[2] + dir[2] * len * uu + rz * rad,
-             sz, rotY, tilt, aspect, lcr, lcgg, lcb);
+    float h1 = TH(sb + i), h2 = TH(sb + i + 977), h3 = TH(sb + i + 1889);
+    // gleichmaessige Richtungen ueber die Kugel (goldener Winkel + gleichmaessiges z)
+    float th = (float)(sb + i) * GOLD;
+    float nz0 = 1.0f - 2.0f * ((float)i + 0.5f) / (float)cnt;
+    float sr = sqrtf(fmaxf(0.0f, 1.0f - nz0 * nz0));
+    float dx = sr * cosf(th), dy = nz0, dz = sr * sinf(th);
+    // 3/4 der Blaetter auf der Schale (sichtbare Huelle), 1/4 im Volumen
+    float rr = r * (h1 < 0.75f ? (0.82f + 0.20f * h2) : (0.20f + 0.58f * h2));
+    float px = cx + dx * rr, py = cy + dy * rr * 0.9f, pz = cz + dz * rr;
+    // Normale: vom Buschelzentrum weg, zum Himmel gekippt (Blattchen zeigen
+    // selten senkrecht nach unten)
+    float nx = dx, ny = dy + upBias, nz = dz;   // upBias = planophil..erectophil
+    float nl = sqrtf(nx * nx + ny * ny + nz * nz); if(nl < 1e-6f) nl = 1e-6f;
+    nx /= nl; ny /= nl; nz /= nl;
+    // leichte Zufallsdrehung, damit kein perfekter Igel entsteht
+    float tilt, rotY;
+    float nn[3] = { nx + (h2 - 0.5f) * 0.5f, ny + (h3 - 0.5f) * 0.4f, nz + (h1 - 0.5f) * 0.5f };
+    leaf_orient(nn, &tilt, &rotY);
+    add_leaf(px, py, pz,
+             size * (0.75f + 0.5f * h3), rotY, tilt, aspect, lcr, lcgg, lcb);
   }
 }
 
@@ -268,7 +284,9 @@ static void gen_tree(float bx, float by, float bz, float s, float seed, int tier
   float hue   = 0.20f + TH(8) * 0.20f;          // Blattfarbe individuell
   float lsat  = 0.45f + TH(9) * 0.45f;
   float lval  = 0.30f + TH(10) * 0.30f;
-  float lsize = 0.055f + TH(11) * 0.060f;       // 5,5..11,5 cm
+  float lsize = 0.085f + TH(11) * 0.085f;       // 8,5..17 cm: eine Karte steht fuer ein
+                                            // Buschel kleiner Blaetter (Crysis Leaf-Cards),
+                                            // sonst bleibt die Krone bei gleichem Budget loechrig
   float lasp  = 0.35f + TH(12) * 0.30f;         // Breite/Laenge (Sapling: nie 1)
   float tiltB = 0.55f + TH(13) * 0.55f;         // Blattneigung gegenueber dem Ast
   float bTone = 0.80f + TH(14) * 0.45f;         // Rindenton
@@ -358,13 +376,14 @@ static void gen_tree(float bx, float by, float bz, float s, float seed, int tier
     emit_cap(&br[2], 6, 1.0f, 0.34f * bTone, 0.27f * bTone, 0.17f * bTone, 0.9f, bv);
     if(nTip < 16){ tipx[nTip] = bx + s * t0x; tipy[nTip] = by + s * t0y; tipz[nTip] = bz + s * t0z; nTip++; }
 
-    if(tier >= 3){
-      // Zweige: eigene kurze Rohre entlang des Aests, darauf die Blaetter.
+    // ---------- Zweigspitzen = Blattbuschel ----------
+    // Wird fuer ALLE Detailstufen gleich berechnet (nur die Zweig-ROHRE gibt es
+    // erst ab tier 3) — die KronenFORM wechselt also nicht mit der Detailstufe.
+    if(tier >= 2){
       for(int j = 0; j < nTwig; j++){
+        int jj = i * 32 + j;
         float tj = 0.30f + 0.70f * (j + 0.5f) / (float)nTwig;
         float px, py, pz;
-        Ring tw[2];
-        int jj = i * 32 + j;
         if(tj < 0.55f){
           float w = tj / 0.55f;
           px = s0x + (m0x - s0x) * w; py = s0y + (m0y - s0y) * w; pz = s0z + (m0z - s0z) * w;
@@ -375,32 +394,49 @@ static void gen_tree(float bx, float by, float bz, float s, float seed, int tier
         float az3 = az0 + jj * GOLD + (TH(200 + jj) - 0.5f) * 0.8f;
         float el3 = el - 0.20f + TH(210 + jj) * 0.55f - (shape == 3 ? 0.45f : 0.0f);
         float d3x = cosf(el3) * cosf(az3), d3y = sinf(el3), d3z = cosf(el3) * sinf(az3);
+        // Weg vom Stamm: die Endpunkte sollen das Kronenvolumen FUELLEN statt der
+        // Astachse entlangzulaufen (Space Colonization: der Ast waechst zum
+        // Attraktor im freien Raum). Radiale Komponente beimischen.
+        float rl = sqrtf(px * px + pz * pz); if(rl < 1e-4f) rl = 1e-4f;
+        const float mix = 0.45f;
+        d3x = d3x * (1.0f - mix) + (px / rl) * mix;
+        d3z = d3z * (1.0f - mix) + (pz / rl) * mix;
+        float dl = sqrtf(d3x * d3x + d3y * d3y + d3z * d3z); if(dl < 1e-6f) dl = 1e-6f;
+        d3x /= dl; d3y /= dl; d3z /= dl;
         float len3 = len * (0.22f + 0.22f * TH(220 + jj));
-        float back = br[1].r / s * 0.9f;
-        memset(tw, 0, sizeof tw);
-        tw[0].p[0] = bx + s * (px - d3x * back); tw[0].p[1] = by + s * (py - d3y * back); tw[0].p[2] = bz + s * (pz - d3z * back);
-        tw[0].r = s * 0.012f * hf;
-        tw[1].p[0] = bx + s * (px + d3x * len3); tw[1].p[1] = by + s * (py + d3y * len3); tw[1].p[2] = bz + s * (pz + d3z * len3);
-        tw[1].r = s * 0.006f * hf;
-        ring_basis(&tw[0], d3x, d3y, d3z);
-        ring_transport(&tw[1], &tw[0], d3x, d3y, d3z, d3x, d3y, d3z);
-        emit_tube(&tw[0], &tw[1], 4, 1.0f, 1.0f, 0.40f * bTone, 0.32f * bTone, 0.20f * bTone, 0.9f, 0.0f);
-        float st[3] = { tw[0].p[0], tw[0].p[1], tw[0].p[2] };
-        float dr[3] = { d3x, d3y, d3z };
-        leaves_along(st, dr, tw[0].u, tw[0].v, s * len3, s * 0.012f * hf,
-                     700, lsize, lasp, tiltB, seed, 3000 + jj * 1000, lcr, lcgg, lcb);
+        float tipx = bx + s * (px + d3x * len3);
+        float tipy = by + s * (py + d3y * len3);
+        float tipz = bz + s * (pz + d3z * len3);
+        if(tier >= 3){
+          float back = br[1].r / s * 0.9f;
+          Ring tw[2];
+          memset(tw, 0, sizeof tw);
+          tw[0].p[0] = bx + s * (px - d3x * back); tw[0].p[1] = by + s * (py - d3y * back); tw[0].p[2] = bz + s * (pz - d3z * back);
+          tw[0].r = s * 0.012f * hf;
+          tw[1].p[0] = tipx; tw[1].p[1] = tipy; tw[1].p[2] = tipz;
+          tw[1].r = s * 0.006f * hf;
+          ring_basis(&tw[0], d3x, d3y, d3z);
+          ring_transport(&tw[1], &tw[0], d3x, d3y, d3z, d3x, d3y, d3z);
+          emit_tube(&tw[0], &tw[1], 4, 1.0f, 1.0f, 0.40f * bTone, 0.32f * bTone, 0.20f * bTone, 0.9f, 0.0f);
+        }
+        float cr2 = s * (0.105f + 0.070f * hf) * (0.80f + 0.55f * TH(230 + jj));
+        // Zwei Buschel pro Zweig (knapp ueber halber Laenge + Spitze): nur an der
+        // Spitze entstehen getrennte Kugeln mit Luecken dazwischen, der Raum
+        // zwischen Asten bleibt leer.
+        int per = tier >= 3 ? 200 : 80;
+        leaf_cluster(bx + s * (px + d3x * len3 * 0.55f),
+                     by + s * (py + d3y * len3 * 0.55f),
+                     bz + s * (pz + d3z * len3 * 0.55f),
+                     cr2 * 0.85f, per, lsize, lasp, tiltB, seed,
+                     3000 + jj * 1000, lcr, lcgg, lcb);
+        leaf_cluster(tipx, tipy, tipz, cr2, per + per / 2,
+                     lsize, lasp, tiltB, seed, 3500 + jj * 1000, lcr, lcgg, lcb);
       }
-    } else if(tier == 2){
-      // Blaetter direkt an den beiden Astsegmenten (ohne eigene Zweige)
-      int per = 1000;
-      float st1[3] = { br[0].p[0], br[0].p[1], br[0].p[2] };
-      float d1[3]  = { dx, dy, dz };
-      float st2[3] = { br[1].p[0], br[1].p[1], br[1].p[2] };
-      float d2[3]  = { dx2, dy2, dz2 };
-      leaves_along(st1, d1, br[0].u, br[0].v, s * len * 0.55f, br[0].r, per,
-                   lsize, lasp, tiltB, seed, 300 + i * 4000, lcr, lcgg, lcb);
-      leaves_along(st2, d2, br[1].u, br[1].v, s * len * 0.45f, br[1].r, per,
-                   lsize, lasp, tiltB, seed, 2300 + i * 4000, lcr, lcgg, lcb);
+      // Buschel auf der Astspitze — die groessten, sie bilden den Kronensaum
+      leaf_cluster(bx + s * t0x, by + s * t0y, bz + s * t0z,
+                   s * (0.13f + 0.09f * hf) * (0.85f + 0.4f * TH(57 + i)),
+                   tier >= 3 ? 430 : 170,
+                   lsize, lasp, tiltB, seed, 900 + i * 7000, lcr, lcgg, lcb);
     }
   }
 

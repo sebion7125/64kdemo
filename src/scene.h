@@ -36,7 +36,7 @@ float c_terrainH(float px, float py);
 // Einzelblaetter an nahen Baeumen (leaf.vert): iPos(3), iData(4: size, rotY,
 // tilt, pad), iCol(3). Grundblatt ist ein statisches Quad (aBase = t, w).
 #define LEAF_FLOATS  10
-#define LEAF_CAP     300000   // 300k Instanzen a 10 floats = 12 MB
+#define LEAF_CAP     500000   // 500k Instanzen a 10 floats = 20 MB
 // Referenz-Krone fuer den Blatthorizont-Atlas (ferne Baeume sampeln diese
 // Textur statt prozeduraler Flecken). Layout im Atlas: 8x8 Kacheln =
 // 4 Kronen-Varianten x 16 Ansichts-Richtungen.
