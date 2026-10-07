@@ -73,7 +73,8 @@ float shadowAt(vec3 wp, vec3 n){
 }
 
 void main(){
-  if(uLeafMask > 0.5){ O = vec4(1.0, 0.0, 0.0, 1.0); return; }
+  // Masken-Diagnose ERST nach dem Discard der Blattsilhouette: sonst zaehlt die
+  // Maske auch die leeren Quad-Ecken und die Farbmessung mittelt Hintergrund mit.
   // ---- Blattsilhouette (Vorlage: Sapling — Blätter sind in die Länge gestreckt,
   // niemals quadratisch; die Silhouette kommt aus der Textur/dem Shader, nicht
   // aus der Geometrie). vT = -0.5..0.5 entlang, vW = -0.5..0.5 quer.
@@ -83,6 +84,7 @@ void main(){
   hw = max(hw, 1e-4);                                   // bei tt->0 wird hw klein
   float e = abs(vW) / hw;
   if(e > 1.0) discard;
+  if(uLeafMask > 0.5 && uLeafMask < 1.5){ O = vec4(1.0, 0.0, 0.0, 1.0); return; }
   float midrib = 1.0 - smoothstep(0.0, 0.055, abs(vW)); // Mittelrippe
   float vein   = 1.0 - smoothstep(0.0, 0.05,
                     abs(fract((tt + abs(vW) * 0.9) * 5.0) - 0.5) * 0.34 - abs(vW) * 0.02);
@@ -99,6 +101,7 @@ void main(){
   vec3 albedo = vCol * (0.72 + 0.55 * pat);
   albedo *= 1.0 + midrib * 0.35 - vein * 0.10;          // Rippen heller, Adern dunkler
   albedo *= 1.0 - 0.18 * smoothstep(0.75, 1.0, e);      // Rand etwas dunkler
+  if(uLeafMask > 1.5){ O = vec4(albedo, 1.0); return; } // DIAGNOSE: nur Albedo
   if(uAlbedoOnly > 0.5){ O = vec4(albedo, 1.0); return; }
   vec3 col = albedo * (vec3(1.0, 0.95, 0.80) * (dif * 0.7 + 0.3) + amb + vec3(0.8, 1.0, 0.5) * thru);
   col *= 0.85 + 0.15 * vT;

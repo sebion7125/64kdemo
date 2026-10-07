@@ -29,22 +29,38 @@ float c_terrainH(float px, float py);
 // ================= Baeume (prozedural, Mesh + Billboard-Blattdach) =================
 // Vertex-Layouts (muessten zu den Shadern passen):
 //   treeVerts:  pos(3) nrm(3) col(3) sway(1)             = 10 floats
-//   crownVerts: center(3) off(2) size(1) rotY(1) seed(1) pad(1) = 9 floats
+//   crownVerts: center(3) off(2) size rotY seed variant lodR col(3) = 13 floats
 //   wireVerts:  pos(3)
 #define TREE_FLOATS  12   // pos3, nrm3, col3, sway, u (um den Ring), v (Bogenlaenge)
-#define CROWN_FLOATS 9
+// Kronen-Karte: center(3) off(2) size rotY seed variant lodR col(3) = 13 floats.
+// lodR = Radius, ab dem diese Karte die Einzelblaetter dieses Baumes eretzt
+// (blendet um lodR +/- 10 % ein). col = Blattfarbe DIESES Baumes: der Atlas ist
+// farbneutral aufgenommen, die Farbe kommt pro Instanz dazu.
+#define CROWN_FLOATS 13
 // Einzelblaetter an nahen Baeumen (leaf.vert): iPos(3), iData(4: size, rotY,
-// tilt, pad), iCol(3). Grundblatt ist ein statisches Quad (aBase = t, w).
-#define LEAF_FLOATS  10
-#define LEAF_CAP     500000   // 500k Instanzen a 10 floats = 20 MB
+// tilt, aspect), iCol(3), iLodR(1). Grundblatt ist ein statisches Quad.
+// iLodR = Radius, ab dem die Karten dieses Baumes die Blaetter uebernehmen
+// (keep = 1 - smoothstep(0,9*lodR, 1,1*lodR, d)) — Komplement zu lodR oben.
+#define LEAF_FLOATS  11
+#define LEAF_CAP     1200000  // 1,2M Instanzen a 11 floats = 52,8 MB
 // Referenz-Krone fuer den Blatthorizont-Atlas (ferne Baeume sampeln diese
 // Textur statt prozeduraler Flecken). Layout im Atlas: 8x8 Kacheln =
 // 4 Kronen-Varianten x 16 Ansichts-Richtungen.
 #define FOLIAGE_CAP  2100
 #define WIRE_FLOATS  3
 
-#define TREE_VERT_CAP 700000
-#define CROWN_CAP     90000
+// Caps fuer den vollen Wald (646 Baeume im Umkreis von 180 m) bei der neuen
+// Stufenlogik: volle Dichte bis 10x Wuchshoehe, Karten bis 20x, dahinter Karten
+// mit Stride 4. Gemessen (/tmp/test_full.c, Region (0,0)): 2 555 406 Geruest-
+// Vertices, 284 118 Karten, 577 320 Einzelblaetter; Bauzeit 0,20 s. Nahe Baeume
+// werden zuerst gebaut, bei Cap-Uberlauf fehlt Geometrie also ganz hinten —
+// nicht vor der Kamera.
+#ifndef TREE_VERT_CAP
+#define TREE_VERT_CAP 2700000   // gemessen: 2 555 406 fuer 646 Baeume (kidPct 100)
+#endif
+#ifndef CROWN_CAP
+#define CROWN_CAP     1800000   // 300k Karten a 6 Vertices
+#endif
 #define WIRE_CAP      90000
 
 extern float treeVerts[TREE_VERT_CAP * TREE_FLOATS];
@@ -64,6 +80,16 @@ extern const char *ezDbgName; extern float ezDbgUnit, ezDbgR0;
 extern float ezDbgR[13]; extern int ezDbgNSec;
 extern float ezDbgS, ezDbgHf;
 extern int treeForceTier;    // DEMO_TIER=0|2|3: Detailstufe erzwingen (-1 = automatisch)
+extern int treeTierLog;      // DEMO_TREELOG=1: Stufe je Baum auf der Console
+extern float treeLodScale;   // DEMO_LODRSCALE: Schaltweiten skalieren (0 = aus)
+extern int ezKidPct;         // DEMO_KIDPCT: Kinderzahl aller Stufen gleich duennen
+// Referenzpunkt fuer die Detailstufe. main.c setzt das auf die ECHTE Kamera
+// (camPos). Vorher war es das Build-Zentrum = camTgt, das haengt 10 m in
+// Blickrichtung vor der Kamera -> die Stufe hing von der Blickrichtung ab.
+extern float treeLodRef[3]; extern int treeLodRefValid;
+// Der Baum, den die Debug-Kamera gerahmt hat (tree_jump). Mit DEMO_ONETREE wird
+// genau dieser gebaut, nicht der naechste am Build-Zentrum.
+extern float treeFocus[3]; extern int treeFocusValid;
 // Naechsten Baum zu (x,z) — Debug (Taste F11). Liefert 1, wenn einer gefunden wurde.
 int  tree_find_nearest(float x, float z, float *out, float *sizeOut, float *hfOut);
 // Eine Referenz-Krone aus echten Einzelblaettern, zentriert um (0, 2.05*s, 0).

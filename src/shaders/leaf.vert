@@ -3,6 +3,8 @@ layout(location=0) in vec2 aBase;   // (t laengs, w quer) Grundblatt
 layout(location=1) in vec3 iPos;    // Blattbasis (Welt)
 layout(location=2) in vec4 iData;   // size, rotY, tilt, lod-Pad
 layout(location=3) in vec3 iCol;
+layout(location=4) in float iLodR;   // Radius, ab dem Karten dieses Baumes die
+                                     // Einzelblaetter eretzen (CPU: 10x Wuchshoehe)
 uniform mat4 uMVP;
 uniform vec3 uCamPos;
 uniform vec3 uLodCam;   // Referenzpunkt fuer den Entfernungs-LOD (IMMER die
@@ -30,15 +32,19 @@ void main(){
   float size = iData.x, rotY = iData.y, tilt = iData.z;
   float t = aBase.x, w = aBase.y;
   float d = length(iPos - uLodCam);
-  // LOD: die Kronen-Quads gibt es immer (fuelle die Krone), die echten Blätter
-  // sterben in der Distanz statistisch aus — per Hash pro Blatt, damit die Dichte
-  // sanft faellt und nicht schlagartig (Anzahl wechselt ja nur beim Rebuild).
-  float keep = 1.0 - smoothstep(20.0, 28.0, d);
+  // LOD: die Kronen-Karten gibt es ab 0,9*iLodR, die echten Blaetter sterben bis
+  // 1,1*iLodR statistisch aus — per Hash pro Blatt, damit die Dichte sanft faellt
+  // und nicht schlagartig. Beide Seiten nutzen dieselbe Bande um iLodR, die
+  // Ueberblendung ist also komplementaer (kein kahlstreifiger Uebergang).
+  float keep = 1.0 - smoothstep(iLodR * 0.90, iLodR * 1.10, d);
   if(hash12(vec2(iPos.x * 31.7, iPos.z * 17.3)) > keep) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
-  float lod = 1.0 - smoothstep(24.0, 30.0, d);
-  if(lod < 0.004){ gl_Position = vec4(2.0, 0.0, 0.0, 1.0); return; }
+  // Groessen-Kompensation wie bei EZ-Tree: die uebrigbleibenden Blaetter werden
+  // leicht groesser (deren leafScale 1,25 in LOD1), NICHT kleiner. Der alte
+  // Faktor (1 - smoothstep(24,30,d)) schrumpfte jedes Blatt bis auf 0 — das war
+  // ein zweiter, unabhaengiger Grund fuer "der Baum verliert seine Blaetter".
+  float gs = 1.0 + 0.25 * smoothstep(iLodR * 0.90, iLodR * 1.10, d);
   // lokales Blatt: Laenge +X, Breite +Z, Normal +Y
-  vec3 lp = vec3(t * size * lod, 0.0, w * size * lod);
+  vec3 lp = vec3(t * size * gs, 0.0, w * size * gs);
   // Ueberhang (Rotation um Z): Spitze haeengt
   float ct = cos(tilt), st = sin(tilt);
   lp = vec3(lp.x * ct, -lp.x * st, lp.z);

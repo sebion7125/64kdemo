@@ -7,6 +7,7 @@ in float vFade;
 in vec2 vTile;      // Atlas-Kachel (Spalte, Zeile)
 in vec3 vNrm;       // Billboard-Normale
 in vec3 vRight, vUp;
+in vec3 vCol;       // Blattfarbe des Baumes (Atlas-Kachel ist farbneutral)
 uniform vec3 uCamPos;
 uniform sampler2D uFoliage;   // Atlas: 8x8 Kacheln echter Blattwerk-Aufnahmen
 uniform float uCrownMask;   // DEBUG: Kronen-Quads als reines Rot -> exakte Maske
@@ -74,7 +75,6 @@ float shadowAt(vec3 wp, vec3 n){
 }
 
 void main(){
-  if(uCrownMask > 0.5){ O = vec4(1.0, 0.0, 0.0, 1.0); return; }
   // Atlas-Kachel antasten. Ohne Mipmaps (die Kacheln wuerden sich beim Mip-
   // Wechsel aufloesen) -> Aufloesungsstufe selbst schaetzen und die UV an den
   // Kachelrand zurueckziehen, damit nichts in die Nachbar-Kachel blutet.
@@ -101,16 +101,25 @@ void main(){
   float a = tx.a * smoothstep(0.0, band, e) * vFade;
   float thr = 0.5 + (hash12(gl_FragCoord.xy + vTile * 37.0) - 0.5) * 0.75;
   if(a < thr) discard;
-  // Beleuchtung: die Kachel enthaelt Albedo, nicht Licht. Eine Kugel-Andeutung
-  // ueber die Quad-Ebene gibt der Krone Volumen (ferne Kronen sind zu klein fuer
-  // echte Normale aus der Textur).
+  // Masken-Diagnose erst nach dem Discard: sonst zaehlt sie auch die leeren
+  // areas der Kachel und die Farbmessung mittelt den Hintergrund mit.
+  if(uCrownMask > 0.5 && uCrownMask < 1.5){ O = vec4(1.0, 0.0, 0.0, 1.0); return; }
+  // Beleuchtung wie im Blatt-Shader, nicht als Kugel: die Karte steht fuer einen
+  // Buschel duenner Blaetter, also dieselbe Beleuchtung (beidseitig diffus,
+  // Transluzenz, warmes Ambient). Vorher eigene Kugel-Schattierung mit 0,45
+  // Diffus-Anteil -> Karten deutlich heller/grauer als das Nah-LOD (gemessen am
+  // selben Baum: 60 m Karten (128,148,116) gegen 16 m Einzelblaetter (59,99,39)).
   vec3 nrm = normalize(vNrm + (vRight * vUV.x + vUp * vUV.y) * 0.55);
   float sh = shadowAt(vPos, nrm);
-  float dif = 0.45 + 0.55 * max(dot(nrm, SUN), 0.0) * sh;
-  float back = pow(max(dot(-nrm, SUN), 0.0), 2.0) * 0.5 * (0.3 + 0.7 * sh);   // Gegenlicht-Schimmer
-  vec3 albedo = tx.rgb;
-  vec3 col = albedo * (vec3(1.0, 0.95, 0.80) * (dif + back)
-                      + vec3(0.35, 0.45, 0.40) * 0.55 * (0.62 + 0.38 * sh));
+  float dif = abs(dot(nrm, SUN)) * mix(0.18, 1.0, sh) * 0.7 + 0.3;
+  float thru = pow(max(dot(-nrm, SUN), 0.0), 1.5) * 0.8 * mix(0.2, 1.0, sh);
+  vec3 amb = vec3(0.35, 0.45, 0.40) * (0.5 + 0.5 * max(nrm.y, 0.0)) * (0.62 + 0.38 * sh);
+  // Die Kachel ist ein farbneutraler BLATTBUSCHEL (mehrere unserer Blaetter an
+  // kurzen Stielen) — dieselbe Silhouette wie das Nah-LOD. Die Farbe kommt pro
+  // Baum aus der Instanz, vorher steckte eine zufaellige Fremdfarbe in der Textur.
+  vec3 albedo = tx.rgb * vCol;
+  if(uCrownMask > 1.5){ O = vec4(albedo, 1.0); return; }   // DIAGNOSE: nur Albedo
+  vec3 col = albedo * (vec3(1.0, 0.95, 0.80) * dif + amb + vec3(0.8, 1.0, 0.5) * thru);
   float s = length(vPos - uCamPos) - 60.0;   // Dunst wie fogAmt() in fragment.glsl
   float fog = s <= 0.0 ? 0.0 : 1.0 - exp(-s * s * 0.000012);
   col = mix(col, skyColor(normalize(uCamPos - vPos)), fog);

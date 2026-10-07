@@ -12,9 +12,7 @@
 // Terrain-Filter) -> Baeume stehen an den selben Positionen wie zuvor.
 #include "scene.h"
 #include <math.h>
-#ifdef TREE_SEAM_DEBUG
-#include <stdio.h>
-#endif
+#include <stdio.h>   // Baum-Stufen-Log (DEMO_TREELOG)
 #include <string.h>
 
 int   treeOneShot = 0;
@@ -25,6 +23,16 @@ const char *ezDbgName = "-"; float ezDbgUnit = 0.0f, ezDbgR0 = 0.0f;
 float ezDbgR[13]; int ezDbgNSec = 0;
 float ezDbgS = 0.0f, ezDbgHf = 0.0f;
 int   treeForceTier = -1;
+int   treeTierLog = 0;
+float treeLodScale = 0.0f;   // DEMO_LODRSCALE (0 = aus)
+float treeLodRef[3] = { 0.0f, 0.0f, 0.0f };
+int   treeLodRefValid = 0;
+float treeFocus[3] = { 0.0f, 0.0f, 0.0f };
+int   treeFocusValid = 0;
+// Detail-Radius des gerade gebauten Baums (lodR in crownVerts/leafInst). Steht
+// hier, weil add_leaf()/leaf_cluster() von beiden Generatoren aus tief unten
+// aufgerufen werden und die Kette dafuer nicht voll durchgereicht wird.
+static float gLodR = 30.0f;
 float treeVerts[TREE_VERT_CAP * TREE_FLOATS];float crownVerts[CROWN_CAP * CROWN_FLOATS];
 float leafInst[LEAF_CAP * LEAF_FLOATS];
 float wireVerts[WIRE_CAP * WIRE_FLOATS];
@@ -186,9 +194,27 @@ static void emit_cap(const Ring *a, int sides, float sway,
 #define EZ_TIPCAP 48
 static float ezTipx[EZ_TIPCAP], ezTipy[EZ_TIPCAP], ezTipz[EZ_TIPCAP];
 static int   ezNTip = 0;
-#define EZ_SPRIGCAP 512
+// 512 war zu klein: ein oak-Terminalast-Schema (6x4x3 = 72 Aeste x 18 Blaetter)
+// hat 1296 Laubpositionen, pine 82 x 30 = 2460. Mit 512 wurden nur die ersten
+// ~28 Aeste erfasst -> die Karten einer fernen Krone lagen auf einem Fleck.
+#define EZ_SPRIGCAP 4096
 static float ezSx[EZ_SPRIGCAP], ezSy[EZ_SPRIGCAP], ezSz[EZ_SPRIGCAP], ezSsize[EZ_SPRIGCAP];
 static int   ezNSprig = 0;
+// Kinderzahl-Faktor (1:1 = 100). DEMO_KIDPCT erlaubt Messungen. Wirkt auf alle
+// Stufen gleich, die Aststruktur wechselt also nicht mit der Detailstufe.
+int ezKidPct = 100;
+// Einzelblaetter fuer den aktuellen Baum erzeugen? Haengt an der Entfernung
+// (Band um lodR), nicht an der Build-Stufe — sonst fehlt in einem Band um lodR
+// die Geometrie fuer die Ueberblendung und der Baum steht kahl da.
+static int ezWantLeaves = 1;
+// Kartengroesse der aktuellen Stufe (deren leafScale) und Karten-Stride.
+static float ezCardScale = 1.25f;
+// Blattfarbe des gerade gebauten Baumes. Der EZ-Generator wuerfelte sie vorher
+// pro Terminalast (0,10..0,26 / 0,26..0,52 / 0,05..0,15) — deshalb sahen die
+// Distanz-Karten nach einem ANDEREN Baum aus als das Nah-LOD. Jetzt: eine Farbe
+// pro Baum (HSV wie im alternativen Generator), pro Ast nur noch +/-15 %
+// moduliert, und dieselbe Farbe steht in der Karten-Instanz.
+static float ezLeafR = 0.18f, ezLeafG = 0.46f, ezLeafB = 0.09f;
 
 // Kronen-Quads (Distanz-LOD): 2/3 an den echten Astspitzen, Rest um die
 // Kronenmitte. Steht beiden Generatoren zur Verfuegung.
@@ -224,6 +250,7 @@ static void emit_crown_quads(float bx, float bz, float s, float hf,
       d[0] = cc; d[1] = ccy2; d[2] = ccz2;
       d[3] = corners[c][0]; d[4] = corners[c][1];
       d[5] = qsize; d[6] = qrot; d[7] = qseed; d[8] = (float)variant;
+      d[9] = gLodR; d[10] = ezLeafR; d[11] = ezLeafG; d[12] = ezLeafB;
       nCrownVerts++;
     }
   }
@@ -237,7 +264,7 @@ static void emit_sprig_quads(float seed, int want){
     {-0.5f,-0.5f},{0.5f,-0.5f},{-0.5f,0.5f},
     { 0.5f,-0.5f},{ 0.5f, 0.5f},{-0.5f, 0.5f}
   };
-  if(ezNSprig <= 0) return;
+  if(ezNSprig <= 0 || want <= 0) return;
   int stride = ezNSprig / want; if(stride < 1) stride = 1;
   for(int q = 0; q < ezNSprig && want > 0; q += stride, want--){
     float h3 = TH(97 + q * 3), h4 = TH(98 + q * 3);
@@ -249,6 +276,7 @@ static void emit_sprig_quads(float seed, int want){
       d[0] = ezSx[q]; d[1] = ezSy[q]; d[2] = ezSz[q];
       d[3] = corners[c][0]; d[4] = corners[c][1];
       d[5] = ezSsize[q]; d[6] = qrot; d[7] = qseed; d[8] = (float)variant;
+      d[9] = gLodR; d[10] = ezLeafR; d[11] = ezLeafG; d[12] = ezLeafB;
       nCrownVerts++;
     }
   }
@@ -261,7 +289,7 @@ static void add_leaf(float x, float y, float z, float size, float rotY, float ti
   float *d = &leafInst[nLeafInst * LEAF_FLOATS];
   d[0] = x; d[1] = y; d[2] = z;
   d[3] = size; d[4] = rotY; d[5] = tilt; d[6] = aspect;   // aspect = Breite/Laenge
-  d[7] = cr; d[8] = cg; d[9] = cb;
+  d[7] = cr; d[8] = cg; d[9] = cb; d[10] = gLodR;
   nLeafInst++;
 }
 // Ein Baum in "Einheitsspace" (Höhe ~3.0), nach (bx,by,bz) verschoben, * s skaliert.
@@ -375,6 +403,7 @@ static void gen_tree(float bx, float by, float bz, float s, float seed, int tier
   ezDbgS = s; ezDbgHf = hf;
   float lcr, lcgg, lcb;
   hsv2rgb(hue, lsat, lval, &lcr, &lcgg, &lcb);
+  ezLeafR = lcr; ezLeafG = lcgg; ezLeafB = lcb;   // auch fuer die Distanz-Karten
 
   // ---------- Stamm: 6 Knoten, konisch + Wurzelflan + individueller Schwung ----------
   float kx[6], ky[6], kz[6], kr[6];
@@ -640,10 +669,11 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
   else if(tier == 0) G = (G * 2) / 5;
   if(G < 3) G = 3;
   if(G > 8) G = 8;
-  // Kinderzahl fern reduziert: deren Presets (bis 82 Aeste) sind fuer wenige
-  // Baeume gerechnet, unser Wald hat 646. Das duennt die Struktur aus, statt sie
-  // gegen eine andere Repraesentation zu tauschen.
-  int kidPct = (tier >= 3) ? 100 : (tier == 2 ? 85 : 60);
+  // Kinderzahl: in ALLEN Stufen gleich (deren Regel: detail ändert nur die
+  // Vernetzung). Der Wald hat 646 Baeume, ihre Presets sind fuer wenige
+  // gerechnet — die Dichte deshalb ueber einen GLOBALen Faktor (DEMO_KIDPCT),
+  // der jede Stufe gleichmaessig trifft, statt ueber die Stufe.
+  int kidPct = ezKidPct;
 
   // Kronenlevel-Laengen sind extra skalierbar: ihre Presets sind schlanker als
   // unsere Kronen proportioniert (Breite/Hoehe ~0,4 statt ~0,85).
@@ -790,8 +820,11 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
     // Laubpositionen werden in ALLEN Stufen gesammelt — die Atlas-Karten sind
     // bei fern die einzige Laubdarstellung. Nur die Einzelblaetter entfallen.
     int lc = (int)P->leafCount;
-    int leafStride = (tier >= 3) ? 1 : 2;          // deren leafStride
-    float leafScale = (tier >= 3) ? 1.0f : (tier == 2 ? 1.25f : 1.3f);
+    // Laub in ALLEN Stufen (deren Regel: leafStride/leafScale, nie "kein Laub").
+    // Einzelblaetter gibt es, solange ezWantLeaves (Entfernung bis 1,1 lodR),
+    // Karten uebernehmen komplementaer ab 0,9 lodR.
+    int leafStride = 1;
+    const float CARDSCALE = ezCardScale;   // deren leafScale: 1,25 (LOD1) / 1,3 (LOD2)
     if(ezNTip < EZ_TIPCAP){              // Spitze fuer die Distanz-Quads merken
       ezTipx[ezNTip] = sec[S].rg.p[0];
       ezTipy[ezNTip] = sec[S].rg.p[1];
@@ -800,7 +833,9 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
     }
     if(lc < 1) return;
     float lsz = P->leafSize * unit;
-    float lcr = 0.10f + 0.16f * TH(700), lcgg = 0.26f + 0.26f * TH(701), lcb = 0.05f + 0.10f * TH(702);
+    float lcr = ezLeafR * (0.85f + 0.30f * TH(700)),
+          lcgg = ezLeafG * (0.85f + 0.30f * TH(701)),
+          lcb  = ezLeafB * (0.85f + 0.30f * TH(702));
     for(int i = 0; i < lc; i++){
       float st = (1.0f - P->leafStart) / (float)lc;
       float t = P->leafStart + (i + TH(400 + i)) * st;
@@ -809,12 +844,15 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
       float cx = sec[si].rg.p[0] + (sec[si2].rg.p[0] - sec[si].rg.p[0]) * al;
       float cy = sec[si].rg.p[1] + (sec[si2].rg.p[1] - sec[si].rg.p[1]) * al;
       float cz = sec[si].rg.p[2] + (sec[si2].rg.p[2] - sec[si].rg.p[2]) * al;
-      if(ezNSprig < EZ_SPRIGCAP){       // Karte fuer den Atlas-Quad
+      if(ezNSprig < EZ_SPRIGCAP){       // Karte fuer die Distanzstufe
         ezSx[ezNSprig] = cx; ezSy[ezNSprig] = cy; ezSz[ezNSprig] = cz;
-        ezSsize[ezNSprig] = lsz * (1.6f + 0.9f * TH(430 + i)) * leafScale;
+        // Groessenstreuung wie bei ihnen: leafSize * (1 +/- sizeVariance=0,7).
+        // Der alte Faktor (1,6..2,5) war auf 22 Riesenquads pro Baum getunt; mit
+        // 648 Karten pro Baum waere die Krone damit ueberfuellt.
+        ezSsize[ezNSprig] = lsz * (0.30f + 1.40f * TH(430 + i)) * CARDSCALE;
         ezNSprig++;
       }
-      if(tier >= 3 && (i % leafStride) == 0){   // Nahstufe: Einzelblaetter
+      if(ezWantLeaves && (i % leafStride) == 0){   // Einzelblaetter (NAHstufe)
         float rr = lsz * (0.30f + 0.25f * TH(430 + i));
         leaf_cluster(cx, cy, cz, rr, 5, lsz * 0.45f, 0.85f, 0.55f,
                      seed + (float)i * 7.3f, 500 + i * 3, lcr, lcgg, lcb);
@@ -832,7 +870,9 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
             seed + (float)lvl * 17.0f + (float)i * 3.13f, tier, btone);
 }
 
-static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int tier){
+static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int tier,
+                        float d, float R1){
+  (void)d; (void)R1;   // frueher steuerte die Distanz noch, ob Karten gebaut werden
   int pidx = (int)(TH(0) * (float)(EZ_NPRESETS - 0.001f));
   if(treeEzPreset >= 0 && treeEzPreset < EZ_NPRESETS) pidx = treeEzPreset;
   const EzPreset *P = &EZ_PRESETS[pidx];
@@ -841,17 +881,36 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
   float treeH = 1.5f * hf * 1.15f * s;
   float unit = treeH / P->length[0];
   float btone = 0.75f + 0.55f * TH(2);
+  // eigene Blattfarbe pro Baum (wie im alternativen Generator) — sie sitzt auch
+  // in der Karten-Instanz, damit die Distanzstufe dieselbe Krone zeigt wie nah
+  float hueE  = 0.20f + TH(800) * 0.20f;
+  float lsatE = 0.45f + TH(801) * 0.45f;
+  float lvalE = 0.30f + TH(802) * 0.30f;
+  hsv2rgb(hueE, lsatE, lvalE, &ezLeafR, &ezLeafG, &ezLeafB);
   Sec root;
   root.rg.p[0] = bx; root.rg.p[1] = by; root.rg.p[2] = bz;
   root.rg.r = P->radius[0] * unit;
   root.d[0] = 0.0f; root.d[1] = 1.0f; root.d[2] = 0.0f;
   ring_basis(&root.rg, 0.0f, 1.0f, 0.0f);
   ezNTip = 0; ezNSprig = 0;
+  ezCardScale = (tier >= 2) ? 1.25f : 1.30f;   // muss VOR ez_grow stehen
   ezDbgName = P->name; ezDbgUnit = unit; ezDbgR0 = root.rg.r; ezDbgNSec = 0;  ezDbgS = s; ezDbgHf = hf;
   ez_grow(0, &root, P, unit, seed, tier, btone);
-  // Atlas-Karten: fern mehr (sie sind das Laub), nah weniger (dort stehen
-  // Einzelblaetter). Budget: CROWN_CAP erlaubt ~15000 Quads pro Region.
-  emit_sprig_quads(seed, tier >= 3 ? 24 : (tier == 2 ? 60 : 22));
+  // Karten (Distanzstufe): ab 0,9 lodR uebernehmen sie das Laub, im Band um
+  // lodR existieren beide und der Shader blendet sie um lodR +/-10 % um.
+  // Dichte/Groesse wie deren LOD1/LOD2: jeder zweite / vierte Laubansatz.
+  // Nach oben gibt es keine Kante mehr — die Krone endet sonst kahl bei R2
+  // (gemessen: ab 1,1 R2 war vorher GAR kein Laub mehr da). Das Billboard
+  // (TODO 23) eretzt diese Stufe spaeter, nicht eine Luecke.
+  // Karten gibt es in JEDER Stufe — auch bei einem beim Bau nahen Baum. Die
+  // Stufe wird nur alle 12 m Kameraweg neu gebaut (main.c), ein Baum kann also
+  // bis ~17 m veraltet sein. Ohne Karten verschwindet beim Entfernen das Laub:
+  // der Shader blendet die Einzelblaetter weg, nichts uebernimmt (gemessen: 79
+  // von 640 Baeumen waren beim Bau tier 3 -> 0 Karten). Zusatzkosten klein: nur
+  // tier-3-Baeume bekommen sie, jeder vierte Laubansatz (79 x ~82 Karten = 39k
+  // von 2,66 Mio Geruest-Vertices).
+  int wantCards = ezNSprig / (tier >= 2 ? 2 : 4);
+  emit_sprig_quads(seed, wantCards);
 }
 
 // ---------- Platzierung (identisch zum alten SDF-System) ----------
@@ -905,43 +964,60 @@ int tree_find_nearest(float x, float z, float *out, float *sizeOut, float *hfOut
   return bd < 1e29f;
 }
 
-// Eine Referenz-Krone aus echten Einzelblaettern (Vorlage fuer den Atlas).
-// Absichtlich in BUSCHEL gebaut — 26 Klumpen a ~22 Blaetter — weil eine
-// gleichmaessige Fuellung aus der Ferne wie ein gruerner Nebel aussieht,
-// Haufen dagegen wie Blattwerk mit Luecken dazwischen.
+// Atlas-Vorlage: EIN Blattbuschel (Rebe), nicht eine ganze Krone.
+// Eine Distanz-Karte steht bei uns fuer genau einen Laubansatz des Baumes —
+// genau wie bei EZ-Tree, deren "leaf" eine Texturkarte mit mehreren Blaettern
+// ist. Vorher lag in der Kachel eine ganze Referenzkrone (40 Klumpen a 50
+// Blaetter, 2,4 m Durchmesser), die dann auf einer 0,45-m-Karte landetet: die
+// Karte zeigte eine ganze Krone, und das Nah-LOD zeigte Einzelblaetter.
+// Die Farbe ist absichtlich NEUTRAL: die Blattfarbe DIESES Baumes steckt in der
+// Karten-Instanz und wird im Kronen-Shader multipliziert.
 int foliage_patch(float *out, int cap, float seed, float s){
   #define THP(i) c_hash12(seed * 0.731f + (i) * 13.7f, seed * 1.173f + (i) * 7.9f)
   int n = 0;
-  float ccy = 2.05f * s, ex = 1.20f * s, ey = 1.00f * s, ez = 1.20f * s;
-  for(int c = 0; c < 40 && n < cap; c++){
-    float g1 = THP(c * 3), g2 = THP(c * 3 + 1), g3 = THP(c * 3 + 2);
-    float bx = (g1 + g2 - 1.0f) * ex * 0.82f;
-    float by = ccy + (g3 + g1 - 1.0f) * ey * 0.82f;
-    float bz = (g2 + g3 - 1.0f) * ez * 0.82f;
-    float rad = s * (0.20f + 0.16f * g2);
-    for(int i = 0; i < 50 && n < cap; i++){
-      int k = c * 32 + i;
-      float h1 = THP(400 + k * 3), h2 = THP(401 + k * 3), h3 = THP(402 + k * 3);
-      float th = h1 * 6.2832f, cz2 = h2 * 2.0f - 1.0f;
-      float rr = rad * cbrtf(h3);
-      float sr = sqrtf(fmaxf(0.0f, 1.0f - cz2 * cz2));
-      float *d = &out[n * LEAF_FLOATS];
-      d[0] = bx + rr * sr * cosf(th);
-      d[1] = by + rr * cz2 * 0.85f;
-      d[2] = bz + rr * sr * sinf(th);
-      d[3] = s * (0.120f + 0.070f * h1);      // Atlas-Blaetter sind bewusst gross:
-      d[4] = h2 * 6.2832f;                    // sie stehen fuer einen Blattbuschel,
-      d[5] = 0.25f + h3 * 1.05f;              // nicht fuer ein Einzelblatt
-      d[6] = 0.0f;
-      d[7] = 0.09f + 0.17f * h2; d[8] = 0.24f + 0.28f * h3; d[9] = 0.04f + 0.11f * h1;
-      n++;
-    }
+  int cnt = 9 + (int)(THP(0) * 4.9f);              // 9..13 Blaetter pro Buschel
+  for(int i = 0; i < cnt && n < cap; i++){
+    float h1 = THP(10 + i * 3), h2 = THP(11 + i * 3), h3 = THP(12 + i * 3);
+    // Richtungen gleichmaessig ueber die Kugel (goldener Winkel, gleichmaessiges z)
+    float th = (float)i * GOLD;
+    float nz = 1.0f - 2.0f * ((float)i + 0.5f) / (float)cnt;
+    float sr = sqrtf(fmaxf(0.0f, 1.0f - nz * nz));
+    float rr = s * (0.15f + 0.11f * h1);
+    float *d = &out[n * LEAF_FLOATS];
+    d[0] = sr * cosf(th) * rr;
+    d[1] = nz * rr * 0.9f;
+    d[2] = sr * sinf(th) * rr;
+    d[3] = s * (0.19f + 0.12f * h2);               // Blatt = ~1/3 der Kartenbreite
+    d[4] = h3 * 6.2832f;
+    d[5] = 0.35f + h1 * 0.75f;                     // Neigung gegenueber dem Stiel
+    d[6] = 0.38f + 0.22f * h2;                     // Seitenverhaeltnis (nie 1)
+    d[7] = 1.0f; d[8] = 1.0f; d[9] = 1.0f;         // farbneutral
+    d[10] = 1e9f;                                  // Atlas: nie ausduennen
+    n++;
   }
   #undef THP
   return n;
 }
 
-typedef struct { float p[3]; float s; float d2; } TreeCand;
+typedef struct { float p[3]; float s; float d2; int ix, iz; float H; } TreeCand;
+
+// Hysterese der Stufenwahl, wie bei EZ-Tree (0,05 als Bruchteil des Schalt-
+// radius). Der Wald wird nur neu gebaut, wenn sich das Build-Zentrum um 12 m
+// bewegt; ohne Gedaelnnis wechselt ein Baum beim selben Standort die Stufe, nur
+// weil das Zentrum wandert — das war die "seltsame Hysterese" im Bild.
+#define LODMEM 2048
+static struct { int ix, iz; signed char tier; } lodMem[LODMEM];
+static int lodGet(int ix, int iz){
+  unsigned h = (unsigned)ix * 73856093u ^ (unsigned)iz * 19349663u;
+  int k = (int)(h & (LODMEM - 1));
+  return (lodMem[k].tier >= 0 && lodMem[k].ix == ix && lodMem[k].iz == iz)
+       ? (int)lodMem[k].tier : -1;
+}
+static void lodSet(int ix, int iz, int tier){
+  unsigned h = (unsigned)ix * 73856093u ^ (unsigned)iz * 19349663u;
+  int k = (int)(h & (LODMEM - 1));
+  lodMem[k].ix = ix; lodMem[k].iz = iz; lodMem[k].tier = (signed char)tier;
+}
 
 void trees_build(float tx, float tz){
   nTreeVerts = 0; nCrownVerts = 0; nWireVerts = 0; nTrees = 0; nLeafInst = 0;
@@ -950,18 +1026,26 @@ void trees_build(float tx, float tz){
   int nc = 0;
   const int RANGE = 20;   // Zellen-Radius um das Kameraziel (~180m, passt zur
                           // groesseren Sichtweite: march bis 400m)
+  // Referenzpunkt fuer Detailstufe und Budget: die ECHTE Kamera. Vorher das
+  // Build-Zentrum = camTgt, das haengt in Fly-Kamera 10 m in Blickrichtung vor
+  // der Kamera -> ein Baum vor der Nase wurde so eingestuft, als waere man 10 m
+  // naeher, einer hinter einem als 10 m ferner.
+  float rx = treeLodRefValid ? treeLodRef[0] : tx;
+  float rz = treeLodRefValid ? treeLodRef[2] : tz;
   int ix0 = (int)floorf((tx - RANGE * TREE_G) / TREE_G);
   int ix1 = (int)floorf((tx + RANGE * TREE_G) / TREE_G);
   int iz0 = (int)floorf((tz - RANGE * TREE_G) / TREE_G);
   int iz1 = (int)floorf((tz + RANGE * TREE_G) / TREE_G);
   for(int iz = iz0; iz <= iz1; iz++)
   for(int ix = ix0; ix <= ix1; ix++){
-    float tp[3], s;
-    if(!tree_cell(ix, iz, tp, &s, 0)) continue;
+    float tp[3], s, hf;
+    if(!tree_cell(ix, iz, tp, &s, &hf)) continue;
     if(nc < CAND_CAP){
       cand[nc].p[0] = tp[0]; cand[nc].p[1] = tp[1]; cand[nc].p[2] = tp[2];
-      cand[nc].s = s;
-      float ddx = tp[0] - tx, ddz = tp[2] - tz;
+      cand[nc].s = s; cand[nc].ix = ix; cand[nc].iz = iz;
+      // Wuchshoehe ueber Grund — dieselbe Formel, die auch tree_jump() rahmt.
+      cand[nc].H = s * 1.5f * hf * 1.15f;
+      float ddx = tp[0] - rx, ddz = tp[2] - rz;
       cand[nc].d2 = ddx * ddx + ddz * ddz;
       nc++;
     }
@@ -972,18 +1056,59 @@ void trees_build(float tx, float tz){
   for(int i = 0; i < nc; i++)
     for(int j = i + 1; j < nc; j++)
       if(cand[j].d2 < cand[i].d2){ TreeCand t = cand[i]; cand[i] = cand[j]; cand[j] = t; }
-  // DEMO_ONETREE: nur der naechste Baum (Liste ist gerade nach Entfernung
-  // sortiert), damit ein einzelner Baum in Ruhe betrachtet werden kann.
-  if(treeOneShot && nc > 1) nc = 1;
+  // DEMO_ONETREE: genau den Baum bauen, den die Debug-Kamera gerahmt hat
+  // (tree_jump). Vorher war es der naechste am Build-Zentrum = camTgt, ab ~24 m
+  // Abstand also systematisch ein ANDERER Baum -> jede Abstandsmessung wertlos.
+  if(treeOneShot && nc > 1){
+    int best = 0;
+    if(treeFocusValid){
+      float bd = 1e30f;
+      for(int i = 0; i < nc; i++){
+        float ddx = cand[i].p[0] - treeFocus[0], ddz = cand[i].p[2] - treeFocus[2];
+        if(ddx * ddx + ddz * ddz < bd){ bd = ddx * ddx + ddz * ddz; best = i; }
+      }
+    }
+    TreeCand t = cand[0]; cand[0] = cand[best]; cand[best] = t;
+    nc = 1;
+  }
   for(int i = 0; i < nc; i++){
-    // Detail-Stufe nach Entfernung zum Kameraziel: sehr nahe Baeume bekommen
-    // Zweige + vollstaendige Blaetter (bis ~100.000), mittlere nur Blaetter an
-    // den Aesten, ferne nur die Atlas-Quads.
-    int tier = treeForceTier >= 0 ? treeForceTier
-           : (cand[i].d2 < 121.0f ? 3 : (cand[i].d2 < 784.0f ? 2 : 0));
+    float d = sqrtf(cand[i].d2), H = cand[i].H;
+    // Schaltweiten nach deren Verhaeltnis (LOD1 bei 2,7x, LOD2 bei 6,7x der
+    // Wuchslaenge), hier auf Nutzerwunsch deutlich weiter: volle Dichte bis
+    // 10x Wuchshoehe, Kartenstufe bis 20x. Absolut begrenzt, damit die
+    // 13,8-m-Baeume nicht bis 138 m Vollast bekommen und die 2,6-m-Baeume nicht
+    // schon auf 26 m ausduennen.
+    float R1 = 10.0f * H, R2 = 20.0f * H;
+    if(R1 < 25.0f) R1 = 25.0f; else if(R1 > 90.0f) R1 = 90.0f;
+    if(R2 < 50.0f) R2 = 50.0f; else if(R2 > 160.0f) R2 = 160.0f;
+    // DEMO_LODRSCALE: Schaltweiten skalieren — Messbank, um an EINEM Standort
+    // beide Repraesentationen (Einzelblaetter / Karten) vergleichend zu sehen.
+    if(treeLodScale > 0.0f){ R1 *= treeLodScale; R2 *= treeLodScale; }
+    int tier;
+    if(treeForceTier >= 0) tier = treeForceTier;
+    else {
+      int prev = lodGet(cand[i].ix, cand[i].iz);
+      if(prev == 3)      tier = (d < R1 * 1.05f) ? 3 : (d < R2 ? 2 : 0);
+      else if(prev == 2) tier = (d < R1 * 0.95f) ? 3 : (d < R2 * 1.05f ? 2 : 0);
+      else if(prev == 0) tier = (d < R2 * 0.95f) ? 2 : 0;
+      else               tier = (d < R1) ? 3 : (d < R2 ? 2 : 0);
+      lodSet(cand[i].ix, cand[i].iz, tier);
+    }
+    // Laub-Entscheidung haengt an der Entfernung, nicht an der Build-Stufe:
+    // Einzelblaetter bis 1,1 R1, Karten ab 0,9 R1. Im Band um R1 existieren
+    // beide, der Shader blendet sie um R1 +/-10 % uebereinander.
+    gLodR = R1;
+    ezWantLeaves = (d <= R1 * 1.10f);
+    int leafBefore = nLeafInst, quadBefore = nCrownVerts;
     float tseed = cand[i].p[0] * 12.9898f + cand[i].p[2] * 78.233f;
-    if(treeGenMode) gen_tree_ez(cand[i].p[0], cand[i].p[1], cand[i].p[2], cand[i].s, tseed, tier);
+    if(treeGenMode) gen_tree_ez(cand[i].p[0], cand[i].p[1], cand[i].p[2], cand[i].s, tseed, tier, d, R1);
     else            gen_tree (cand[i].p[0], cand[i].p[1], cand[i].p[2], cand[i].s, tseed, tier);
+    if(treeTierLog)
+      printf("  Baum (%.1f,%.1f) H %.1f m  d %.1f m  R1 %.0f R2 %.0f  tier %d  "
+             "Blaetter %d  Karten %d  Farbe (%.2f,%.2f,%.2f)\n",
+             cand[i].p[0], cand[i].p[2], H, d, R1, R2, tier,
+             nLeafInst - leafBefore, (nCrownVerts - quadBefore) / 6,
+             ezLeafR, ezLeafG, ezLeafB);
     nTrees++;
   }
 }

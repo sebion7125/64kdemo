@@ -412,6 +412,10 @@ static float envShotAt = -1.0f;
 static float envFreeze = -1.0f;
 //   DEMO_NOLEAF=1    Einzelblaetter nicht zeichnen (Vorher/Nachher-Messung)
 static int envNoLeaf = 0;
+// DEMO_NOTERRAIN=1: Terrain, Himmel und Gras nicht zeichnen -> schwarzer
+// Hintergrund. Messbank fuer LOD-Farben: ohne Landschaft mittelt kein
+// Hintergrund in die Baumfarbe hinein, und die Bilddifferenz ist exakt der Baum.
+static int envNoTerrain = 0;
 //   DEMO_LEAFMASK=1    Einzelblaetter in reinem Rot (Maske fuer Blatt-Messungen)
 static int envLeafMask = 0;
 static int envCrownMask = 0;
@@ -651,11 +655,18 @@ static void build_foliage_atlas(GLuint progLeaf){
   p_glEnableVertexAttribArray(3);
   p_glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, LEAF_FLOATS * 4, (const void *)28);
   p_glVertexAttribDivisor(3, 1);
+  p_glEnableVertexAttribArray(4);
+  p_glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, LEAF_FLOATS * 4, (const void *)40);  // iLodR
+  p_glVertexAttribDivisor(4, 1);
 
   p_glDisable(GL_BLEND);
   p_glEnable(GL_DEPTH_TEST);
   p_glDepthFunc(GL_LESS);
-  const float s = 2.2f, cy = 2.05f * s, camR = 6.0f, half = 1.62f * s;
+  // Aufnahme-Rahmen: der Buschel fillt die Kachel zu ~85 %. half bestimmt auch
+  // den Tiefenbereich (dz = 2,8*half), camR = dz/2 -> der Buschel liegt genau in
+  // der Mitte des orthografischen Bereichs (sonst wird die hintere Haelfte weg-
+  // geclippt, gemessen an der halbleeren Kachel).
+  const float s = 2.2f, cy = 0.0f, camR = 0.42f * s, half = 0.30f * s;
   double tCap0 = now_sec();
   int nLast = 0;
   for(int v = 0; v < FOL_VAR; v++){
@@ -764,6 +775,10 @@ static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: t
   p_glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, CROWN_FLOATS * 4, (const void *)12);
   p_glEnableVertexAttribArray(2);
   p_glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, CROWN_FLOATS * 4, (const void *)20);
+  p_glEnableVertexAttribArray(3);
+  p_glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, CROWN_FLOATS * 4, (const void *)36); // lodR
+  p_glEnableVertexAttribArray(4);
+  p_glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, CROWN_FLOATS * 4, (const void *)40); // Blattfarbe
 
   // Einzelblaetter naher Baeume: aBase(2) statisch + iPos(3) iData(4) iCol(3) [instanzen]
   p_glBindBuffer(GL_ARRAY_BUFFER, vboLeafBase);
@@ -783,6 +798,9 @@ static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: t
   p_glEnableVertexAttribArray(3);
   p_glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, LEAF_FLOATS * 4, (const void *)28);
   p_glVertexAttribDivisor(3, 1);
+  p_glEnableVertexAttribArray(4);
+  p_glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, LEAF_FLOATS * 4, (const void *)40);  // iLodR
+  p_glVertexAttribDivisor(4, 1);
 
   // Gras: aBase(2) + iPos(3) iData(4) [instanzen]
   p_glGenVertexArrays(1, &vaoGrass);
@@ -1152,13 +1170,40 @@ static void tree_jump(void){
   float crownY = tp[1] + ts * 1.5f * hf * 1.15f;
   float dist = 1.6f + ts * hf * 0.75f;
   // DEMO_TREEDIST=<m>: Abstand erzwungen (Ganzbaum-Ansicht fuer Messungen)
-  { const char *ed = getenv("DEMO_TREEDIST"); if (ed) dist = (float)atof(ed); }
+  const char *edist = getenv("DEMO_TREEDIST");
+  if (edist) dist = (float)atof(edist);
+  float camY = crownY - ts * hf * 0.35f;
+  if (edist){
+    // Messbank: Richtung waehlen, in der kein Ruecken die Sicht auf die Krone
+    // verdeckt. Beobachtung: bei 80 m lag der Baum hinter einem Huegel, die
+    // Messung zaehlte daraufhin NULL Geruest-Pixel — eine Messung, die nichts
+    // ueber das LOD aussagte.
+    float best = 1e9f; int bi = 0;
+    for(int a = 0; a < 16; a++){
+      float ang = (float)a * 6.2832f / 16.0f;
+      float ex = sinf(ang), ez = cosf(ang), worst = -1e9f;
+      for(int k = 2; k < 24; k++){
+        float t = dist * (float)k / 24.0f;
+        float sight = crownY + (camY - crownY) * (t / dist);
+        float g = c_terrainH(tp[0] + ex * t, tp[2] + ez * t) - sight;
+        if(g > worst) worst = g;
+      }
+      if(worst < best){ best = worst; bi = a; }
+    }
+    float ang = (float)bi * 6.2832f / 16.0f;
+    dx = sinf(ang); dz = cosf(ang); l = 1.0f;
+    printf("DEBUG Messbank: Richtung %.0f grad, hoechster Hindernis-Ueberschuss %.2f m\n",
+           ang * 57.29578f, best);
+  }
   flyPos[0] = tp[0] + dx / l * dist;
-  flyPos[1] = crownY - ts * hf * 0.35f;
+  flyPos[1] = camY;
   flyPos[2] = tp[2] + dz / l * dist;
   flyYaw = atan2f(tp[0] - flyPos[0], tp[2] - flyPos[2]);
   float dy = crownY - flyPos[1];
   flyPitch = atan2f(dy, sqrtf(dist * dist - 0.0f));
+  // gemerkter Fokusbaum: DEMO_ONETREE baut genau diesen (nicht den naechsten am
+  // Build-Zentrum), damit Abstandsmessungen denselben Baum zeigen.
+  treeFocus[0] = tp[0]; treeFocus[1] = tp[1]; treeFocus[2] = tp[2]; treeFocusValid = 1;
   printf("DEBUG Baum-Sprung: (%.1f, %.1f, %.1f) Groesse %.2f hf %.2f Krone %.1f m, Abstand %.2f m\n",
          tp[0], tp[1], tp[2], ts, hf, crownY, dist);
 }
@@ -1392,6 +1437,9 @@ int main(int argc, char **argv) {
   { const char *eo = getenv("DEMO_ONETREE");
     if (eo && atoi(eo)) { treeOneShot = 1; envTreeJump = 1; grassMaxDist = 0.5f; } }
   { const char *et = getenv("DEMO_TIER"); if (et) treeForceTier = atoi(et); }
+  { const char *el = getenv("DEMO_TREELOG"); if (el) treeTierLog = atoi(el); }
+  { const char *ek = getenv("DEMO_KIDPCT"); if (ek) ezKidPct = atoi(ek); }
+  { const char *er = getenv("DEMO_LODRSCALE"); if (er) treeLodScale = (float)atof(er); }
   { const char *eg = getenv("DEMO_TREEGEN"); if (eg) treeGenMode = (strstr(eg,"alt")||strstr(eg,"0")) ? 0 : 1; }
   { const char *es = getenv("DEMO_EZSPREAD"); if (es) treeEzSpread = (float)atof(es); }
   { const char *ep = getenv("DEMO_EZPRESET"); if (ep) treeEzPreset = atoi(ep); }
@@ -1416,7 +1464,8 @@ int main(int argc, char **argv) {
       flyPitch = cp; if(cy2 < 1e29f) flyYaw = cy2;
       printf("DEBUG Kamera gesetzt: (%.1f, %.2f, %.1f) Pitch %.2f Yaw %.2f\n", cx, flyPos[1], cz, cp, flyYaw); } } }
   envNoLeaf = getenv("DEMO_NOLEAF") ? 1 : 0;
-  envLeafMask = getenv("DEMO_LEAFMASK") ? 1 : 0;
+  envNoTerrain = getenv("DEMO_NOTERRAIN") ? 1 : 0;
+  envLeafMask = getenv("DEMO_LEAFMASK") ? atoi(getenv("DEMO_LEAFMASK")) : 0;  // 1=rot, 2=nur Albedo
   if (envTreeJump) tree_jump();
   build_foliage_atlas(progLeaf);   // Atlas braucht vboLeafBase (build_tree_lines) + progLeaf
   init_shadow();
@@ -1761,6 +1810,9 @@ int main(int argc, char **argv) {
       static float tCX = 0, tCZ = 0;
       if(!builtT || fabsf(camTgt[0] - tCX) > 12.0f || fabsf(camTgt[2] - tCZ) > 12.0f){
         tCX = camTgt[0]; tCZ = camTgt[2];
+        // Detailstufe an der echten Kamera messen, nicht am Build-Zentrum
+        treeLodRef[0] = camPos[0]; treeLodRef[1] = camPos[1]; treeLodRef[2] = camPos[2];
+        treeLodRefValid = 1;
         trees_build(tCX, tCZ);
         upload_mesh_buffers();
         builtT = 1;
@@ -1974,7 +2026,7 @@ int main(int argc, char **argv) {
       if(envGlDbg) printf("DBG nach Shadow-Pass: err=0x%x fb=0x%x vp=%d,%d\n",
                           p_glGetError(), p_glCheckFramebufferStatus(GL_FRAMEBUFFER), fboW, fboH);
     }
-    if (!grassOnly) {
+    if (!grassOnly && !envNoTerrain) {
       p_glUseProgram(progScene);
       p_glBindVertexArray(vaoTri);
       p_glUniform2f(locRes, (float)fboW, (float)fboH);
@@ -2059,7 +2111,7 @@ int main(int argc, char **argv) {
     // Nachbarpaare innerhalb eines Chunks liegen falsch, bis 24m). Aendert sich
     // am Swap die Sortierung, werden verdeckte Halme schlagartig sichtbar.
     p_glDepthMask(dbgGrassDepth ? GL_TRUE : GL_FALSE);
-    {
+    if(!envNoTerrain){
       int chunk = (nGrass + 31) / 32;   // 32 Chunks (der Fade-Crescent liegt
                                          // in den letzten 1-2 Chunks -> genuegend fein)
       if (grassSortedOrderActive()) {

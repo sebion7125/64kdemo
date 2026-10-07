@@ -2,6 +2,9 @@
 layout(location=0) in vec3 aCenter;  // Quad-Mitte (Welt)
 layout(location=1) in vec2 aOff;     // Ecke ±0.5
 layout(location=2) in vec4 aData;    // size, rotY, seed, pad
+layout(location=3) in float iLodR;   // Radius, ab dem diese Karte das Laub dieses
+                                     // Baumes eretzt (CPU: 10x Wuchshoehe)
+layout(location=4) in vec3 iCol;     // Blattfarbe DIESES Baum
 uniform mat4 uMVP;
 uniform vec3 uCamPos;
 uniform vec3 uCamTgt;
@@ -15,6 +18,7 @@ out float vFade;
 out vec2 vTile;      // Atlas-Kachel (Spalte, Zeile)
 out vec3 vNrm;      // Billboard-Normale (zeigt zur Kamera)
 out vec3 vRight, vUp;
+out vec3 vCol;      // Blattfarbe des Baumes (Atlas ist farbneutral)
 float hash12(vec2 p){
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);
@@ -55,18 +59,17 @@ void main(){
   p.z += cos(uTime * 1.3 + ph * 1.7) * amp * 0.7;
   p.y += sin(uTime * 2.2 + ph) * amp * 0.35;
   float d = length(aCenter - uCamPos);
-  // Uebergabe an die echten Einzelblaetter: leaf.vert duennt seine Blaetter
-  // zwischen 20 und 28 m statistisch aus — die Billboards fuellen exakt
-  // komplementaer auf und sind unterhalb von 20 m AUS (Nutzer: "Billboards der
-  // Baumkrone duerfen nicht mehr genutzt werden, wenn die Kamera direkt davor
-  // ist. Das sieht immer unecht aus.").
-  float near = smoothstep(20.0, 28.0, d);
+  // Uebergabe an die echten Einzelblaetter: leaf.vert duennt seine Blaetter um
+  // iLodR +/-10 % statistisch aus — die Karten fuellen exakt komplementaer auf.
+  // Der feste Schwellwert 20..28 m passte zu keiner CPU-Detailstufe: die Karten
+  // waren unter 20 m ganz aus, die Blaetter hoerten schon viel frueher auf.
+  // Im Schatten-Wurf ist uCamPos das Sonnenauge (63 m weg) -> dort immer 1.
+  float near = (uLightFace > 0.5) ? 1.0 : smoothstep(iLodR * 0.90, iLodR * 1.10, d);
   // Build-Rand: Baeume werden bis RANGE=20 Zellen a 9 m gebaut (180 m halbe
   // Kantenlaenge, Ecken ~255 m). Bis 2026-10-07 endete das Blattdach bei 185 m,
   // die Staemme gingen aber bis ~255 m -> kahle Stummel in der Ferne.
   float far = 1.0 - smoothstep(190.0, 250.0, d);
   vFade = near * far;
-  // Im Schatten-Wurf ist uCamPos das Sonnenauge (63 m weg) -> dort immer 1.
   if(uLightFace < 0.5 && vFade < 0.002){ gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vUV = aOff * 2.0;
   vPos = p;
@@ -79,5 +82,6 @@ void main(){
   vTile = vec2(mod(t, 8.0), floor(t / 8.0));
   vNrm = normalize(uCamPos - aCenter);
   vRight = right; vUp = up;
+  vCol = iCol;
   gl_Position = uMVP * vec4(p, 1.0);
 }
