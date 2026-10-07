@@ -18,9 +18,14 @@
 #include <string.h>
 
 int   treeOneShot = 0;
+int   treeGenMode = 1;   // 0 = eigener Generator, 1 = EZ-Tree-Port
+int   treeEzPreset = -1;   // DEMO_EZPRESET=0..3: Preset erzwingen (-1 = pro Baum gewuerfelt)
+float treeEzSpread = 1.0f;  // DEMO_EZSPREAD: Laengenfaktor der Kronenlevel (1 = 1:1-Port)
+const char *ezDbgName = "-"; float ezDbgUnit = 0.0f, ezDbgR0 = 0.0f;
+float ezDbgR[13]; int ezDbgNSec = 0;
+float ezDbgS = 0.0f, ezDbgHf = 0.0f;
 int   treeForceTier = -1;
-float treeVerts[TREE_VERT_CAP * TREE_FLOATS];
-float crownVerts[CROWN_CAP * CROWN_FLOATS];
+float treeVerts[TREE_VERT_CAP * TREE_FLOATS];float crownVerts[CROWN_CAP * CROWN_FLOATS];
 float leafInst[LEAF_CAP * LEAF_FLOATS];
 float wireVerts[WIRE_CAP * WIRE_FLOATS];
 int nTreeVerts = 0, nCrownVerts = 0, nWireVerts = 0, nTrees = 0, nLeafInst = 0;
@@ -176,6 +181,79 @@ static void emit_cap(const Ring *a, int sides, float sway,
 // Deterministischer per-Baum-Hash (Seed aus der Weltposition)
 #define TH(i) c_hash12(seed * 0.731f + (i) * 13.7f, seed * 1.173f + (i) * 7.9f)
 
+// Astspitzen + Laubpositionen des aktuellen Baums ( fuer die Distanz-Quads).
+// Steht hier oben, weil sowohl der alte als auch der EZ-Generator sie fuellen.
+#define EZ_TIPCAP 48
+static float ezTipx[EZ_TIPCAP], ezTipy[EZ_TIPCAP], ezTipz[EZ_TIPCAP];
+static int   ezNTip = 0;
+#define EZ_SPRIGCAP 512
+static float ezSx[EZ_SPRIGCAP], ezSy[EZ_SPRIGCAP], ezSz[EZ_SPRIGCAP], ezSsize[EZ_SPRIGCAP];
+static int   ezNSprig = 0;
+
+// Kronen-Quads (Distanz-LOD): 2/3 an den echten Astspitzen, Rest um die
+// Kronenmitte. Steht beiden Generatoren zur Verfuegung.
+static void emit_crown_quads(float bx, float bz, float s, float hf,
+                             float seed, float crownY,
+                             const float *tipx, const float *tipy, const float *tipz, int nTip){
+  int K = 12;
+  int variant = (int)(fabsf(seed) * 7.31f) % 4;
+  static const float corners[6][2] = {
+    {-0.5f,-0.5f},{0.5f,-0.5f},{-0.5f,0.5f},
+    { 0.5f,-0.5f},{ 0.5f, 0.5f},{-0.5f, 0.5f}
+  };
+  for(int q = 0; q < K; q++){
+    float h1 = TH(95 + q * 3), h2 = TH(96 + q * 3), h3 = TH(97 + q * 3);
+    float h4 = TH(98 + q * 3), h5 = TH(99 + q * 3);
+    float cc, ccy2, ccz2;
+    if(nTip > 0 && q % 3 != 2){          // 2/3 der Quads an den Astspitzen
+      int ti = (q / 3) % nTip;
+      cc   = tipx[ti] + (h1 - 0.5f) * s * 0.7f * hf;
+      ccy2 = tipy[ti] + (h3 - 0.5f) * s * 0.6f * hf;
+      ccz2 = tipz[ti] + (h5 - 0.5f) * s * 0.7f * hf;
+    } else {                             // Rest um die Kronenmitte
+      cc   = bx + (h1 + h2 - 1.0f) * s * 0.95f * hf;
+      ccy2 = crownY + (h3 + h4 - 1.0f) * s * 0.80f * hf;
+      ccz2 = bz + (h5 + h1 - 1.0f) * s * 0.95f * hf;
+    }
+    float qsize = s * (0.85f + 0.55f * h2) * (0.7f + 0.45f * hf);
+    float qrot  = h3 * 6.283f;
+    float qseed = h4 * 13.7f + q * 0.37f;
+    for(int c = 0; c < 6; c++){
+      if(nCrownVerts + 1 > CROWN_CAP) return;
+      float *d = &crownVerts[nCrownVerts * CROWN_FLOATS];
+      d[0] = cc; d[1] = ccy2; d[2] = ccz2;
+      d[3] = corners[c][0]; d[4] = corners[c][1];
+      d[5] = qsize; d[6] = qrot; d[7] = qseed; d[8] = (float)variant;
+      nCrownVerts++;
+    }
+  }
+}
+
+// Kronen-Quads auf den echten Laubpositionen (EZ-Generator). Pro Quad wird im
+// Atlas ein ganzer Blattbuschel gemalt, das ist bei uns die Blattreben-Stufe.
+static void emit_sprig_quads(float seed, int want){
+  int variant = (int)(fabsf(seed) * 7.31f) % 4;
+  static const float corners[6][2] = {
+    {-0.5f,-0.5f},{0.5f,-0.5f},{-0.5f,0.5f},
+    { 0.5f,-0.5f},{ 0.5f, 0.5f},{-0.5f, 0.5f}
+  };
+  if(ezNSprig <= 0) return;
+  int stride = ezNSprig / want; if(stride < 1) stride = 1;
+  for(int q = 0; q < ezNSprig && want > 0; q += stride, want--){
+    float h3 = TH(97 + q * 3), h4 = TH(98 + q * 3);
+    float qrot  = h3 * 6.283f;
+    float qseed = h4 * 13.7f + q * 0.37f;
+    for(int c = 0; c < 6; c++){
+      if(nCrownVerts + 1 > CROWN_CAP) return;
+      float *d = &crownVerts[nCrownVerts * CROWN_FLOATS];
+      d[0] = ezSx[q]; d[1] = ezSy[q]; d[2] = ezSz[q];
+      d[3] = corners[c][0]; d[4] = corners[c][1];
+      d[5] = ezSsize[q]; d[6] = qrot; d[7] = qseed; d[8] = (float)variant;
+      nCrownVerts++;
+    }
+  }
+}
+
 // Einzelblatt-Instanz: Basispunkt (Welt), Groesse, Orientierung, Seitenverhaeltnis, Farbe
 static void add_leaf(float x, float y, float z, float size, float rotY, float tilt,
                      float aspect, float cr, float cg, float cb){
@@ -294,6 +372,7 @@ static void gen_tree(float bx, float by, float bz, float s, float seed, int tier
   float tiltB = 0.55f + TH(13) * 0.55f;         // Blattneigung gegenueber dem Ast
   float bTone = 0.80f + TH(14) * 0.45f;         // Rindenton
   float H     = 1.5f * hf;                      // Stammhoehe in s-Einheiten
+  ezDbgS = s; ezDbgHf = hf;
   float lcr, lcgg, lcb;
   hsv2rgb(hue, lsat, lval, &lcr, &lcgg, &lcb);
 
@@ -478,42 +557,275 @@ static void gen_tree(float bx, float by, float bz, float s, float seed, int tier
   }
 
   // ---------- Kronen-Quads: sitzen um die echten Astspitzen ----------
-  {
-    int K = 12;
-    int variant = (int)(fabsf(seed) * 7.31f) % 4;
-    float ccy = by + s * H * 1.15f;
-    static const float corners[6][2] = {
-      {-0.5f,-0.5f},{0.5f,-0.5f},{-0.5f,0.5f},
-      { 0.5f,-0.5f},{ 0.5f, 0.5f},{-0.5f, 0.5f}
-    };
-    for(int q = 0; q < K; q++){
-      float h1 = TH(95 + q * 3), h2 = TH(96 + q * 3), h3 = TH(97 + q * 3);
-      float h4 = TH(98 + q * 3), h5 = TH(99 + q * 3);
-      float cc, ccy2, ccz2;
-      if(nTip > 0 && q % 3 != 2){          // 2/3 der Quads an den Astspitzen
-        int ti = (q / 3) % nTip;
-        cc   = tipx[ti] + (h1 - 0.5f) * s * 0.7f * hf;
-        ccy2 = tipy[ti] + (h3 - 0.5f) * s * 0.6f * hf;
-        ccz2 = tipz[ti] + (h5 - 0.5f) * s * 0.7f * hf;
-      } else {                             // Rest um die Kronenmitte
-        cc   = bx + (h1 + h2 - 1.0f) * s * 0.95f * hf;
-        ccy2 = ccy + (h3 + h4 - 1.0f) * s * 0.80f * hf;
-        ccz2 = bz + (h5 + h1 - 1.0f) * s * 0.95f * hf;
-      }
-      float qsize = s * (0.85f + 0.55f * h2) * (0.7f + 0.45f * hf);
-      float qrot  = h3 * 6.283f;
-      float qseed = h4 * 13.7f + q * 0.37f;
-      for(int c = 0; c < 6; c++){
-        if(nCrownVerts + 1 > CROWN_CAP) return;
-        float *d = &crownVerts[nCrownVerts * CROWN_FLOATS];
-        d[0] = cc; d[1] = ccy2; d[2] = ccz2;
-        d[3] = corners[c][0]; d[4] = corners[c][1];
-        d[5] = qsize; d[6] = qrot; d[7] = qseed; d[8] = (float)variant;
-        nCrownVerts++;
+  emit_crown_quads(bx, bz, s, hf, seed, by + s * H * 1.15f, tipx, tipy, tipz, nTip);
+}
+// ---------- Generator B: Port des EZ-Tree-Algorithmus --------------------
+// Uebernommen aus github.com/dgreenheck/ez-tree (MIT License, (c) 2024 Daniel
+// Greenheck) — der Algorithmus, nicht der Code. Kernpunkte:
+//   * ein Ast = Kette von Abschnitten (sections), jeder mit Position, Rahmen
+//     und Radius; der Ast waechst entlang seiner lokalen Y-Achse
+//   * pro Abschnitt Gnarliness-Jitter, skaliert mit 1/sqrt(Radius) -> duenne
+//     Aeste bewegen sich staerker als dicke
+//   * Wachstums-Kraft: Drehung um cross(Astachse, Ziel) mit Schritt
+//     strength/Radius, begrenzt auf den vollen Winkel -> duenne Aeste biegen
+//     staerker nach oben (Phototropismus). Das ist der Grund, warum deren Aeste
+//     geschwungen sind und unsere gerade Stoecke waren.
+//   * Kinder geschichtet entlang der Elternachse (Slot + Jitter) und auf
+//     Radial-Slots verteilt (Slotzuweisung vertauscht, +/- halber Slot Jitter).
+//     Deren Begruendung im Code: sonst drehen Nadelbaeume ihre laengsten Aeste
+//     auf eine Seite.
+//   * Kinder-Radius IMMER aus dem Elternradius interpoliert * Level-Faktor
+//   * Laub: gleiche Schichtung an den Terminalaesten
+// Die Parameterwerte stammen direkt aus deren Presets (*_medium.json).
+
+typedef struct { Ring rg; float d[3]; } Sec;
+
+typedef struct {
+  const char *name;
+  int   levels, evergreen;
+  int   children[4], sections[4], segments[4];
+  float angle[4], length[4], radius[4], start[4], gnarl[4], twist[4], taper[4];
+  float force, leafCount, leafAngle, leafStart, leafSize;
+} EzPreset;
+
+static const EzPreset EZ_PRESETS[] = {
+  // name  lvl ev  children      sections      segments
+  { "oak",   3, 0, {6,4,3,0},  {8,6,3,1},    {7,5,3,3},
+    {0,54,58,32},   {37.24f,11.08f,12.39f,7.16f}, {1.41f,0.90f,0.69f,1.19f},
+    {0,0.49f,0.06f,0.12f}, {0,-0.10f,-0.15f,0.09f}, {-0.23f,0.42f,0,0},
+    {0.73f,0.42f,0.69f,0.75f}, 0.020f, 18, 42, 0.16f, 2.50f },
+  { "ash",   3, 0, {7,4,3,0},  {12,8,6,4},   {12,6,4,3},
+    {0,48,75,60},   {43.47f,27.14f,9.51f,4.60f}, {2.00f,0.63f,0.76f,0.70f},
+    {0,0.23f,0.33f,0},     {0.03f,0.25f,0.20f,0.09f}, {0.09f,-0.07f,0,0},
+    {0.70f,0.70f,0.70f,0.70f}, 0.010f, 16, 55, 0.00f, 2.67f },
+  { "aspen", 2, 0, {10,3,3,0}, {12,10,8,6},  {8,6,4,3},
+    {0,75,32,7},    {50.0f,6.07f,11.19f,1.0f},  {0.72f,0.41f,0.70f,0.70f},
+    {0,0.59f,0.35f,0},     {0.05f,0.12f,0.12f,0.02f}, {0,0,0,0},
+    {0.37f,0.13f,0.70f,0.70f}, 0.0148f, 11, 30, 0.124f, 2.50f },
+  { "pine",  1, 1, {82,3,5,0}, {12,10,8,6},  {8,6,4,3},
+    {0,110,16,60},  {50.0f,23.87f,14.08f,1.0f}, {1.05f,0.36f,0.70f,0.70f},
+    {0,0.27f,0.14f,0.30f}, {0.05f,0.08f,0,0},     {0,0,0,0},
+    {0.70f,0.70f,0.70f,0.70f}, -0.003f, 30, 39, 0.09f, 1.435f },
+};
+#define EZ_NPRESETS ((int)(sizeof(EZ_PRESETS) / sizeof(EZ_PRESETS[0])))
+
+// Drehung eines Vektors um eine Achse (Rodrigues)
+static void ez_rot(float *x, float *y, float *z,
+                   float ax, float ay, float az, float ang){
+  float c = cosf(ang), s = sinf(ang), k = 1.0f - c;
+  float vx = *x, vy = *y, vz = *z;
+  float kd = ax * vx + ay * vy + az * vz;
+  float cx = ay * vz - az * vy, cy = az * vx - ax * vz, cz = ax * vy - ay * vx;
+  *x = vx * c + cx * s + ax * kd * k;
+  *y = vy * c + cy * s + ay * kd * k;
+  *z = vz * c + cz * s + az * kd * k;
+}
+
+static void ez_norm3(float *x, float *y, float *z){
+  float l = sqrtf((*x) * (*x) + (*y) * (*y) + (*z) * (*z));
+  if(l < 1e-6f){ *x = 0.0f; *y = 1.0f; *z = 0.0f; return; }
+  *x /= l; *y /= l; *z /= l;
+}
+
+// rekursiver Ast: Abschnitte bauen, Roehre senden, Kinder/Laub ansetzen
+static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
+                    float seed, int tier, float btone){
+  int S = P->sections[lvl], G = P->segments[lvl];
+  // Detailstufen: fern weniger Abschnitte/Segmente und flachere Hierarchie
+  if(tier == 2){ S = (S + 1) / 2; G = (G * 3) / 4; }
+  else if(tier == 0){ S = (lvl == 0) ? 3 : 1; G = 4; }
+  if(S < 1) S = 1;
+  if(S > 12) S = 12;
+  if(G < 3) G = 3;
+  if(G > 8) G = 8;
+
+  // Kronenlevel-Laengen sind extra skalierbar: ihre Presets sind schlanker als
+  // unsere Kronen proportioniert (Breite/Hoehe ~0,4 statt ~0,85).
+  float len = P->length[lvl] * unit * (lvl == 0 ? 1.0f : treeEzSpread);
+  float sl = len / (float)S;
+  Sec sec[13];
+  sec[0] = *base;
+
+  for(int i = 1; i <= S; i++){
+    sec[i] = sec[i-1];
+    float dx = sec[i-1].d[0], dy = sec[i-1].d[1], dz = sec[i-1].d[2];
+    // Gnarliness: duenne Aeste staerker (deren Faktor 1/sqrt(Radius)). Der Radius
+    // muss DAFUER in Preset-Einheiten stehen: unser Baum ist gegenueber deren
+    // Presets um 'unit' geschrumpft, sonst wirkt die Formel um 1/unit zu stark.
+    float rpu = sec[i-1].rg.r / unit;          // Radius in Preset-Einheiten
+    float g = P->gnarl[lvl] * fmaxf(1.0f, 1.0f / sqrtf(fmaxf(rpu, 0.001f)));
+    if(g != 0.0f){
+      ez_rot(&dx, &dy, &dz, sec[i-1].rg.u[0], sec[i-1].rg.u[1], sec[i-1].rg.u[2],
+             (TH(40 + i) - 0.5f) * 2.0f * g);
+      ez_rot(&dx, &dy, &dz, sec[i-1].rg.v[0], sec[i-1].rg.v[1], sec[i-1].rg.v[2],
+             (TH(90 + i) - 0.5f) * 2.0f * g);
+    }
+    // Wachstums-Kraft nach oben (negatives force biegt nach unten): Schritt =
+    // force / Radius, begrentzt auf den vollen Winkel zur Zielrichtung
+    if(P->force != 0.0f){
+      float ax = -dz, az = dx;                 // axis = cross(d, up), up = (0,1,0)
+      float sf = sqrtf(ax * ax + az * az);
+      if(sf > 1e-6f){
+        float full = atan2f(sf, dy);           // dy = dot(d, up)
+        float step = P->force / fmaxf(rpu, 0.02f);
+        if(step >  full) step =  full;
+        if(step < -full) step = -full;
+        ez_rot(&dx, &dy, &dz, ax / sf, 0.0f, az / sf, step);
       }
     }
+    ez_norm3(&dx, &dy, &dz);
+    sec[i].d[0] = dx; sec[i].d[1] = dy; sec[i].d[2] = dz;
+    sec[i].rg.p[0] = sec[i-1].rg.p[0] + dx * sl;
+    sec[i].rg.p[1] = sec[i-1].rg.p[1] + dy * sl;
+    sec[i].rg.p[2] = sec[i-1].rg.p[2] + dz * sl;
+    // Radius exakt nach deren Regel: Basisradius * (1 - taper[level] * i/S);
+    // Nadelbaum (evergreen) bis auf 0, weil er keinen Terminalast hat. Der letzte
+    // Abschnitt des letzten Levels geht auf ~0 (deren closeTip-Verhalten).
+    float fr = (float)i / (float)S;
+    float r = base->rg.r * (P->evergreen ? (1.0f - fr) : (1.0f - P->taper[lvl] * fr));
+    if(lvl >= P->levels && i == S) r = 0.001f;
+    sec[i].rg.r = r < 0.001f ? 0.001f : r;
+    // Rahmen parallel transportieren (gleiches Verfahren wie beim Stamm)
+    ring_transport(&sec[i].rg, &sec[i-1].rg,
+                   sec[i-1].d[0], sec[i-1].d[1], sec[i-1].d[2], dx, dy, dz);
+    if(P->twist[lvl] != 0.0f){
+      ez_rot(&sec[i].rg.u[0], &sec[i].rg.u[1], &sec[i].rg.u[2], dx, dy, dz, P->twist[lvl]);
+      ez_rot(&sec[i].rg.v[0], &sec[i].rg.v[1], &sec[i].rg.v[2], dx, dy, dz, P->twist[lvl]);
+    }
+    // Rindenfarbe pro Level (Stamm dunkler, aeussere Zweige gruenlicher)
   }
+
+  // ---- Kinder: geschichtet entlang der Achse, Radial-Slots vertauscht ----
+  int maxKid = (tier >= 3) ? P->levels : (tier == 2 ? P->levels - 1 : 0);
+  Sec kids[96]; int nkid = 0;
+  if(lvl < maxKid){
+    int cnt = P->children[lvl];
+    if(tier == 2) cnt = (cnt * 3) / 4;
+    if(cnt < 1) cnt = 1;
+    if(cnt > 96) cnt = 96;
+    float startMin = P->start[lvl + 1];
+    float stp = (1.0f - startMin) / (float)cnt;
+    int slots[96];
+    for(int i = 0; i < cnt; i++) slots[i] = i;
+    for(int i = cnt - 1; i > 0; i--){
+      int j = (int)(TH(300 + i) * (float)(i + 1));
+      if(j > i) j = i;
+      int t = slots[i]; slots[i] = slots[j]; slots[j] = t;
+    }
+    float radialOff = TH(310);
+    float ang = P->angle[lvl + 1] * 0.017453293f;
+    for(int i = 0; i < cnt; i++){
+      float t = startMin + (i + TH(320 + i)) * stp;
+      if(t > 1.0f) t = 1.0f;
+      float fs = t * (float)S; int si = (int)fs; if(si > S - 1) si = S - 1;
+      float al = fs - (float)si;
+      Sec cb;
+      for(int k = 0; k < 3; k++)
+        cb.rg.p[k] = sec[si].rg.p[k] + (sec[si+1].rg.p[k] - sec[si].rg.p[k]) * al;
+      // Kinder-Radius IMMER aus dem Elternast abgeleitet
+      float rp = sec[si].rg.r + (sec[si+1].rg.r - sec[si].rg.r) * al;
+      cb.rg.r = rp * P->radius[lvl + 1];
+      // Elternrahmen bei t (u/v interpolieren, dann orthonormieren)
+      float ux = sec[si].rg.u[0] + (sec[si+1].rg.u[0] - sec[si].rg.u[0]) * al;
+      float uy = sec[si].rg.u[1] + (sec[si+1].rg.u[1] - sec[si].rg.u[1]) * al;
+      float uz = sec[si].rg.u[2] + (sec[si+1].rg.u[2] - sec[si].rg.u[2]) * al;
+      float px = sec[si].d[0] + (sec[si+1].d[0] - sec[si].d[0]) * al;
+      float py = sec[si].d[1] + (sec[si+1].d[1] - sec[si].d[1]) * al;
+      float pz = sec[si].d[2] + (sec[si+1].d[2] - sec[si].d[2]) * al;
+      ez_norm3(&px, &py, &pz);
+      float dd = ux * px + uy * py + uz * pz;
+      ux -= px * dd; uy -= py * dd; uz -= pz * dd;
+      ez_norm3(&ux, &uy, &uz);
+      // 1) Neigung gegenueber dem Elternast, 2) Radial-Slot um die Elternachse
+      float dx = px, dy = py, dz = pz;
+      ez_rot(&dx, &dy, &dz, ux, uy, uz, ang);
+      float ra = 6.2831853f * (radialOff + ((float)slots[i] + (TH(330 + i) - 0.5f)) / (float)cnt);
+      ez_rot(&dx, &dy, &dz, px, py, pz, ra);
+      ez_norm3(&dx, &dy, &dz);
+      cb.d[0] = dx; cb.d[1] = dy; cb.d[2] = dz;
+      ring_basis(&cb.rg, dx, dy, dz);
+      kids[nkid] = cb; nkid++;
+    }
+  }
+
+  if(lvl == 0){                       // Messbank: Stammradien pro Abschnitt
+    ezDbgNSec = S;
+    for(int i = 0; i <= S && i < 13; i++) ezDbgR[i] = sec[i].rg.r;
+  }
+  // ---- Roehren senden ----
+  float tone = btone * (0.86f + 0.05f * (float)lvl);
+  float cr = (0.30f - 0.03f * (float)lvl) * tone;
+  float cg = (0.24f + 0.03f * (float)lvl) * tone;
+  float cb2 = (0.15f - 0.02f * (float)lvl) * tone;
+  float sw = 0.20f + 0.30f * (float)lvl;
+  for(int i = 1; i <= S; i++)
+    emit_tube(&sec[i-1].rg, &sec[i].rg, G, sw, sw, cr, cg, cb2, 0.9f, (float)i * sl);
+
+  if(lvl >= maxKid){
+    // Terminalast: Laub geschichtet entlang des Astes (deren Laub-Schema).
+    // Laubpositionen werden in ALLEN Stufen gesammelt — die Atlas-Karten sind
+    // bei fern die einzige Laubdarstellung. Nur die Einzelblaetter entfallen.
+    int lc = (int)P->leafCount;
+    if(tier == 0) lc = lc / 2;
+    if(ezNTip < EZ_TIPCAP){              // Spitze fuer die Distanz-Quads merken
+      ezTipx[ezNTip] = sec[S].rg.p[0];
+      ezTipy[ezNTip] = sec[S].rg.p[1];
+      ezTipz[ezNTip] = sec[S].rg.p[2];
+      ezNTip++;
+    }
+    if(lc < 1) return;
+    float lsz = P->leafSize * unit;
+    float lcr = 0.10f + 0.16f * TH(700), lcgg = 0.26f + 0.26f * TH(701), lcb = 0.05f + 0.10f * TH(702);
+    for(int i = 0; i < lc; i++){
+      float st = (1.0f - P->leafStart) / (float)lc;
+      float t = P->leafStart + (i + TH(400 + i)) * st;
+      if(t > 1.0f) t = 1.0f;
+      float fs = t * (float)S; int si = (int)fs; if(si > S - 1) si = S - 1;
+      float al = fs - (float)si;
+      float cx = sec[si].rg.p[0] + (sec[si+1].rg.p[0] - sec[si].rg.p[0]) * al;
+      float cy = sec[si].rg.p[1] + (sec[si+1].rg.p[1] - sec[si].rg.p[1]) * al;
+      float cz = sec[si].rg.p[2] + (sec[si+1].rg.p[2] - sec[si].rg.p[2]) * al;
+      if(ezNSprig < EZ_SPRIGCAP){       // Karte fuer den Atlas-Quad
+        ezSx[ezNSprig] = cx; ezSy[ezNSprig] = cy; ezSz[ezNSprig] = cz;
+        ezSsize[ezNSprig] = lsz * (1.6f + 0.9f * TH(430 + i));
+        ezNSprig++;
+      }
+      if(tier >= 3){                    // Nahstufe: Einzelblaetter zusaetzlich
+        float rr = lsz * (0.30f + 0.25f * TH(430 + i));
+        leaf_cluster(cx, cy, cz, rr, 5, lsz * 0.45f, 0.85f, 0.55f,
+                     seed + (float)i * 7.3f, 500 + i * 3, lcr, lcgg, lcb);
+      }
+    }
+    return;
+  }
+
+  for(int i = 0; i < nkid; i++)
+    ez_grow(lvl + 1, &kids[i], P, unit,
+            seed + (float)lvl * 17.0f + (float)i * 3.13f, tier, btone);
 }
+
+static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int tier){
+  int pidx = (int)(TH(0) * (float)(EZ_NPRESETS - 0.001f));
+  if(treeEzPreset >= 0 && treeEzPreset < EZ_NPRESETS) pidx = treeEzPreset;
+  const EzPreset *P = &EZ_PRESETS[pidx];
+  float hf = 0.80f + TH(1) * 2.20f;
+  // dieselbe Groessenlogik wie Generator A: Kronenmittelpunkt-Hoehe ueber Basis
+  float treeH = 1.5f * hf * 1.15f * s;
+  float unit = treeH / P->length[0];
+  float btone = 0.75f + 0.55f * TH(2);
+  Sec root;
+  root.rg.p[0] = bx; root.rg.p[1] = by; root.rg.p[2] = bz;
+  root.rg.r = P->radius[0] * unit;
+  root.d[0] = 0.0f; root.d[1] = 1.0f; root.d[2] = 0.0f;
+  ring_basis(&root.rg, 0.0f, 1.0f, 0.0f);
+  ezNTip = 0; ezNSprig = 0;
+  ezDbgName = P->name; ezDbgUnit = unit; ezDbgR0 = root.rg.r; ezDbgNSec = 0;  ezDbgS = s; ezDbgHf = hf;
+  ez_grow(0, &root, P, unit, seed, tier, btone);
+  // Atlas-Karten: fern mehr (sie sind das Laub), nah weniger (dort stehen
+  // Einzelblaetter). Budget: CROWN_CAP erlaubt ~15000 Quads pro Region.
+  emit_sprig_quads(seed, tier >= 3 ? 24 : (tier == 2 ? 60 : 22));
+}
+
 // ---------- Platzierung (identisch zum alten SDF-System) ----------
 // Eine Zelle der Groesse G=9 m: liefert 1, wenn dort ein Baum steht, und setzt
 // tp (Basispunkt) + s (Groesse). trees_build() und tree_find_nearest() nutzen
@@ -641,8 +953,9 @@ void trees_build(float tx, float tz){
     // den Aesten, ferne nur die Atlas-Quads.
     int tier = treeForceTier >= 0 ? treeForceTier
            : (cand[i].d2 < 121.0f ? 3 : (cand[i].d2 < 784.0f ? 2 : 0));
-    gen_tree(cand[i].p[0], cand[i].p[1], cand[i].p[2], cand[i].s,
-             cand[i].p[0] * 12.9898f + cand[i].p[2] * 78.233f, tier);
+    float tseed = cand[i].p[0] * 12.9898f + cand[i].p[2] * 78.233f;
+    if(treeGenMode) gen_tree_ez(cand[i].p[0], cand[i].p[1], cand[i].p[2], cand[i].s, tseed, tier);
+    else            gen_tree (cand[i].p[0], cand[i].p[1], cand[i].p[2], cand[i].s, tseed, tier);
     nTrees++;
   }
 }

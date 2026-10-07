@@ -1392,6 +1392,9 @@ int main(int argc, char **argv) {
   { const char *eo = getenv("DEMO_ONETREE");
     if (eo && atoi(eo)) { treeOneShot = 1; envTreeJump = 1; grassMaxDist = 0.5f; } }
   { const char *et = getenv("DEMO_TIER"); if (et) treeForceTier = atoi(et); }
+  { const char *eg = getenv("DEMO_TREEGEN"); if (eg) treeGenMode = (strstr(eg,"alt")||strstr(eg,"0")) ? 0 : 1; }
+  { const char *es = getenv("DEMO_EZSPREAD"); if (es) treeEzSpread = (float)atof(es); }
+  { const char *ep = getenv("DEMO_EZPRESET"); if (ep) treeEzPreset = atoi(ep); }
   { const char *eh = getenv("DEMO_REEDH"); if (eh) reedH = (float)atof(eh); }
   { const char *er = getenv("DEMO_REED");
     if (er) { reedDens = 1.0f; reedWide = 1.0f;
@@ -1762,6 +1765,24 @@ int main(int argc, char **argv) {
         upload_mesh_buffers();
         builtT = 1;
         printf("Baeume um (%.0f,%.0f): %d Baeume, %d Vertices, %d Canopy-Quads, %d Einzelblaetter\n", tCX, tCZ, nTrees, nTreeVerts, nCrownVerts / 6, nLeafInst);
+        // Messbank: Welt-BBox des Baumgeruests in Metern (Kronendurchmesser,
+        // Wuchshoehe, Stammradius unten) — ohne Bildskala-Raten zu muessen.
+        if(treeOneShot && nTreeVerts > 0){
+          float mn[3] = {1e9f,1e9f,1e9f}, mx[3] = {-1e9f,-1e9f,-1e9f};
+          for(int i = 0; i < nTreeVerts; i++)
+            for(int k = 0; k < 3; k++){
+              float v = treeVerts[i * TREE_FLOATS + k];
+              if(v < mn[k]) mn[k] = v;
+              if(v > mx[k]) mx[k] = v;
+            }
+          printf("  BBox: Breite %.2f m  Hoehe %.2f m  Tiefe %.2f m  (Boden y=%.2f, Scheitel y=%.2f)\n",
+                 mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2], mn[1], mx[1]);
+          printf("  Preset %s  unit %.4f  Stammradius %.3f m  Spread %.2f  s=%.2f hf=%.2f\n",
+                 ezDbgName, ezDbgUnit, ezDbgR0, treeEzSpread, ezDbgS, ezDbgHf);
+          { printf("  Stammradien (m):");
+            for (int i = 0; i <= ezDbgNSec && i < 13; i++) printf(" %.3f", ezDbgR[i]);
+            printf("\n"); }
+        }
       }
       // Blickrichtung (XZ-projiziert) fuer die sortierte Walk-Ordnung setzen —
       // vor jedem Build, damit der Build die aktuelle Richtung benutzt.

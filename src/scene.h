@@ -56,7 +56,13 @@ extern int   nTreeVerts, nCrownVerts, nWireVerts, nTrees;
 
 // Baut die Baum-Geometrie um (tx,tz) (Zellen-Grid wie der alte SDF-Platzierer).
 void trees_build(float tx, float tz);
-extern int treeOneShot;      // DEMO_ONETREE: nur den naechsten Baum erzeugen
+extern int treeOneShot;
+extern int treeGenMode;      // DEMO_TREEGEN=alt|ez: welcher Baum-Generator baut
+extern int   treeEzPreset;
+extern float treeEzSpread;   // DEMO_EZSPREAD: Laengenfaktor der Kronenlevel
+extern const char *ezDbgName; extern float ezDbgUnit, ezDbgR0;
+extern float ezDbgR[13]; extern int ezDbgNSec;
+extern float ezDbgS, ezDbgHf;
 extern int treeForceTier;    // DEMO_TIER=0|2|3: Detailstufe erzwingen (-1 = automatisch)
 // Naechsten Baum zu (x,z) — Debug (Taste F11). Liefert 1, wenn einer gefunden wurde.
 int  tree_find_nearest(float x, float z, float *out, float *sizeOut, float *hfOut);
