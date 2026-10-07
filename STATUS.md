@@ -1,11 +1,19 @@
 # 64kDemo — Status
 
-Stand: 2026-10-07, Runde 16. **Baum-Nahte zu** und **prozedurale Rinde drin**
-(beides nachgemessen). Kennzahlen: 640.972 Halme bei grassMaxDist=110, POS-Build 1 m
-194 ms, Initial-Build 1420 ms, VM-fps 1,63, Binary 92.856 Byte.
-**Fade-Dauer Standard 1 s. Issue A/B/C und R-Reset erledigt.**
-Jetzt: echtes Blattwerk nah + Kronen-Textur fern, Blätter im Wind, Schatten,
-Himmel/Tageszeiten. Budget ist laut Nutzer zweitrangig.
+Stand: 2026-10-07, Runde 22. **Blumen (Mohn/Lupine/Gänseblümchen) drin**, Shadow-Map
+**vorhanden aber im Bild unsichtbar** (TODO 20). Kennzahlen: Binary 117.472 Byte
+(Budget laut Nutzer zweitrangig), VM-fps ~1,9 bei 1280x720, Shadow-Map 23,25 % gefüllt.
+Himmel ist wieder intakt (zwei Shadow-Bugs behoben: `texture()` auf Depth-Textur ohne
+Mipmaps -> schwarz; `GL_LESS` statt `GL_LEQUAL` nach dem Schatten-Wurf).
+**Als nächstes (Nutzer-Reihenfolge aus Runde 22): TODO 15** ferne Kronen-Quads zeigen
+Atlas-Transparenz schwarz (Verdacht: `textureLod` mit lod>0 auf Atlas ohne Mipmaps),
+**16** Kronen-Billboards nahe der Kamera abschalten, **17** echtes Gras weiter zeichnen
+(Ferntextur ist periodisch), **18** volumetrische Krone (Sapling-Recherche: /tmp/sapling),
+**19** Schilf-Halme dicker/lichter, **20** Schatten sichtbar machen.
+Budget ist laut Nutzer zweitrangig. Test-Hygiene: Timeout <=120 s, nach jedem Test
+`pkill -9 -x 64kdemo`. Deterministische Hooks statt X-Tastendrücken: `DEMO_TREE`,
+`DEMO_CAM="x z [pitch]"`, `DEMO_FREEZE`, `DEMO_SHOT`, `DEMO_ARTEN=2`, `DEMO_TREEMASK`,
+`DEMO_LEAFMASK`, `DEMO_CROWNMASK`, `DEMO_SHADOW*`.
 
 ## TODO-Liste (Nutzer-Aufträge 2026-10-07, der Reihe nach abarbeiten)
 
