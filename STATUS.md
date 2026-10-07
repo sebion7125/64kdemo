@@ -22,9 +22,9 @@ Himmel/Tageszeiten. Budget ist laut Nutzer zweitrangig.
 | 7 | Blätter im Wind | ✅ Runde 19 (Kronen-Bewegung 4,2 % → 19,0 %) |
 | 8 | Schattenwurf | ⬜ |
 | 9 | Himmel schöner, Wolken, Tageszeiten | ⬜ |
-| 10 | **Kronen-Redesign** (Nah: nur Einzelblätter, zahlreich; weicher LOD-Übergang; Blattsilhouette statt Quadrate; keine Polygonkanten fern) | ⬜ (Nutzer-Runde 20) |
+| 10 | **Kronen-Redesign** (Nah: nur Einzelblätter, zahlreich; weicher LOD-Übergang; Blattsilhouette statt Quadrate; keine Polygonkanten fern) | 🔶 Runde 20: Silhouette + Zweige + 137,5° + 272k Blätter (Krone 8 % → 39 %); ferne Kachel-Optik noch offen |
 | 11 | Rinde auch an Abzweigungen (Oberflächenkoordinaten pro Rohr, nicht nur am Stamm) | ⬜ (Nutzer-Runde 20) |
-| 12 | Ast-Gerüst pro Baum unterschiedlich + Baumgrößen stärker streuen | ⬜ (Nutzer-Runde 20) |
+| 12 | Ast-Gerüst pro Baum unterschiedlich + Baumgrößen stärker streuen | ✅ Runde 20 |
 | 13 | Schilf: lichter, nicht kerzengerade, Farbe wie Baumblätter, vereinzelt dicke Halme mit Kolben | ⬜ (Nutzer-Runde 20) |
 | 14 | Blumen auf den Wiesen | ⬜ (Nutzer-Runde 20) |
 
@@ -446,6 +446,42 @@ der alten Add-on-Datei sind tot (404), das Add-on ist seit Blender 4.2 eine Exte
 (geseed), Blätter entlang der Zweige mit 137,5°-Phyllotaxis, Blattsilhouette per
 Alpha-Test im Shader, Blatt-Laenge/Breite-Verhaeltnis ~2:1, Blattgroessen-Abstufung
 zum Zweigende hin, Kronenform ueber das Astlaengen-Profil.
+
+## Session 2026-10-07, Runde 20 (Nutzer-Feedback: Kronen-Redesign, Baum-Individuen)
+
+**Nutzerbefund:** Blätter sind Quadrate; ferne Kronen zeigen Polygonkanten; die
+hellgrünen Blattpolygone sind zu dünn („vereinzelt begrünte Zweige“); der
+LOD-Übergang ist „eine Katastrophe“; Rinde endet an den Abzweigungen; jeder Baum
+soll ein Individuum sein; ~100.000 Blätter pro Baum.
+
+**Umgesetzt (Sapling-Vorbild, siehe Recherche oben):**
+- **Blattsilhouette im Shader** (`leaf.frag`): eiförmiges Profil
+  `hw = 0.5*aspect*sin(pi*t^0.55)^0.7` mit Sägeblattrand, Mittelrippe und Adern.
+  Seitenverhältnis kommt pro Blatt aus `iData.w` (Sapling: `leafScaleX` 0,2–0,65,
+  **niemals quadratisch**). Wirkt auch im Atlas, weil der Atlas mit demselben
+  Shader aufgenommen wird.
+- **Drei Hierarchieebenen**: Stamm → Aeste (5–9) → **Zweige** (6–16 pro Ast, eigene
+  Rohre) — Zweige nur bei Bäumen < 11 m.
+- **Blaetter sitzen AUF Aesten/Zweigen** statt in einem Zufallsellipsoid, mit
+  **137,5°-Phyllotaxis** (goldener Winkel) und Neigung gegenueber dem Mutterast
+  (zur Zweigspitze flacher), Blattgroesse zum Zweigende abnehmend (`leafScaleT`).
+- **Jeder Baum ein Individuum**: Groesse hf 0,8–3,0, 5–9 Aeste, Kronenform aus
+  5 Profilen (Astlaengen entlang des Stamms), eigene Blattfarbe (HSV), eigene
+  Blattgroesse 5,5–11,5 cm, eigenes Seitenverhaeltnis, eigener Rindenton.
+- **Blattbudget nah→fern sortiert**: Bäume wurden in Zell-Reihenfolge erzeugt, dadurch
+  hatten ferne Bäume das LEAF_CAP schon leergeraeumt, bevor der Baum direkt vor der
+  Kamera dran war. Jetzt Kandidaten einsammeln, nach Distanz sortieren, nah→fern bauen.
+- **LOD-Pop entfernt**: die Zahl der Kronen-Quads wechselte mit der Detailstufe
+  (3 → 18 bei 24 m) = sichtbarer Sprung. Jetzt **konstant 12 Quads pro Baum**, und
+  die echten Blätter sterben im Vertex-Shader **statistisch** aus
+  (`hash(iPos) > keep`, keep = 1−smoothstep(20,28 m)) — Dichte faellt sanft, statt
+  schlagartig beim Rebuild.
+- Kamera-Debugsprung `'` rahmt jetzt die **Krone** (braucht hf aus `tree_cell`).
+
+**Messung:** 271.700 Einzelblaetter (1,6M Vertex), 7.668 Kronen-Quads, Blattgroesse
+3,2–13,6 cm (Mittel 6,9 cm). Kronen-Nahschuss: grüner Blatt-Anteil der oberen
+Bildhaelfte **8,07 % → 38,79 %**. fps 2,15 (vorher 55k Blätter) → 1,42 (300k, unsortiert)
+→ **2,03** (272k, sortiert + Hash-Cull).
 
 ## Session 2026-10-07, Runde 19 (TODO 7: Blätter im Wind)
 

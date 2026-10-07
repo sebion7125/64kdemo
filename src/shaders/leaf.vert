@@ -10,6 +10,8 @@ out vec3 vNrm;
 out vec3 vPos;
 out vec3 vCol;
 out float vT;
+out float vW;      // quer ueber das Blatt (-0.5..0.5) -> Silhouette im Fragment-Shader
+out float vAsp;    // Seitenverhaeltnis Breite/Laenge (Sapling: niemals 1)
 float hash12(vec2 p){
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);
@@ -25,8 +27,12 @@ void main(){
   float size = iData.x, rotY = iData.y, tilt = iData.z;
   float t = aBase.x, w = aBase.y;
   float d = length(iPos - uCamPos);
-  // LOD: Blaeue schrumpft in der Distanz (Kronen-Billboard uebernimmt)
-  float lod = 1.0 - smoothstep(36.0, 50.0, d);
+  // LOD: die Kronen-Quads gibt es immer (fuelle die Krone), die echten Blätter
+  // sterben in der Distanz statistisch aus — per Hash pro Blatt, damit die Dichte
+  // sanft faellt und nicht schlagartig (Anzahl wechselt ja nur beim Rebuild).
+  float keep = 1.0 - smoothstep(20.0, 28.0, d);
+  if(hash12(vec2(iPos.x * 31.7, iPos.z * 17.3)) > keep) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  float lod = 1.0 - smoothstep(24.0, 30.0, d);
   if(lod < 0.004){ gl_Position = vec4(2.0, 0.0, 0.0, 1.0); return; }
   // lokales Blatt: Laenge +X, Breite +Z, Normal +Y
   vec3 lp = vec3(t * size * lod, 0.0, w * size * lod);
@@ -57,5 +63,7 @@ void main(){
   vPos = p;
   vCol = iCol;
   vT = t;
+  vW = w;
+  vAsp = iData.w > 0.01 ? iData.w : 1.0;
   gl_Position = uMVP * vec4(p, 1.0);
 }

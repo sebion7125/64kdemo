@@ -4,6 +4,8 @@ in vec3 vNrm;
 in vec3 vPos;
 in vec3 vCol;
 in float vT;
+in float vW;
+in float vAsp;
 uniform vec3 uCamPos;
 uniform float uLeafMask;   // DEBUG: Blatt als Maske (reines Rot)
 uniform float uAlbedoOnly; // Atlas-Kapture: nur Albedo + Abdeckung (keine Beleuchtung)
@@ -45,6 +47,18 @@ vec3 skyColor(vec3 rd){
 }
 void main(){
   if(uLeafMask > 0.5){ O = vec4(1.0, 0.0, 0.0, 1.0); return; }
+  // ---- Blattsilhouette (Vorlage: Sapling — Blätter sind in die Länge gestreckt,
+  // niemals quadratisch; die Silhouette kommt aus der Textur/dem Shader, nicht
+  // aus der Geometrie). vT = -0.5..0.5 entlang, vW = -0.5..0.5 quer.
+  float tt = vT + 0.5;                                  // 0 Stiel .. 1 Spitze
+  float hw = 0.5 * vAsp * pow(sin(3.14159 * pow(tt, 0.55)), 0.70);  // breiteste Stelle
+  hw *= 1.0 - 0.07 * step(0.5, fract(tt * 17.0));       // feiner Sägeblattrand
+  hw = max(hw, 1e-4);                                   // bei tt->0 wird hw klein
+  float e = abs(vW) / hw;
+  if(e > 1.0) discard;
+  float midrib = 1.0 - smoothstep(0.0, 0.055, abs(vW)); // Mittelrippe
+  float vein   = 1.0 - smoothstep(0.0, 0.05,
+                    abs(fract((tt + abs(vW) * 0.9) * 5.0) - 0.5) * 0.34 - abs(vW) * 0.02);
   vec3 n = normalize(vNrm);
   vec3 rd = normalize(uCamPos - vPos);
   // Blaetter sind duenn: beidseitig beleuchtet (kein "blaues" Ambient mehr)
@@ -55,6 +69,8 @@ void main(){
   vec3 amb = vec3(0.35, 0.45, 0.40) * (0.5 + 0.5 * max(n.y, 0.0));
   float pat = vnoise(vPos.xz * 16.0 + vPos.y * 9.0);
   vec3 albedo = vCol * (0.72 + 0.55 * pat);
+  albedo *= 1.0 + midrib * 0.35 - vein * 0.10;          // Rippen heller, Adern dunkler
+  albedo *= 1.0 - 0.18 * smoothstep(0.75, 1.0, e);      // Rand etwas dunkler
   if(uAlbedoOnly > 0.5){ O = vec4(albedo, 1.0); return; }
   vec3 col = albedo * (vec3(1.0, 0.95, 0.80) * (dif * 0.7 + 0.3) + amb + vec3(0.8, 1.0, 0.5) * thru);
   col *= 0.85 + 0.15 * vT;

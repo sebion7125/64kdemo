@@ -36,7 +36,7 @@ float c_terrainH(float px, float py);
 // Einzelblaetter an nahen Baeumen (leaf.vert): iPos(3), iData(4: size, rotY,
 // tilt, pad), iCol(3). Grundblatt ist ein statisches Quad (aBase = t, w).
 #define LEAF_FLOATS  10
-#define LEAF_CAP     60000
+#define LEAF_CAP     300000   // 300k Instanzen a 10 floats = 12 MB
 // Referenz-Krone fuer den Blatthorizont-Atlas (ferne Baeume sampeln diese
 // Textur statt prozeduraler Flecken). Layout im Atlas: 8x8 Kacheln =
 // 4 Kronen-Varianten x 16 Ansichts-Richtungen.
@@ -57,7 +57,7 @@ extern int   nTreeVerts, nCrownVerts, nWireVerts, nTrees;
 // Baut die Baum-Geometrie um (tx,tz) (Zellen-Grid wie der alte SDF-Platzierer).
 void trees_build(float tx, float tz);
 // Naechsten Baum zu (x,z) — Debug (Taste F11). Liefert 1, wenn einer gefunden wurde.
-int  tree_find_nearest(float x, float z, float *out, float *sizeOut);
+int  tree_find_nearest(float x, float z, float *out, float *sizeOut, float *hfOut);
 // Eine Referenz-Krone aus echten Einzelblaettern, zentriert um (0, 2.05*s, 0).
 // Fuellt out (LEAF_FLOATS-Stride) und liefert die Anzahl. seed waehlt die Krone.
 int  foliage_patch(float *out, int cap, float seed, float s);

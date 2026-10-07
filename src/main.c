@@ -1070,24 +1070,25 @@ static void draw_sliders(float posD, float posH, float posM, int w, int h, int l
 
 // Kamera direkt vor den naechsten Baum (Debug: Rinde / Blattwerk pruefen)
 static void tree_jump(void){
-  float tp[3], ts = 2.0f;
-  if (!tree_find_nearest(flyPos[0], flyPos[2], tp, &ts)){
+  float tp[3], ts = 2.0f, hf = 1.5f;
+  if (!tree_find_nearest(flyPos[0], flyPos[2], tp, &ts, &hf)){
     printf("DEBUG: kein Baum in der Nahe\n"); return;
   }
   float dx = flyPos[0] - tp[0], dz = flyPos[2] - tp[2];
   float l = sqrtf(dx * dx + dz * dz);
   if(l < 0.1f){ dx = 1.0f; dz = 0.0f; l = 1.0f; }
-  // So rahmen, dass die KRONE im Bild ist: sie sitzt bei by + s*2.05, also
-  // mehrere Meter ueber der Stamm-Basis. Frueherer Pitch (-0.22) schaute an ihr
-  // vorbei — deshalb war eine Blattwerk-Messung unmoeglich.
-  float dist = 3.6f + ts * 0.9f;
+  // Rahmung auf die KRONE: sie sitzt bei by + s*1.5*hf*1.15 (hf = individueller
+  // Groessenfaktor des Baums), also je nach Baum 3..12 m ueber der Basis.
+  float crownY = tp[1] + ts * 1.5f * hf * 1.15f;
+  float dist = 1.6f + ts * hf * 0.75f;
   flyPos[0] = tp[0] + dx / l * dist;
-  flyPos[1] = tp[1] + 1.00f;
+  flyPos[1] = crownY - ts * hf * 0.35f;
   flyPos[2] = tp[2] + dz / l * dist;
   flyYaw = atan2f(tp[0] - flyPos[0], tp[2] - flyPos[2]);
-  flyPitch = 0.55f;
-  printf("DEBUG Baum-Sprung: (%.1f, %.1f, %.1f) Groesse %.2f, Abstand %.2f m\n",
-         tp[0], tp[1], tp[2], ts, dist);
+  float dy = crownY - flyPos[1];
+  flyPitch = atan2f(dy, sqrtf(dist * dist - 0.0f));
+  printf("DEBUG Baum-Sprung: (%.1f, %.1f, %.1f) Groesse %.2f hf %.2f Krone %.1f m, Abstand %.2f m\n",
+         tp[0], tp[1], tp[2], ts, hf, crownY, dist);
 }
 
 int main(int argc, char **argv) {
