@@ -42,7 +42,7 @@ float c_terrainH(float px, float py);
 // iLodR = Radius, ab dem die Karten dieses Baumes die Blaetter uebernehmen
 // (keep = 1 - smoothstep(0,9*lodR, 1,1*lodR, d)) — Komplement zu lodR oben.
 #define LEAF_FLOATS  11
-#define LEAF_CAP     1200000  // 1,2M Instanzen a 11 floats = 52,8 MB
+#define LEAF_CAP     1600000  // gemessen max. 772k pro Wald; 1,6M = Reserve (70 MB)
 // Referenz-Krone fuer den Blatthorizont-Atlas (ferne Baeume sampeln diese
 // Textur statt prozeduraler Flecken). Layout im Atlas: 8x8 Kacheln =
 // 4 Kronen-Varianten x 16 Ansichts-Richtungen.
@@ -56,10 +56,10 @@ float c_terrainH(float px, float py);
 // werden zuerst gebaut, bei Cap-Uberlauf fehlt Geometrie also ganz hinten —
 // nicht vor der Kamera.
 #ifndef TREE_VERT_CAP
-#define TREE_VERT_CAP 2700000   // gemessen: 2 555 406 fuer 646 Baeume (kidPct 100)
+#define TREE_VERT_CAP 3600000   // gemessen 2,40-2,70 Mio pro Wald (3 Kamerapositionen), Reserve
 #endif
 #ifndef CROWN_CAP
-#define CROWN_CAP     1800000   // 300k Karten a 6 Vertices
+#define CROWN_CAP     2600000   // gemessen 295-300k Karten a 6 Vertices; Reserve auf 433k
 #endif
 #define WIRE_CAP      90000
 
@@ -82,7 +82,8 @@ extern float ezDbgS, ezDbgHf;
 extern int treeForceTier;    // DEMO_TIER=0|2|3: Detailstufe erzwingen (-1 = automatisch)
 extern int treeTierLog;
 extern int treeCapTree, treeCapCrown, treeCapLeaf;
-extern int treeSkipped;      // DEMO_TREELOG=1: Stufe je Baum auf der Console
+extern int treeSkipped;
+extern int treeCapSprig;      // DEMO_TREELOG=1: Stufe je Baum auf der Console
 extern float treeLodScale;   // DEMO_LODRSCALE: Schaltweiten skalieren (0 = aus)
 extern int ezKidPct;         // DEMO_KIDPCT: Kinderzahl aller Stufen gleich duennen
 // Referenzpunkt fuer die Detailstufe. main.c setzt das auf die ECHTE Kamera

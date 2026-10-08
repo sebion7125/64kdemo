@@ -27,7 +27,8 @@ int   treeTierLog = 0;
 // Cap-Waechter: eine Stufe, die mitten im Baum abbricht, sieht aus wie ein
 // abgesaegter Stamm ohne Laub. Deshalb wird jeder Cap-Treffer gezaehlt.
 int   treeCapTree = 0, treeCapCrown = 0, treeCapLeaf = 0;
-int   treeSkipped = 0;   // Baeume, die komplett ins Budget passten
+int   treeSkipped = 0;   // Baeume, die nicht ins Budget passten
+int   treeCapSprig = 0;   // Laub-Liste pro Baum voll
 float treeLodScale = 0.0f;   // DEMO_LODRSCALE (0 = aus)
 float treeLodRef[3] = { 0.0f, 0.0f, 0.0f };
 int   treeLodRefValid = 0;
@@ -195,13 +196,10 @@ static void emit_cap(const Ring *a, int sides, float sway,
 
 // Astspitzen + Laubpositionen des aktuellen Baums ( fuer die Distanz-Quads).
 // Steht hier oben, weil sowohl der alte als auch der EZ-Generator sie fuellen.
-#define EZ_TIPCAP 48
-static float ezTipx[EZ_TIPCAP], ezTipy[EZ_TIPCAP], ezTipz[EZ_TIPCAP];
-static int   ezNTip = 0;
 // 512 war zu klein: ein oak-Terminalast-Schema (6x4x3 = 72 Aeste x 18 Blaetter)
 // hat 1296 Laubpositionen, pine 82 x 30 = 2460. Mit 512 wurden nur die ersten
 // ~28 Aeste erfasst -> die Karten einer fernen Krone lagen auf einem Fleck.
-#define EZ_SPRIGCAP 4096
+#define EZ_SPRIGCAP 16384   // groesster Baum: 4 920 Laubansaetze (1 230 Karten bei Stride 4)
 static float ezSx[EZ_SPRIGCAP], ezSy[EZ_SPRIGCAP], ezSz[EZ_SPRIGCAP], ezSsize[EZ_SPRIGCAP];
 static int   ezNSprig = 0;
 // Kinderzahl-Faktor (1:1 = 100). DEMO_KIDPCT erlaubt Messungen. Wirkt auf alle
@@ -829,12 +827,6 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
     // Karten uebernehmen komplementaer ab 0,9 lodR.
     int leafStride = 1;
     const float CARDSCALE = ezCardScale;   // deren leafScale: 1,25 (LOD1) / 1,3 (LOD2)
-    if(ezNTip < EZ_TIPCAP){              // Spitze fuer die Distanz-Quads merken
-      ezTipx[ezNTip] = sec[S].rg.p[0];
-      ezTipy[ezNTip] = sec[S].rg.p[1];
-      ezTipz[ezNTip] = sec[S].rg.p[2];
-      ezNTip++;
-    }
     if(lc < 1) return;
     float lsz = P->leafSize * unit;
     float lcr = ezLeafR * (0.85f + 0.30f * TH(700)),
@@ -848,6 +840,7 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
       float cx = sec[si].rg.p[0] + (sec[si2].rg.p[0] - sec[si].rg.p[0]) * al;
       float cy = sec[si].rg.p[1] + (sec[si2].rg.p[1] - sec[si].rg.p[1]) * al;
       float cz = sec[si].rg.p[2] + (sec[si2].rg.p[2] - sec[si].rg.p[2]) * al;
+      if(ezNSprig >= EZ_SPRIGCAP) treeCapSprig++;
       if(ezNSprig < EZ_SPRIGCAP){       // Karte fuer die Distanzstufe
         ezSx[ezNSprig] = cx; ezSy[ezNSprig] = cy; ezSz[ezNSprig] = cz;
         // Groessenstreuung wie bei ihnen: leafSize * (1 +/- sizeVariance=0,7).
@@ -897,7 +890,7 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
   root.rg.r = P->radius[0] * unit;
   root.d[0] = 0.0f; root.d[1] = 1.0f; root.d[2] = 0.0f;
   ring_basis(&root.rg, 0.0f, 1.0f, 0.0f);
-  ezNTip = 0; ezNSprig = 0;
+  ezNSprig = 0;
   ezCardScale = (tier >= 2) ? 1.25f : 1.30f;   // muss VOR ez_grow stehen
   ezDbgName = P->name; ezDbgUnit = unit; ezDbgR0 = root.rg.r; ezDbgNSec = 0;  ezDbgS = s; ezDbgHf = hf;
   ez_grow(0, &root, P, unit, seed, tier, btone);
@@ -1109,20 +1102,35 @@ void trees_build(float tx, float tz){
     // ein abgesaegter Stamm ohne Laub (Nutzerbefund; gemessen: 54 Cap-Abbrueche,
     // Karten-Puffer 1 800 000/1 800 000 voll, Geruest 2 663 286/2 700 000).
     // Baeume werden von nah nach fern gebaut, es fehlen also nur die fernsten.
-    int needV = (tier >= 3) ? 9000 : (tier == 2 ? 1800 : 500);
-    int needC = (tier >= 2) ? 8000 : 4000;
-    int needL = (tier >= 3) ? 9000 : 0;
+    // Groessen pro Baum GEMESSEN (DEMO_TREELOG, drei Kamerapositionen):
+    //   tier 3: bis 30 096 Geruest-Vertices, 1 230 Karten, 12 300 Blatt-Instanzen
+    //   tier 2: bis  8 016 Vertices, 1 230 Karten, 12 300 Instanzen
+    //   tier 0: bis  2 988 Vertices,  615 Karten
+    int needV = (tier >= 3) ? 31000 : (tier == 2 ? 8500 : 3200);
+    int needC = (tier >= 1) ? 8000 : 4200;
+    int needL = ezWantLeaves ? 12500 : 0;
     if(nTreeVerts + needV > TREE_VERT_CAP || nCrownVerts + needC > CROWN_CAP ||
        nLeafInst + needL > LEAF_CAP){ treeSkipped++; continue; }
-    int leafBefore = nLeafInst, quadBefore = nCrownVerts;
+    int leafBefore = nLeafInst, quadBefore = nCrownVerts, vertBefore = nTreeVerts;
     float tseed = cand[i].p[0] * 12.9898f + cand[i].p[2] * 78.233f;
+    treeCapTree = treeCapCrown = treeCapLeaf = treeCapSprig = 0;
     if(treeGenMode) gen_tree_ez(cand[i].p[0], cand[i].p[1], cand[i].p[2], cand[i].s, tseed, tier, d, R1);
     else            gen_tree (cand[i].p[0], cand[i].p[1], cand[i].p[2], cand[i].s, tseed, tier);
+    // Sicherheitsnetz: die Budget-Schaetzung oben ist pro Baum nur geschaetzt.
+    // Hat der Baum trotzdem ein Cap gerissen, wird er KOMPLETT zurueckgerollt —
+    // ein Baum, der mitten im Ast endet, zeigt eine offene Ringkante (eine
+    // Schnittflaeche) und hoert sich fuer den Nutzer "abgebrochener Baum" an.
+    // Die Puffer werden pro Baum nur angehaengt, zurueckrollen ist also billig.
+    if(treeCapTree || treeCapCrown || treeCapLeaf || treeCapSprig){
+      nTreeVerts = vertBefore; nCrownVerts = quadBefore; nLeafInst = leafBefore;
+      treeSkipped++;
+      continue;
+    }
     if(treeTierLog)
       printf("  Baum (%.1f,%.1f) H %.1f m  d %.1f m  R1 %.0f R2 %.0f  tier %d  "
-             "Blaetter %d  Karten %d  Farbe (%.2f,%.2f,%.2f)\n",
+             "Blaetter %d  Karten %d  Geruest %d  Farbe (%.2f,%.2f,%.2f)\n",
              cand[i].p[0], cand[i].p[2], H, d, R1, R2, tier,
-             nLeafInst - leafBefore, (nCrownVerts - quadBefore) / 6,
+             nLeafInst - leafBefore, (nCrownVerts - quadBefore) / 6, nTreeVerts - vertBefore,
              ezLeafR, ezLeafG, ezLeafB);
     nTrees++;
   }

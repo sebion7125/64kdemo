@@ -568,6 +568,51 @@ der alten Add-on-Datei sind tot (404), das Add-on ist seit Blender 4.2 eine Exte
 Alpha-Test im Shader, Blatt-Laenge/Breite-Verhaeltnis ~2:1, Blattgroessen-Abstufung
 zum Zweigende hin, Kronenform ueber das Astlaengen-Profil.
 
+## Session 2026-10-08, Runde 25c (Budget erhoeht — Nutzer: „keine Loesung, Budget erhoehen, auch pro Baum")
+
+Pro Baum **gemessen** (DEMO_TREELOG, drei Kamerapositionen):
+
+| Stufe | max Geruest-Vertices | max Karten | max Blatt-Instanzen |
+|---|---|---|---|
+| tier 3 | **30 096** | 1 230 | **12 300** |
+| tier 2 | 8 016 | 1 230 | 12 300 |
+| tier 0 | 2 988 | 615 | 0 |
+
+Wald-Summen: Geruest 2,40-2,84 Mio, Karten 295-321k, Blaetter 0,55-0,77 Mio.
+Davon abgeleitete Budgets (mit Reserve):
+`TREE_VERT_CAP 2 700 000 -> 3 600 000`, `CROWN_CAP 1 800 000 -> 2 600 000`,
+`LEAF_CAP 1 200 000 -> 1 600 000`, und pro Baum `EZ_SPRIGCAP 4 096 -> 16 384`
+(groesster Baum 4 920 Laubansaetze — deshalb fielen bei ihm still Karten weg).
+Die Budget-Schaetzung pro Baum ist auf die gemessenen Maxima angehoben
+(31 000 / 8 500 / 3 200 Geruest, 12 500 Blaetter).
+Gemessen nachher, drei Kamerapositionen: **0 Cap-Treffer, 0 uebersprungene Baeume**,
+Rebuild 299-342 ms (Generieren 211-242 + Upload 88-100), Puffer 242-270 MB,
+Prozess-RSS 984 MB.
+Nebenbei entfernt: `ezTip*`/`EZ_TIPCAP` — geschrieben, aber nie gelesen (toter Code,
+Cap 48 war zu klein und haette fast jeden Baum falscho rollen lassen).
+Rollback-Netz bleibt als letzte Sicherung (soll nie ausloesen).
+
+## Session 2026-10-08, Runde 25b (Blattfarbe saettiger, Rebuild-Kosten gemessen)
+
+- **Blattfarbe**: HSV `sat 0,45..0,90 -> 0,62..0,95`, `val 0,30..0,60 -> 0,24..0,46`;
+  Ambient in leaf.frag/crown.frag von `(0,35,0,45,0,40)` auf `(0,18,0,32,0,16)`
+  (graues Ambient woesch aus — Nutzerbefund „blass, herbstlich").
+  Gemessen 16 m: (94,130,48) Sattigung 0,63 -> **(77,114,30) Sattigung 0,74**, G/R 1,48;
+  60 m (72,109,30) Sattigung 0,72 — Stufen halten zusammen.
+- **Abgesaegte Staemme / zu wenig Laub = volle Puffer**: Karten-Puffer war
+  **1 800 000/1 800 000 voll, 54 Abbrueche**, Geruest 2 663 286/2 700 000 (98,6 %).
+  Ein Abbruch mitten im Ast hinterlaesst einen offenen Ring = flaeche Schnittflaeche.
+  Jetzt: vor dem Bauen wird geschaetzt, ob der ganze Baum ins Budget passt, sonst
+  wird er uebersprungen (Bau nah->fern). Gemessen: **0 Cap-Treffer**, 585 Baeume
+  gebaut, **55 uebersprungen**. Cap-Waechter + Uebersprungs-Zaehler im Log.
+  => TODO 23 (Ganzbaum-Billboard, ~6 Vertices pro Baum) ist die eigentliche
+  Antwort: damit sind ferne Baeume immer da, ohne Budgetdruck.
+- **Rebuild-Stottern gemessen**: `Baum-Rebuild: Generieren 214 ms + Upload 91 ms
+  = 305 ms (242 MB Puffer)` — ausgeloesst alle 12 m Kameraweg (camTgt). Das ist
+  die Antwort auf die Nutzerfrage: ja, wie beim Gras verteilen (Baeume pro Frame
+  abzuarbeiten) und/oder eigener Thread mit Doppel-Puffer; der Upload von 242 MB
+  ist der teurere Teil und laeuft im Main-Thread.
+
 ## Session 2026-10-08, Runde 25 (LOD-Farbe: drei Fehler gefunden und gemessen)
 
 Nutzerbefund: Stufen besser, aber Karten weiterhin falsch gefärbt; ferner Baum ohne

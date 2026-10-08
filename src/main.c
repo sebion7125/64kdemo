@@ -1831,6 +1831,7 @@ int main(int argc, char **argv) {
         printf("  Caps: Geruest %d/%d  Karten %d/%d  Blaetter %d/%d   TREffer: Geruest %d Karten %d Blaetter %d\n",
                nTreeVerts, TREE_VERT_CAP, nCrownVerts, CROWN_CAP, nLeafInst, LEAF_CAP,
                treeCapTree, treeCapCrown, treeCapLeaf);
+        if(treeCapSprig) printf("  Laub-Liste pro Baum voll: %d\n", treeCapSprig);
         printf("  uebersprungen (Budget): %d Baeume\n", treeSkipped);
         treeCapTree = treeCapCrown = treeCapLeaf = treeSkipped = 0;
         // Messbank: Welt-BBox des Baumgeruests in Metern (Kronendurchmesser,
