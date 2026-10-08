@@ -3408,6 +3408,64 @@ int main(int argc, char **argv) {
       p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
     }
 
+    // REIHENFOLGE: erst die ABGEHENDE Schicht (Einzelblaetter), dann die
+    // KOMMENDE (Karten/Billboard) darueber. Mit dem Halt der abgehenden Schicht
+    // (lodBandOutHold: opak bis 0,97 des Bands) darf die kommende nicht UNTER der
+    // opaken liegen — sonst ist die Blende unsichtbar und die Karten erscheinen
+    // schlagartig am Bandende (Nutzer: "von dem fade nichts mehr, als ob der
+    // ploetzlich stattfaende").
+    // Einzelblaetter naher Baeume: Alpha-Test im Shader (discard), also opak wie
+    // das Baum-Mesh -> Depth schreiben, kein Blend. Vor dem Gras zeichnen, damit
+    // der Tiefentest Gras hinter den Blaettern verwirft.
+    if(!grassOnly && layLeaf && (nLeafInstCur > 0 || (treeFadeNew < 1.0f && nLeafInstOld > 0)) && !envNoLeaf){
+      // Ueberblendung jetzt als echtes Alpha (Nutzer: kein Dither, alle Blaetter
+      // gleichzeitig). Beim Mischen kein Depth schreiben — sonst verdeckt ein
+      // halb durchsichtiges Blatt den Hintergrund, der erst danach gezeichnet
+      // wird (Gras). Ohne laufende Ueberblendung bleibt alles wie vorher.
+      p_glEnable(GL_BLEND);
+      p_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+      p_glUniform1f(locLDepth, 0.0f);
+      p_glDepthMask((treeFadeNew < 1.0f || !dbgTreeDepthWrite) ? GL_FALSE : GL_TRUE);
+      if(dbgTreeA2C) p_glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE); else p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+      p_glUseProgram(progLeaf);
+      p_glUniformMatrix4fv(locLMVP, 1, GL_FALSE, mvp);
+      p_glUniform3f(locLCam, camPos[0], camPos[1], camPos[2]);
+      if(locLLod >= 0) p_glUniform3f(locLLod, camPos[0], camPos[1], camPos[2]);
+      p_glUniform1f(locLTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
+      p_glUniform1f(locLMask, (float)envLeafMask);
+      if(locLAlb >= 0) p_glUniform1f(locLAlb, 0.0f);
+      if(locLFade >= 0) p_glUniform1f(locLFade, treeFadeNew);
+      p_glBindVertexArray(vaoLeaf[drawSet]);
+      p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInstCur);
+      if(treeFadeNew < 1.0f && treeOldSet >= 0 && nLeafInstOld > 0){
+        if(locLFade >= 0) p_glUniform1f(locLFade, 1.0f - treeFadeNew);
+        if(locLOld >= 0) p_glUniform1f(locLOld, 1.0f);
+        p_glBindVertexArray(vaoLeaf[treeOldSet]);
+        p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInstOld);
+        if(locLOld >= 0) p_glUniform1f(locLOld, 0.0f);
+      }
+      if(locLFade >= 0) p_glUniform1f(locLFade, 1.0f);
+      if(treeFadeNew < 1.0f && treeOldSet >= 0 && nLeafInstOld > 0 && dbgTreeDepthPass){
+        p_glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        p_glDisable(GL_BLEND);
+        p_glDepthMask(GL_TRUE);
+        p_glUniform1f(locLDepth, 1.0f);
+        p_glBindVertexArray(vaoLeaf[drawSet]);
+        p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInstCur);
+        p_glBindVertexArray(vaoLeaf[treeOldSet]);
+        p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInstOld);
+        p_glUniform1f(locLDepth, 0.0f);
+        p_glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        p_glEnable(GL_BLEND);
+      }
+      // DepthMask ZURUECKsetzen: bleibt sie bei laufender Ueberblendung auf
+      // FALSE, schreibt im NAechsten Frame der Raymarch-Terrain-Pass keine Tiefe
+      // mehr — alle Meshes testen gegen eine kaputte Tiefenbuffer (Nutzerbefund
+      // "Z-Buffer wird nicht geloescht", Bildschirm flackert).
+      p_glDepthMask(GL_TRUE);
+      p_glDisable(GL_BLEND);
+      p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+    }
     // Kronen-Karten und Ganzbaum-Billboards: jetzt echtes Alpha (kein
     // Dither-Discard), also Depth NICHT schreiben — sonst verdeckt eine halb
     // durchsichtige Karte die dahinterliegende und die Krone wird loechrig.
@@ -3471,58 +3529,6 @@ int main(int argc, char **argv) {
       p_glDisable(GL_BLEND);
     }
 
-    // Einzelblaetter naher Baeume: Alpha-Test im Shader (discard), also opak wie
-    // das Baum-Mesh -> Depth schreiben, kein Blend. Vor dem Gras zeichnen, damit
-    // der Tiefentest Gras hinter den Blaettern verwirft.
-    if(!grassOnly && layLeaf && (nLeafInstCur > 0 || (treeFadeNew < 1.0f && nLeafInstOld > 0)) && !envNoLeaf){
-      // Ueberblendung jetzt als echtes Alpha (Nutzer: kein Dither, alle Blaetter
-      // gleichzeitig). Beim Mischen kein Depth schreiben — sonst verdeckt ein
-      // halb durchsichtiges Blatt den Hintergrund, der erst danach gezeichnet
-      // wird (Gras). Ohne laufende Ueberblendung bleibt alles wie vorher.
-      p_glEnable(GL_BLEND);
-      p_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-      p_glUniform1f(locLDepth, 0.0f);
-      p_glDepthMask((treeFadeNew < 1.0f || !dbgTreeDepthWrite) ? GL_FALSE : GL_TRUE);
-      if(dbgTreeA2C) p_glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE); else p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
-      p_glUseProgram(progLeaf);
-      p_glUniformMatrix4fv(locLMVP, 1, GL_FALSE, mvp);
-      p_glUniform3f(locLCam, camPos[0], camPos[1], camPos[2]);
-      if(locLLod >= 0) p_glUniform3f(locLLod, camPos[0], camPos[1], camPos[2]);
-      p_glUniform1f(locLTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
-      p_glUniform1f(locLMask, (float)envLeafMask);
-      if(locLAlb >= 0) p_glUniform1f(locLAlb, 0.0f);
-      if(locLFade >= 0) p_glUniform1f(locLFade, treeFadeNew);
-      p_glBindVertexArray(vaoLeaf[drawSet]);
-      p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInstCur);
-      if(treeFadeNew < 1.0f && treeOldSet >= 0 && nLeafInstOld > 0){
-        if(locLFade >= 0) p_glUniform1f(locLFade, 1.0f - treeFadeNew);
-        if(locLOld >= 0) p_glUniform1f(locLOld, 1.0f);
-        p_glBindVertexArray(vaoLeaf[treeOldSet]);
-        p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInstOld);
-        if(locLOld >= 0) p_glUniform1f(locLOld, 0.0f);
-      }
-      if(locLFade >= 0) p_glUniform1f(locLFade, 1.0f);
-      if(treeFadeNew < 1.0f && treeOldSet >= 0 && nLeafInstOld > 0 && dbgTreeDepthPass){
-        p_glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-        p_glDisable(GL_BLEND);
-        p_glDepthMask(GL_TRUE);
-        p_glUniform1f(locLDepth, 1.0f);
-        p_glBindVertexArray(vaoLeaf[drawSet]);
-        p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInstCur);
-        p_glBindVertexArray(vaoLeaf[treeOldSet]);
-        p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInstOld);
-        p_glUniform1f(locLDepth, 0.0f);
-        p_glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-        p_glEnable(GL_BLEND);
-      }
-      // DepthMask ZURUECKsetzen: bleibt sie bei laufender Ueberblendung auf
-      // FALSE, schreibt im NAechsten Frame der Raymarch-Terrain-Pass keine Tiefe
-      // mehr — alle Meshes testen gegen eine kaputte Tiefenbuffer (Nutzerbefund
-      // "Z-Buffer wird nicht geloescht", Bildschirm flackert).
-      p_glDepthMask(GL_TRUE);
-      p_glDisable(GL_BLEND);
-      p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
-    }
 
     // 3) MSAA-Resolve: fboMS -> fbo (Farbe + Tiefe in einem Blit, Single-Sample)
     //    glBlitNamedFramebuffer (eindeutige 12-Param-Signatur) statt glBlitFramebuffer
