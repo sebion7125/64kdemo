@@ -2596,4 +2596,44 @@ python3 -c "from PIL import Image; Image.open('/tmp/64kdemo_shot.ppm').save('/tm
 - Tasten: M=AA (4x/8x/OFF), G=Gras-Freeze, V=Nur-Gras, P=Screenshot,
   T=Wireframe, O=Fly/Orbit, 1/2/3=Resolution, H=HUD (Voll/reduziert/aus),
   Q/Esc=Quit
-- Caps: TREE_VERT_CAP 420000, CROWN_CAP 55000, GRASS_CAP 1500000, WIRE_CAP 90000
+- Caps: TREE_VERT_CAP 5200000, CROWN_CAP 900000, LEAF_CAP 2400000, GRASS_CAP 1500000
+## Session 2026-10-09, Runde 32 (Baum-LOD neu aufgebaut: Karten = Basisstufe)
+
+**Ausgangspunkt (Nutzer):** Laub blendet aus, bevor die andere Darstellung einblendet;
+beim Annähern baut ein Baum sein Blattwerk Blatt für Blatt neu auf; ferne Kronen sind
+überzeugende grüne Flecken nicht.
+
+**Messfehler zuerst berichtigt:** die alten Deckungs-Zahlen waren mit Gras *und*
+(bseit Runde 31) Schilf im Maskenbild — deshalb sah man ein "Loch" von 60–86 m, das es
+nicht gab. Saubere Messbank: `DEMO_NOTERRAIN=1 DEMO_GRASSMD=0 DEMO_REEDPASS=0
+DEMO_ONETREE=1 DEMO_TREEDIST=<m> DEMO_FREEZE=1`. Zusätzlich war `DEMO_NOBB0=1`
+verdreht (setzte den Billboard auf 1) — alle Billboard-Vergleiche damit waren wertlos.
+
+**Neue Regeln (CPU):** Karten gibt es in *jeder* Stufe und der Shader zeichnet sie ohne
+Entfernungsschwelle — sie sind die Basis der Krone. Einzelblätter sind eine
+Zusatzschicht, die im Band 0,9–1,1·R1 statistisch ein-/ausblendet, und sie werden bis
+1,3·R1 gebaut, damit in diesem Band immer beide Schichten im Puffer liegen.
+Schaltweiten R1 = 5×, R2 = 15× Wuchshöhe (vorher 10×/20×): ein 6-cm-Blatt ist ab ~50 m
+unter einem Pixel, die Einzelblätter decken die Krone nur bis etwa 5× Wuchshöhe.
+
+**Karten-Dichte:** `DEMO_CARDT2="<div> <scale>"` durchgemessen — wenige große Karten
+schlagen viele kleine: div 3 / scale 2,0 statt div 2 / 1,25 hebt die Deckung von 38 %
+auf 50 % und senkt die Instanzen von 287 194 auf 234 129.
+
+**Deckung ein Baum (H 3,9 m, R1 20 m, R2 58 m), grün/bbox:**
+10 m 41 % · 25 m 50 % · 40 m 52 % · 50 m 51 % · 58 m 60 % · 66 m 67 % · 86 m 73 % · 108 m 69 %
+(vorher: 34 / 34 / 40 / 40 / — / — / 70 / 66 %). Größter Schritt zwischen zwei
+Abständen jetzt +8 % (vorher Loch mit −70 %).
+
+**Satzwechsel (Kameraweg 6 m/s, alle 0,5 s ein Bild):** Laubpixel 53698 → 51013 →
+51010 → 50268 → 49820 → 49820 → 49616 → 49697 → 49794 → 49802, also kein Sprung beim
+Rebuild. Der harte Cull des alten Satzes unter 30 m ist raus (war genau bei nahen
+Bäumen ein Sprung); übergeblendet wird jetzt durchgängig über 0,9 s.
+
+**Caps erhöht statt Geometrie zu überspringen** (Nutzerregel): TREE_VERT_CAP
+3,8 M → 5,2 M, CROWN_CAP 700 k → 900 k, LEAF_CAP 1,6 M → 2,4 M. Im Stress-Szenario
+`DEMO_LODRSCALE=2` fielen vorher 90 Bäume komplett raus. Selbsttest wieder grün.
+
+**Offen nach dieser Runde:** FPS-Einbruch auf Taste `1` (Billboard aus) ist in der VM
+nicht messbar; erklärt ist er durch +246 535 Karten-Instanzen in Stufe 0. Braucht eine
+Draw-Call-/Instanzen-Statistik auf dem GPU-Host.
