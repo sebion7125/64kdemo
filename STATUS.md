@@ -2982,3 +2982,16 @@ Karten-Parameter sind NICHT die Loesung der Restdelle (Sweep 45->20 m,
 div/scale): 3/2,0 -> -5,95 %, 2/2,0 -> -5,92 %, 3/2,6 -> -11,03 %,
 2/3,2 -> -14,34 %. Groessere Karten machen es schlechter, die Ursache liegt also
 nicht in der Kartenflaeche.
+
+## Blende unsichtbar: Pass-Reihenfolge geaendert (2026-10-08, 5. Runde)
+
+Nutzer: "von dem fade nichts mehr, als ob der ploetzlich stattfaende". Ursache
+war meine eigene Kombination: der Halt der abgehenden Schicht (opak bis 0,97 des
+Bands) plus Blatt-Pass NACH dem Kronen-Pass. Die hochblendenden Karten lagen
+UNTER den opaken Blaettern, also unsichtbar, und erschienen schlagartig am
+Bandende. Jetzt: Einzelblaetter zuerst, Karten/Billboard darueber.
+
+Bildmessung ganzer Anflug 140->3 m: groesste Deckungs-Delle -2,15 % bei 31,2 m
+(zuvor -4,99 %, vor der Sortierung -8,16 %). Abdeckungsfehler der Gewichte
+0,77 %, Steigung 0,046/m (Schranke 0,223), 0 Pump-Frames, LT-ERGBNIS OK.
+Selbsttest (Vorversion): ALLE PRUEFUNGEN OK.
