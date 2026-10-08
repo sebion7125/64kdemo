@@ -816,6 +816,15 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
       if(cur == S) break;
     }
   }
+  // Ast-Enden verschliessen. Nicht-terminale Aeste enden mit vollem Radius —
+  // deren taper-Regel laesst bei Eiche 27 % des Stammradius offen, bei Astlevel 1
+  // sogar 58 %. Ohne Abschluss sieht man in das offene Rohr hinein (Nutzer-
+  // befund "abgebrochene Aeste", "abgeschnittener Stamm oben in der Krone").
+  // Terminale Aeste brauchen keinen: deren letzter Abschnitt geht auf 0,001 zu.
+  if(lvl < maxKid){
+    int sides = G >= 3 ? G : 3;
+    emit_cap(&sec[S].rg, sides, sw, cr, cg, cb2, 0.9f, (float)S * sl);
+  }
 
   if(lvl >= maxKid){
     // Terminalast: Laub geschichtet entlang des Astes (deren Laub-Schema).
