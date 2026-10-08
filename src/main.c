@@ -409,6 +409,8 @@ static int dbgTreeMask = 0;    // DEBUG (; bzw. DEMO_TREEMASK): Baum-Mesh als Ma
 //   DEMO_SHOT=12.5    Screenshot automatisch nach 12,5 s Laufzeit
 static int envTreeJump = 0;
 static float envShotAt = -1.0f;
+static int   envExitWhenDone = 0;   // DEMO_EXIT=1: arbeiten, dann sofort beenden
+static unsigned long frameNo = 0;
 //   DEMO_FREEZE=3.5  Shader-Zeit (Wind) auf 3,5 s einfrieren -> Screenshots sind
 //                      zwischen Laeufen Pixel fuer Pixel vergleichbar (noetig fuer
 //                      Maschen-Abgleich: der Baum-Sway verschiebt die Meshes sonst
@@ -573,6 +575,7 @@ static GLuint folTex = 0, folFbo = 0, folDepth = 0, vboFol = 0, vaoFol = 0;
 static GLuint crnTex = 0;
 static GLuint impFbo = 0, impDepthRb = 0;
 static int    envImpDump = 0;
+static int    impCards = 0;          // DEMO_IMPCARDS=1: Karten mit in die Aufnahme
 static int    impNext = 0, impOn = 1;
 static void build_crown_tiles(void){
   p_glGenTextures(1, &crnTex);
@@ -613,10 +616,12 @@ static void impostor_init(void){
 // Kachel repraesentiert: Geruest (Stamm/Aeste) + Karten, mit Kamera auf den
 // Baum angesetzt. Wind auf Zeit 0, Entfernungsblenden aus (uImpostor).
 static void build_mvp(const float camPos[3], const float camTgt[3], int w, int h, float out[16]);
+static void ortho_mvp(const float cp[3], const float tg[3], float half, float out[16]);
 struct ImpLoc {
-  GLuint pTree, pCrown;
+  GLuint pTree, pCrown, pLeaf;
   GLint tMVP, tCam, tTime, tFade;
-  GLint cMVP, cCam, cTime, cFade, cFol, cFol2, cImp, cLFace;
+  GLint cMVP, cCam, cTime, cFade, cFol, cFol2, cImp, cLFace, cJit;
+  GLint lMVP, lCam, lLod, lTime, lFade;
 };
 
 static void impostor_step(double budgetMs, int set, const struct ImpLoc *L){
@@ -638,16 +643,30 @@ static void impostor_step(double budgetMs, int set, const struct ImpLoc *L){
     p_glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     // Aufnahme-Kamera: fester Blickwinkel, Abstand so, dass die Huellkugel
     // genau in die Kachel passt (NDC-Halblaenge 1 = rad * 3.4 / dist).
-    float tgt[3] = { ir->cx, ir->cy + ir->rad * 0.55f, ir->cz };
-    float dir[3] = { 0.86f, 0.30f, 0.42f };
-    // 1.30 Rand: mit 1.02 schnitt die Aufnahme bei manchen Baumen den Rand ab
-    // (Kachel-BBox 128 von 128 px gemessen). Der Billboard-Quad ist gegenueber
-    // dem Baum ohnehin so gross wie die Huellkugel, die transparenzige Kachel-
-    // randzone passt also auf den Quad-Rand.
-    float dist = ir->rad * 3.4f * 1.30f;
+    // Ziel = Mitte STAMM+Krone, Blick fast waagerecht: mit Ziel auf der Krone
+    // und 0.30 Hoehe schaute die Kamera von oben auf die Krone, der Stamm war
+    // verdeckt (im Atlas: gruene Masse ohne Baum).
+    // Ziel = Mitte des Billboard-Quads (nicht Kronenmitte): Aufnahme-Fenster
+    // und Quad muessen deckungsgleich sein
+    float tgt[3] = { ir->cx, ir->cy, ir->cz };
+    if(!ir->hasBb) tgt[1] = ir->cy + ir->rad * 0.72f;
+    float dir[3] = { 0.92f, 0.10f, 0.38f };
+    // ORTHOGONALE Aufnahme (Nutzer): eine Kachel ist ein Standbild, keine
+    // Kamera — perspektivisch wuerden vordere Karten groesser als hintere, und
+    // die Abbildung auf den Billboard-Quad waere nicht 1:1. half = halbe
+    // Baum-Ausdehnung in der Bildebene, 1.10 = Rand (mit perspektivischer
+    // Rahmung 1.02 wurde der Rand beschnitten: Kachel-BBox 128 von 128 px).
+    // Aufnahmefenster = Quadgroesse (ir->rad = halbe Quadkante; der Rand von
+    // 1.15 steckt im Quad selbst). Nur dann ist die Kachel 1:1 auf den Quad
+    // abgebildet und der Baum behaelt seine echte Groesse im Bild.
+    float half = ir->hasBb ? ir->rad : ir->rad * 1.30f;
+    // ortho_mvp legt das Tiefenfenster um die KAMERA (0 .. 2*half*1.4). Der
+    // Abstand muss also in der Mitte liegen, sonst faellt der Baum hinter die
+    // Far-Ebene (gemessen: bei 4x rad waren 48 von 64 Kacheln leer).
+    float dist = half * 1.4f;
     float eye[3] = { tgt[0] + dir[0] * dist, tgt[1] + dir[1] * dist, tgt[2] + dir[2] * dist };
     float mvp[16];
-    build_mvp(eye, tgt, IMP_TILEPX, IMP_TILEPX, mvp);
+    ortho_mvp(eye, tgt, half, mvp);
     p_glEnable(GL_DEPTH_TEST);
     p_glUseProgram(L->pTree);
     p_glBindVertexArray(vaoTree[set]);
@@ -656,6 +675,7 @@ static void impostor_step(double budgetMs, int set, const struct ImpLoc *L){
     p_glUniform1f(L->tTime, 0.0f);
     p_glUniform1f(L->tFade, 1.0f);
     p_glDrawArrays(GL_TRIANGLES, ir->vStart, ir->vCount);
+    { GLenum e = p_glGetError(); if(e) printf("  Aufnahme Geruest: GL 0x%x\n", (unsigned)e); }
     p_glUseProgram(L->pCrown);
     p_glBindVertexArray(vaoCrown[set]);
     p_glUniformMatrix4fv(L->cMVP, 1, GL_FALSE, mvp);
@@ -672,14 +692,52 @@ static void impostor_step(double budgetMs, int set, const struct ImpLoc *L){
     // aufgenommenen Karten haben vCrown = 0 und brauchen uCrownTex nicht, also
     // waehrend der Aufnahme eine andere Textur draufbinden.
     p_glActiveTexture(GL_TEXTURE1); p_glBindTexture(GL_TEXTURE_2D, folTex);
-    p_glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 6, ir->cCount,
-                                        (GLuint)ir->cStart);
+    // Karten nur noch optional (DEMO_IMPCARDS=1): seit jeder Eimer-Repraesentant
+    // Einzelblaetter hat, bringen sie nichts mehr — aber eine Karte, die in der
+    // Aufnahme nahe an der Kamera liegt, fuellt die halbe Kachel als hartes
+    // gruenes Rechteck (im Wald deutlich gesehen).
+    if(impCards){
+    {
+      // drei versetzte Durchgaenge (fester Offset, keine Zeitabhaengigkeit —
+      // die Kachel muss zwischen zwei Laufen identisch sein)
+      static const float jit[3][3] = { {0,0,0}, {0.31f,0.17f,-0.22f}, {-0.26f,0.09f,0.33f} };
+      for(int j = 0; j < 3; j++){
+        if(L->cJit >= 0) p_glUniform3f(L->cJit, jit[j][0], jit[j][1], jit[j][2]);
+        p_glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 6, ir->cCount,
+                                            (GLuint)ir->cStart);
+        { GLenum e = p_glGetError(); if(e) printf("  Aufnahme Karten: GL 0x%x\n", (unsigned)e); }
+      }
+    }
+    }
+    // Einzelblaetter: die 128-px-Kachel soll aussehen wie eine ferne Krone, und
+    // die ist ein weiches Laubdach — nicht ein Stapel grosser Karten-Lappen
+    // (im Atlas deutlich gesehen). Die Aufnahme ist EINMALIG (64 Kacheln pro
+    // Satz, gestueckelt), deshalb ist die feinste Stufe hier vertretbar: sie
+    // kostet einmal Geometrie-Transformation, nicht pro Frame.
+    if(ir->lCount > 0){
+      p_glUseProgram(L->pLeaf);
+      p_glBindVertexArray(vaoLeaf[set]);
+      p_glUniformMatrix4fv(L->lMVP, 1, GL_FALSE, mvp);
+      p_glUniform3f(L->lCam, eye[0], eye[1], eye[2]);
+      p_glUniform3f(L->lLod, eye[0], eye[1], eye[2]);
+      p_glUniform1f(L->lTime, 0.0f);
+      p_glUniform1f(L->lFade, 1.0f);
+      p_glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 6, ir->lCount,
+                                          (GLuint)ir->lStart);
+      { GLenum e = p_glGetError(); if(e) printf("  Aufnahme Blaetter: GL 0x%x\n", (unsigned)e); }
+    }
+
     if(now_sec() * 1000.0 - t0 >= budgetMs) break;
   }
   p_glUniform1f(L->cImp, 0.0f);
   p_glDisable(GL_SCISSOR_TEST);
   p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
   p_glBindVertexArray(0);
+  // Ein Fehler aus diesem Pass haette den naechsten Screenshot still
+  // abbrechen lassen (save_screenshot_ppm steigt bei glGetError != NO_ERROR aus).
+  { GLenum e; int n = 0;
+    while((e = p_glGetError()) != GL_NO_ERROR && n < 4){
+      printf("Impostor-Pass: GL-Fehler 0x%x\n", (unsigned)e); n++; } }
 }
 // Shadow-Map: eine orthogliche Licht-Kaskade um die Kamera. Geworfen werden
 // Baum-Mesh, Kronen-Quads und Einzelblaetter — die Kronen sind der
@@ -1711,6 +1769,13 @@ int main(int argc, char **argv) {
   impLoc.tMVP = locTMVP; impLoc.tCam = locTCam; impLoc.tTime = locTTime; impLoc.tFade = locTFade;
   impLoc.cMVP = locCMVP; impLoc.cCam = locCCam; impLoc.cTime = locCTime; impLoc.cFade = locCFade;
   impLoc.cFol = locCFol; impLoc.cFol2 = locCFol2; impLoc.cImp = locCImp; impLoc.cLFace = locCLFace;
+  impLoc.cJit = p_glGetUniformLocation(progCrown, "uImpJit");
+  impLoc.pLeaf = progLeaf;
+  impLoc.lMVP  = p_glGetUniformLocation(progLeaf, "uMVP");
+  impLoc.lCam  = p_glGetUniformLocation(progLeaf, "uCamPos");
+  impLoc.lLod  = p_glGetUniformLocation(progLeaf, "uLodCam");
+  impLoc.lTime = p_glGetUniformLocation(progLeaf, "uTime");
+  impLoc.lFade = p_glGetUniformLocation(progLeaf, "uTreeFade");
   GLint locLMVP    = p_glGetUniformLocation(progLeaf, "uMVP");
   GLint locLCam    = p_glGetUniformLocation(progLeaf, "uCamPos");
   GLint locLLod    = p_glGetUniformLocation(progLeaf, "uLodCam");
@@ -1751,7 +1816,9 @@ int main(int argc, char **argv) {
   envTreeJump = getenv("DEMO_TREE") ? 1 : 0;
   if (getenv("DEMO_TREEMASK")) dbgTreeMask = 1;
   { const char *es = getenv("DEMO_SHOT"); if (es) envShotAt = (float)atof(es); }
+  envExitWhenDone = getenv("DEMO_EXIT") ? 1 : 0;
   envImpDump = getenv("DEMO_IMPDUMP") ? 1 : 0;
+  impCards = getenv("DEMO_IMPCARDS") ? 1 : 0;
   { const char *ef = getenv("DEMO_FREEZE"); if (ef) envFreeze = (float)atof(ef); }
   // DEMO_TREEFADE=<sek>: Ueberblendzeit beim LOD-Satzwechsel (0 = hart schneiden)
   { const char *tf = getenv("DEMO_TREEFADE"); if (tf) treeFadeDur = (double)atof(tf); }
@@ -2350,6 +2417,25 @@ int main(int argc, char **argv) {
               int filled = 0;
               for(int q = 0; q < IMP_TILES; q++) if(treeImp[q].valid) filled++;
               printf("Impostor-Atlas geschrieben: %d/%d Kacheln gefuellt\n", filled, IMP_TILES);
+              // Diagnose: was steckt in einer Kachel? Kartenanzahl und -groesse
+              // entscheiden, ob sie als Laubmasse oder als paar grosse Lappen
+              // aussieht (im Atlas deutlich zu sehen).
+              for(int q = 0; q < IMP_TILES; q++){
+                const struct ImpRep *ir = &treeImp[q];
+                if(!ir->valid) continue;
+                float sum = 0.0f, mx = 0.0f;
+                for(int c = 0; c < ir->cCount; c++){
+                  // die Billboard-Instanz (Kachel >= 4) hat als "Groesse" die
+                  // ganze Kronenausdehnung — die zaehlt hier nicht mit
+                  float tile = crownVertsD[(ir->cStart + c) * CROWN_FLOATS + 6];
+                  if(tile >= 4.0f) continue;
+                  float sz = crownVertsD[(ir->cStart + c) * CROWN_FLOATS + 3];
+                  sum += sz; if(sz > mx) mx = sz;
+                }
+                printf("Kachel %2d: H %5.1f tier %d Karten %4d mittl %.2f max %.2f Geruest %6d\n",
+                       q, ir->rad / 0.75f, ir->tier, ir->cCount,
+                       ir->cCount ? sum / ir->cCount : 0.0f, mx, ir->vCount);
+              }
               fflush(stdout);
             }
           }
@@ -2928,6 +3014,7 @@ int main(int argc, char **argv) {
 
     // Automatischer Screenshot des vollen Frames (inkl. Wireframe-Overlay) nach dem
     // ersten Frame (Test/Verifikation)
+    frameNo++;
     if (!shotDone) { shotDone = 1; save_screenshot_ppm("/tmp/64kdemo_shot.ppm", winW, winH); }
     // DEBUG: geplanter Screenshot (DEMO_SHOT=<Sekunden>) — deterministisch, ohne
     // X-Tasten (synthetische Tasten kommen in der VM nicht immer an).
@@ -2936,6 +3023,18 @@ int main(int argc, char **argv) {
       envShotAt = -1.0f;
       save_screenshot_ppm("/tmp/64kdemo_shot.ppm", winW, winH);
       printf("DEBUG Auto-Screenshot nach %.1f s\n", el);
+    }
+
+    // DEMO_EXIT=1 (Messlaeufe): die Engine arbeitet genau das ab, was der Lauf
+    // braucht — Baum-Build, Upload-Slices, Impostor-Kacheln — und beendet sich,
+    // sobald alles fertig ist, statt bis zum Timeout durchzurennen.
+    if(envExitWhenDone && !upActive && !trees_build_busy() &&
+       impNext >= IMP_TILES && frameNo >= 3u){
+      save_screenshot_ppm("/tmp/64kdemo_shot.ppm", winW, winH);
+      printf("DEBUG Early-Exit: %u Frames, %.1f s (Build+Upload+Kacheln fertig)\n",
+             frameNo, now_sec() - loopT0);
+      fflush(stdout);
+      break;
     }
 
     p_glXSwapBuffers(disp, win);

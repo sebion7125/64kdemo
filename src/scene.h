@@ -83,8 +83,13 @@ extern float *treeVerts, *crownVerts, *leafInst;
 #define IMP_TILEPX 128
 struct ImpRep {
   int valid;
+  int dense;                     // Repraesentant hat dichte Karten (tier 2/3)
+  int tier;                      // Stufe des Repraesentanten
+  int hasBb;                     // BBox-Mitte/-groesse des Billboards bekannt
+  int nTree;                     // Baeume dieses Eimers ueberhaupt
   int vStart, vCount;            // Geruest-Slice im Baum-Puffer
   int cStart, cCount;            // Karten-Slice (Instanzen)
+  int lStart, lCount;            // Einzelblatt-Slice (nur Aufnahme, nicht pro Frame)
   float cx, cy, cz, rad;         // Baum-Position, Radius der Huellkugel
 };
 extern struct ImpRep treeImp[IMP_TILES];   // Zeichenseite (getauscht im Finish)

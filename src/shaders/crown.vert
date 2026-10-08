@@ -16,6 +16,7 @@ uniform float uTreeFade = 1.0; // Ueberblendung beim LOD-Wechsel (Runde 27):
                                // 0 = dieser Satz verschwindet, 1 = voll sichtbaruniform float uTreeFade = 1.0; // Ueberblendung beim LOD-Wechsel (Runde 27):
                                // 0 = dieser Satz verschwindet, 1 = voll sichtbar
 uniform float uTreeOld = 0.0;    // 1 = dieser Satz blendet AUS (der alte)
+uniform vec3 uImpJit = vec3(0.0);   // Aufnahme: versetztes Wiederholen der Karten
 uniform float uImpostor = 0.0;   // 1 = Aufnahme in die Impostor-Textur (keine
                                  // Entfernungsblenden, kein Wind, feste Kamera)
 out vec2 vUV;
@@ -56,6 +57,10 @@ void main(){
   float cr = cos(aData.y), sr = sin(aData.y);
   vec2 ro = vec2(aOff.x * cr - aOff.y * sr, aOff.x * sr + aOff.y * cr);
   vec3 p = aCenter + right * (ro.x * aData.x) + up * (ro.y * aData.x);
+  // Aufnahme-Pass: dieselben Karten mehrmals versetzt gezeichnet fuellen die
+  // Luecken von Arten mit wenigen grossen Karten (Kiefer: 162 Karten an einem
+  // 7-m-Baum = einzelne Blatt-Lappen in der 128-px-Kachel).
+  if(uImpostor > 0.5) p += uImpJit;
   // Ferne Kronen bewegen sich mit demselben Boen-Feld wie Gras, Aeste und
   // Blaetter — sonst steht der Wald still, waehrend das Gras weht.
   vec2 gp = aCenter.xz * 0.10 - vec2(0.35, 0.20) * uTime;

@@ -93,9 +93,14 @@ void main(){
   vec4 tx = textureLod(uFoliage, (vTile + cell) * (1.0 / 8.0), lod);
   // Ganzbaum-Kachel (groebste Detailstufe): andere Textur, 2x2 Kacheln a 128 px
   if(vCrown > 0.5){
-    float cinset = exp2(lod) * 0.5 / 1024.0;   // Atlas 8x8 a 128 px = 1024
+    // Der Impostor-Atlas hat KEINE Gutters zwischen den Kacheln: ab lod 1
+    // vermischt die Mip-Kette Nachbar-Kacheln, und im Wald erscheinen harte
+    // gruenue Rechtecke aus der Nachbarkrone. Deshalb hier bei lod 0/1 bleiben.
+    // Rand des Billboards: siehe unten bei der Alpha-Berechnung (emEdge).
+    float clod = min(lod, 1.0);
+    float cinset = exp2(clod) * 0.5 / 1024.0;   // Atlas 8x8 a 128 px = 1024
     vec2 cc = clamp(cell, cinset, 1.0 - cinset);
-    tx = textureLod(uCrownTex, (vTile + cc) * (1.0 / 8.0), lod);
+    tx = textureLod(uCrownTex, (vTile + cc) * (1.0 / 8.0), clod);
   }
   // Harte Polygonkanten an fernen Kronen (alter Nutzerbefund): mit steigender
   // Distanz wird die UV in die Kachelmitte zurueckgezogen, dadurch fuellt die
@@ -111,6 +116,14 @@ void main(){
   // vFade = 0 (gemessen, /tmp/crowndist.c): deren transparenten Atlas-Bereiche
   // (rgb = 0) wurden als dunkles Quadrat gemalt = der Nutzerbefund "schwarz".
   float a = tx.a * smoothstep(0.0, band, e) * vFade;
+  // Rand des Billboards ausblenden: entkommt der Baum (Aeste, Blaetter) der
+  // BBox-Schaetzung, beruehrt der Kachelinhalt den Rand — im Wald sieht man dann
+  // ein hartes gruenes Rechteck gegen den Himmel (gemessen: 15 von 64 Kacheln
+  // randberuehrend; mit DEMO_NOBB0=1 verschwindet der Block).
+  if(vCrown > 0.5){
+    float em = max(abs(cell.x * 2.0 - 1.0), abs(cell.y * 2.0 - 1.0));
+    a *= 1.0 - smoothstep(0.88, 1.0, em);
+  }
   float thr = 0.5 + (hash12(gl_FragCoord.xy + vTile * 37.0) - 0.5) * 0.75;
   if(a < thr) discard;
   // Masken-Diagnose erst nach dem Discard: sonst zaehlt sie auch die leeren

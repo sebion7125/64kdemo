@@ -39,7 +39,9 @@ int   treeFocusValid = 0;
 // hier, weil add_leaf()/leaf_cluster() von beiden Generatoren aus tief unten
 // aufgerufen werden und die Kette dafuer nicht voll durchgereicht wird.
 static float gLodR = 30.0f;
-static float gLodR2 = 0.0f;   // Schaltweite der groebsten Stufe (20x Wuchshoehe).
+static float gLodR2 = 0.0f;
+static float gBbSize = 0.0f, gBbCen[3] = {0,0,0};   // BBox des letzten Baums
+static int   gBbWant = 0;      // Billboard fuer diesen Baum wirklich zeichnen   // Schaltweite der groebsten Stufe (20x Wuchshoehe).
                         // sitzt pro Karte in der Instanz, damit der Uebergang
                         // Karten -> Ganzbaum-Billboard im Shader kontinuierlich
                         // ueber die Entfernung laufen kann (kein Stufensprung).
@@ -246,7 +248,8 @@ int treeCardDiv0 = 3; float treeCardScale0 = 1.45f;   // gemessen: deckt wie tie
 // 18 652. Bei 1,0 sind die Blaetter 3-5 cm gross und die Krone durchsichtig;
 // 2,0 (6-10 cm) entspricht echten Eichen-/Eschenblaettern und fuellt sie.
 struct ImpRep treeImp[IMP_TILES];
-static struct ImpRep impRepD[IMP_TILES];   // Schreibseite des laufenden Builds
+static struct ImpRep impRepD[IMP_TILES];
+int impNTree[IMP_TILES];   // Schreibseite des laufenden Builds
 float ezLeafScale = 2.0f, ezLeafPer = 1.0f;   // DEMO_LEAFSC / DEMO_LEAFPER
 int treeCardDivN = 3; float treeCardScaleN = 2.00f;    // DEMO_CARDT2 "<div> <scale>" 
 // DEMO_T2="<stride> <Gzaehler> <Gnenner>": Vernetzung der mittleren Detailstufe.
@@ -315,6 +318,7 @@ static void emit_crown_quads(float bx, float bz, float s, float hf,
 // abgeleitet, damit die Kachel die Krone dieses Baumes abdeckt. Die Kachel ist
 // Variante 4..7 (crown.frag nimmt dafuer eine andere Textur mit 2x2 Kacheln).
 static void emit_crown_billboard(float seed, float bx, float by, float bz, float treeH){
+  gBbSize = 0.0f;              // pro Baum neu — sonst gilt die BBox des letzten
   if(ezNSprig <= 0) return;
   float mn[3] = { 1e30f, 1e30f, 1e30f}, mx[3] = {-1e30f,-1e30f,-1e30f};
   for(int i = 0; i < ezNSprig; i++){
@@ -336,11 +340,21 @@ static void emit_crown_billboard(float seed, float bx, float by, float bz, float
   if(mx[2] - mn[2] > size) size = mx[2] - mn[2];
   if(mx[1] - mn[1] > size) size = mx[1] - mn[1];
   if(size < 0.5f) return;
+  // 1.15: der Quad ist etwas grosser als der Baum. Ist er exakt so gross,
+  // beruehrt die Krone den Quad-Rand und man sieht gegen den Himmel eine gerade
+  // Kante (gemessen: 14 von 64 Kacheln randberuehrend).
+  size *= 1.15f;
+  if(!gBbWant) return;         // Rahmung ist gesetzt, Quad aber nicht gewollt
   if(nCrownVerts + 1 > CROWN_CAP){ treeCapCrown++; return; }
   float *d = &crownVerts[nCrownVerts * CROWN_FLOATS];
   d[0] = (mn[0] + mx[0]) * 0.5f; d[1] = (mn[1] + mx[1]) * 0.5f; d[2] = (mn[2] + mx[2]) * 0.5f;
   d[3] = size; d[4] = 0.0f; d[5] = seed;
-  d[6] = 4.0f + (float)ezBucket;   // 4..67 = Impostor-Kachel (8x8-Atlas)
+  d[6] = 4.0f + (float)ezBucket;
+  // dieselbe BBox wie der Billboard-Quad auch fuer die Aufnahme: passt
+  // Quadratroesse und Aufnahmefenster nicht zusammen, beruehrt der Kachelinhalt
+  // den Rand und man sieht im Wald ein hartes gruenes Rechteck (gemessen;
+  // DEMO_NOBB0=1 lasst den Block verschwinden)
+  gBbSize = size; gBbCen[0] = d[0]; gBbCen[1] = d[1]; gBbCen[2] = d[2];   // 4..67 = Impostor-Kachel (8x8-Atlas)
   d[7] = gLodR; d[8] = ezLeafR; d[9] = ezLeafG; d[10] = ezLeafB; d[11] = gLodR2;
   nCrownVerts++;
 }
@@ -719,6 +733,7 @@ static const EzPreset EZ_PRESETS[] = {
     {0.70f,0.70f,0.70f,0.70f}, -0.003f, 30, 39, 0.09f, 1.435f },
 };
 #define EZ_NPRESETS ((int)(sizeof(EZ_PRESETS) / sizeof(EZ_PRESETS[0])))
+#define EZ_NPRESETS_BUCKETS (IMP_TILES / EZ_NPRESETS)   // Formen pro Art
 
 // Drehung eines Vektors um eine Achse (Rodrigues)
 static void ez_rot(float *x, float *y, float *z,
@@ -1046,7 +1061,10 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
   // mit 1,3 R1 Puffer hatten).
   int cardDiv = (tier >= 2) ? treeCardDivN : (tier == 1 ? treeCardDiv0 : (treeBB0Cards > 0 ? treeBB0Cards : 8));
   int wantCards = ezNSprig / cardDiv;
-  if(treeBillboard0 && tier <= 2){
+  // BBox wird fuer JEDEN Baum bestimmt (die Aufnahme-Rahmung braucht sie auch
+  // fuer tier-3-Repraesentanten, die selbst kein Billboard bekommen)
+  gBbWant = (treeBillboard0 && tier <= 2) ? 1 : 0;
+  {
     // Das Billboard liegt auch in Stufe 2 im Puffer: der Shader blendet es ab
     // 0,7 R2 ein und die Karten bis 1,1 R2 aus — der Uebergang laeuft mit der
     // Entfernung, nicht mit dem Build (kein Dichtesprung an der Schaltweite).
@@ -1173,7 +1191,8 @@ static int treeNCand = 0, treeCandPos = 0;
 
 void trees_build_begin(float tx, float tz){
   nTreeVerts = 0; nCrownVerts = 0; nWireVerts = 0; nTrees = 0; nLeafInst = 0;
-  for(int q = 0; q < IMP_TILES; q++) impRepD[q].valid = 0;
+  for(int q = 0; q < IMP_TILES; q++){ impRepD[q].valid = 0; impRepD[q].nTree = 0; }
+  for(int q = 0; q < IMP_TILES; q++) impNTree[q] = 0;
   #define CAND_CAP TREE_CAND_CAP
   TreeCand *cand = treeCand;
   int nc = 0;
@@ -1306,14 +1325,29 @@ int trees_build_step(int maxTrees){
     // Die Puffer werden pro Baum nur angehaengt, zurueckrollen ist also billig.
     // Repraesentant fuer den Impostor-Eimer: der NAHSTE Baum der Sorte (wir
     // bauen nah vor fern), weil von ihm Geruest UND Karten im Puffer liegen.
-    if(ezBucket >= 0 && ezBucket < IMP_TILES && !impRepD[ezBucket].valid &&
+    // Repraesentant: der NAHSTE Baum der Sorte MIT DICHTEN Karten. Ferne Baeume
+    // (tier 0) bekommen nur jede achte Position in Groesse 2,2 — als Aufnahme
+    // in eine 128-px-Kachel gibt das wenige grosse Blatt-Lappen statt Laubmasse
+    // (im Atlas deutlich gesehen). Also tier 2/3 bevorzugen, einer von tier 0/1
+    // nur als Ausfall.
+    // "dicht" = Karten UND Einzelblaetter. Ein Repraesentant ohne Einzelblaetter
+    // (tier 2 jenseits 1,3 R1) gibt in der Kachel einen Stapel grosser Karten-
+    // Lappen statt einer feinen Krone (im Atlas gesehen).
+    int dense = (tier >= 2) && (nLeafInst > leafBefore);
+    if(ezBucket >= 0 && ezBucket < IMP_TILES) impNTree[ezBucket]++;
+    if(ezBucket >= 0 && ezBucket < IMP_TILES &&
+       (!impRepD[ezBucket].valid || (dense && !impRepD[ezBucket].dense)) &&
        nTreeVerts > vertBefore && nCrownVerts > quadBefore){
       struct ImpRep *ir = &impRepD[ezBucket];
-      ir->valid = 1;
+      ir->valid = 1; ir->dense = dense; ir->tier = tier;
       ir->vStart = vertBefore; ir->vCount = nTreeVerts - vertBefore;
       ir->cStart = quadBefore; ir->cCount = nCrownVerts - quadBefore;
+      ir->lStart = leafBefore; ir->lCount = nLeafInst - leafBefore;
+      ir->nTree = impNTree[ezBucket];
       ir->cx = cand[i].p[0]; ir->cy = cand[i].p[1]; ir->cz = cand[i].p[2];
-      ir->rad = H * 0.75f;
+      ir->rad = (gBbSize > 0.5f ? gBbSize : H) * 0.5f;
+      ir->hasBb = (gBbSize > 0.5f) ? 1 : 0;
+      if(ir->hasBb){ ir->cx = gBbCen[0]; ir->cy = gBbCen[1]; ir->cz = gBbCen[2]; }
     }
     if(treeCapTree || treeCapCrown || treeCapLeaf || treeCapSprig){
       nTreeVerts = vertBefore; nCrownVerts = quadBefore; nLeafInst = leafBefore;
@@ -1353,6 +1387,24 @@ void trees_build_finish(void){
   tp = leafInst;    leafInst = leafInstD;     leafInstD = tp;
   nTreeVertsD = nTreeVerts; nCrownVertsD = nCrownVerts;
   nLeafInstD = nLeafInst;   nTreesD = nTrees;
+  // Ausfall-Aushilfe: ein Eimer kann nur ferne Baeume enthalten (tier 0 = nur
+  // Stamm + jede achte Kartenposition in Groesse 2,2). Als 128-px-Aufgabe gibt
+  // das wenige grosse Blatt-Lappen statt Laubmasse (im Atlas gesehen). Dann
+  // nehmen wir den dichten Repraesentanten einer ANDEREN Form derselben Art —
+  // auf 20-30 px Bildschirmgroesse ist der Formunterschied nicht sichtbar.
+  for(int q = 0; q < IMP_TILES; q++){
+    if(impRepD[q].valid && impRepD[q].dense) continue;
+    for(int q2 = 0; q2 < IMP_TILES; q2++){
+      if(q2 == q) continue;
+      if(q2 / EZ_NPRESETS_BUCKETS != q / EZ_NPRESETS_BUCKETS) continue;
+      if(!impRepD[q2].valid || !impRepD[q2].dense) continue;
+      struct ImpRep t = impRepD[q];
+      impRepD[q] = impRepD[q2];
+      impRepD[q].valid = 1;
+      (void)t;
+      break;
+    }
+  }
   // die Kachel-Repraesentanten gehoeren zum Puffer, also mit tauschen
   for(int q = 0; q < IMP_TILES; q++) treeImp[q] = impRepD[q];
   treeBuildDone = 1; treeBuilding = 0;
