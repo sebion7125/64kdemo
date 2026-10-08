@@ -4,9 +4,11 @@ layout(location=1) in vec3 aNrm;
 layout(location=2) in vec3 aCol;
 layout(location=3) in vec3 aSW;   // sway, u (um das Rohr), v (Bogenlaenge)
 layout(location=4) in float aR2;  // Schaltweite Ganzbaum-Billboard dieses Baums
-layout(location=5) in vec2  aAnchor;  // Lotpunkt DIESES Baums — kanonischer LOD-Abstand
+layout(location=5) in vec2  aAnchor;  // Lotpunkt DIESES Baums
+layout(location=6) in vec2  aLod;     // rad (Ast-Radius m), diss (Aufloes-Schwelle) — kanonischer LOD-Abstand
 uniform float uMeshFade = 1.0;    // 0 = gar nicht ausblenden (Schattenwurf-Pass)
 uniform float uBBPresent = 1.0;   // liegen Ganzbaum-Kacheln im Puffer?
+uniform float uFocalPx = 0.0;     // Brennweite in Pixeln (1,7 * Bildhoehe)
 out float vMeshFade;
 uniform mat4 uMVP;
 uniform vec3 uCamPos;
@@ -57,6 +59,23 @@ void main(){
   // verschiedenen Entfernungen aus, das Geruest konnte nie komplementaer zum
   // Billboard laufen (Spruenge beim Bewegen, Nutzerbefund).
   float md = length(aAnchor - uCamPos.xz);   // LOD: waagerecht, Baum-Anker
+  // HOLZ-LOD NACH BILDGROESSE, OHNE TRANSPARENZ.
+  // Ein Ast der Dicke 2r deckt px = 2*r*focalPx/d Pixel ab. Unter 0,6 px ist er
+  // subpixelig, ueber 1,6 px voll aufloesbar; dazwischen liegt er auf. Aufgeloest
+  // wird PRO AST (aLod.y ist ein stabiler Schwellwert aus dem Ast-Seed, derselbe
+  // Wert auf allen Vertices des Astes): der Ast ist entweder ganz da (opak,
+  // Depth-Write an) oder gar nicht. Damit gibt es im Holz keine Blende, keine
+  // Sortierfrage und keine Z-Artefakte — und die Gesamtabdeckung sinkt sanft,
+  // weil die duennsten Aeste zuerst wegfallen. Ein alpha-gemischtes Doppel
+  // (alter vs. neuer Satz) waere nicht deckungserhaltend: es bliebe
+  // a - a^2 f (1-f) uebrig, bei f = 0,5 bis zu 25 % weniger (gemessen:
+  // Deckungs-Delle in JEDEM Ueberblend-Fenster).
+  if(uFocalPx > 0.0){
+    float d3 = length(p - uCamPos);
+    if(aLod.y > lodBranchW(aLod.x, d3, uFocalPx)){
+      gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return;
+    }
+  }
   // Uebergabe ans Billboard im selben Band, in dem das Billboard einblendet
   // (0,90..1,10 R2): die Gewichte sind komplementaer, Summe immer 1.
   // ohne Billboard im Puffer bleibt das Geruest bis zur Bau-Grenze stehen

@@ -438,7 +438,8 @@ static int   lodTest = 0, ltFrame = 0, ltTierSeqN = 0, ltBuildsSeen = 0;
 static float ltD0 = 140.0f, ltD1 = 3.0f, ltStep = 0.5f;
 static float ltPrevW[4] = {0,0,0,0}, ltPrevD = 0.0f, ltSlope[4] = {0,0,0,0}, ltHole = 0.0f;
 static int   ltPrevTier = -999, ltPrevVerts = -1, ltPrevCrown = -1, ltPrevLeaf = -1;
-static int   ltTierSeq[16]; static int ltGeomChg = 0, ltGeomChgInBand = 0, ltPump = 0;   // DEMO_EXIT=1: arbeiten, dann sofort beenden
+static int   ltTierSeq[16]; static int ltGeomChg = 0, ltGeomChgInBand = 0, ltPump = 0;
+static int   ltCov[3]; static int ltCovN = 0; static float ltDipWorst = 0.0f, ltDipAt = 0.0f;   // DEMO_EXIT=1: arbeiten, dann sofort beenden
 static float envShotTimes[16]; static int envShotN = 0, envShotIdx = 0;
 static int   envShotTimes_on = 0;
 static unsigned long frameNo = 0;
@@ -1316,6 +1317,8 @@ static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: t
   p_glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, TREE_FLOATS * 4, (const void *)48);  // R2
   p_glEnableVertexAttribArray(5);
   p_glVertexAttribPointer(5, 2, GL_FLOAT, GL_FALSE, TREE_FLOATS * 4, (const void *)52);  // Anker
+  p_glEnableVertexAttribArray(6);
+  p_glVertexAttribPointer(6, 2, GL_FLOAT, GL_FALSE, TREE_FLOATS * 4, (const void *)60);  // rad, diss
 
   // Kronen-Billboards: aCenter(3) aOff(2) aData(4)
   // Kronen-Karten: 6 Eckpunkte aus vboCrownQuad (divisor 0) + 1 Instanz pro
@@ -2038,6 +2041,7 @@ int main(int argc, char **argv) {
   GLint locCBB     = p_glGetUniformLocation(progCrown, "uBillboardOn");
   GLint locCBP     = p_glGetUniformLocation(progCrown, "uBBPresent");
   GLint locTBB     = p_glGetUniformLocation(progTMesh, "uBBPresent");
+  GLint locTFocal  = p_glGetUniformLocation(progTMesh, "uFocalPx");
   GLint locCOld    = p_glGetUniformLocation(progCrown, "uTreeOld");
   GLint locCLFace  = p_glGetUniformLocation(progCrown, "uLightFace");
   struct ImpLoc impLoc;
@@ -2663,6 +2667,12 @@ int main(int argc, char **argv) {
     {
       static int builtT = 0, builtG = 0;
       static float tCX = 0, tCZ = 0;
+      // Brennweite in Pixeln fuer den Build: das Ast-LOD haengt an der
+      // Bildgroesse, also muss der Generator dasselbe Bildformat kennen wie der
+      // Shader (sonst existiert ein Ast, der nie sichtbar waere — oder umgekehrt
+      // fehlt einer, der noch sichtbar waere).
+      trees_set_focal_px(1.7f * (float)winH);
+      if(getenv("DEMO_RADDBG")) { static int once=0; if(!once){ once=1; printf("RADDBG main fboH %d focal %.1f\n", fboH, 1.7f*(float)fboH); fflush(stdout);} }
       if(treeForceRebuild){ tCX = 1e30f; treeForceRebuild = 0; }   // Taste 1
       // DEMO_TIERSWITCH=<sek>: nach n Sekunden hart auf tier 0 umstellen und einen
       // Build ausloesen — Messbank fuer die Ueberblendung (alter Satz tier 3,
@@ -2695,6 +2705,8 @@ int main(int argc, char **argv) {
           builtT = 1;
           trees_thread_start();
         } else {
+          trees_set_focal_px(1.7f * (float)winH);   // Bildgroessen-LOD: Build und
+                                                   // Shader mussel dasselbe Format kennen
           trees_build_request(tCX, tCZ, camPos);   // Worker baut im Hintergrund
         }
         fflush(stdout);
@@ -2975,6 +2987,7 @@ int main(int argc, char **argv) {
       // Schattenwurf: Geruest immer voll (uBBPresent = 0 -> mf = 1), sonst
       // fehlten die fernen Aeste in der Schattenkarte.
       if(locTBB >= 0) p_glUniform1f(locTBB, 0.0f);
+      if(locTFocal >= 0) p_glUniform1f(locTFocal, 1.7f * (float)fboH);
       applyShadow(&slTree, 0);
       if(locTFade >= 0) p_glUniform1f(locTFade, 1.0f);
       p_glBindVertexArray(vaoTree[drawSet]);
@@ -3174,7 +3187,11 @@ int main(int argc, char **argv) {
            treeDbgLeaf  != ltPrevLeaf){
           ltGeomChg++;
           int inBand = 0;
-          if(treeDbgVerts != ltPrevVerts &&
+          // Das Geruest hat ohne Ganzbaum-Kacheln KEIN Band (Gewicht 1 bis zur
+          // Bau-Grenze); seine Aenderungen sind die Bildgroessen-Aufloesung und
+          // liegen per Konstruktion bei Gewicht 0. Pruefbar ist sie ueber die
+          // Deckungs-Delle, nicht ueber ein Band.
+          if(treeBillboard0 && treeDbgVerts != ltPrevVerts &&
              dCam >= treeDbgR2 * 0.90f && dCam <= treeDbgR2 * 1.10f) inBand = 1;
           if(treeDbgLeaf != ltPrevLeaf &&
              dCam >= treeDbgR1 * 0.90f && dCam <= treeDbgR1 * 1.10f) inBand = 1;
@@ -3229,6 +3246,8 @@ int main(int argc, char **argv) {
           printf("LT-SUMME groesstes Deckungsloch |Blatt+Karte+Billboard-1| = %.4f\n", ltHole);
           printf("LT-SUMME Geometrie-Wechsel %d, davon innerhalb eines Blendenbands %d\n",
                  ltGeomChg, ltGeomChgInBand);
+          printf("LT-SUMME groesste Deckungs-Delle %.2f %% bei %.1f m (Bildmessung)\n",
+                 ltDipWorst, ltDipAt);
           printf("LT-SUMME Pump-Frames (Schicht mit Gewicht > 0 unterscheidet sich zwischen Saetzen): %d\n", ltPump);
           printf("LT-SUMME Bauten %d\n", treeDbgBuilds);
           int bad = 0;
@@ -3236,6 +3255,7 @@ int main(int argc, char **argv) {
           if(ltSlope[0] > lim1 * 1.1f || ltSlope[1] > lim1 * 1.1f){ bad = 1; printf("LT-FEHLER Blatt/Karten-Steigung ueber der Schranke\n"); }
           if(ltSlope[2] > lim2 * 1.1f || ltSlope[3] > lim2 * 1.1f){ bad = 1; printf("LT-FEHLER Billboard/Geruest-Steigung ueber der Schranke\n"); }
           if(ltGeomChgInBand > 0){ bad = 1; printf("LT-FEHLER Geometrie verschwindet innerhalb eines Blendenbands\n"); }
+          if(ltDipWorst < -8.0f){ bad = 1; printf("LT-FEHLER Deckungs-Delle %.1f %% bei %.1f m\n", ltDipWorst, ltDipAt); }
           if(ltPump > 0){ bad = 1; printf("LT-FEHLER Pumpen: %d Frames mit sichtbarer Satz-Differenz\n", ltPump); }
           printf("LT-ERGBNIS %s\n", bad ? "FEHLER" : "OK");
           fflush(stdout);
@@ -3255,6 +3275,9 @@ int main(int argc, char **argv) {
       p_glUniform1f(locTMask, (float)dbgTreeMask);
       if(locTMeshF >= 0) p_glUniform1f(locTMeshF, 1.0f);
       if(locTBB >= 0) p_glUniform1f(locTBB, (float)treeBillboard0);
+      // Brennweite in Pixeln: build_mvp nutzt fy = 3.4 NDC = 2*1,7, also ist die
+      // vertikale Brennweite 1,7 * Bildhoehe. Dieselbe Zahl bekommt der Build.
+      if(locTFocal >= 0) p_glUniform1f(locTFocal, 1.7f * (float)fboH);
       applyShadow(&slTree, (shadowThis && shadowSampleOn) ? (shadowForce ? 2 : 1) : 0);
       if(locTFade >= 0) p_glUniform1f(locTFade, 1.0f);
       p_glBindVertexArray(vaoTree[drawSet]);
@@ -3510,8 +3533,20 @@ int main(int argc, char **argv) {
           if(covbuf[i*4] > 12 || covbuf[i*4+1] > 12 || covbuf[i*4+2] > 12) lit++;
       }
       float ddx = treeDbgX - camPos[0], ddz = treeDbgZ - camPos[2];
+      float dCov = sqrtf(ddx * ddx + ddz * ddz);
+      // Groesste Delle: Deckung gegenueber der linearen Nachbarschaft. Eine Delle
+      // ist ein sichtbarer Sprung beim Bewegen, egal ob das Modell "glatt" meldet.
+      if(lit >= 0){
+        if(ltCovN < 3){ ltCov[ltCovN++] = lit; }
+        else { ltCov[0] = ltCov[1]; ltCov[1] = ltCov[2]; ltCov[2] = lit;
+               float lin = 0.5f * (float)(ltCov[0] + ltCov[2]);
+               if(lin > 30.0f){
+                 float dip = 100.0f * ((float)ltCov[1] - lin) / lin;
+                 if(dip < ltDipWorst){ ltDipWorst = dip; ltDipAt = dCov; }
+               } }
+      }
       printf("LT-DECKUNG frame %4d d %6.2f m: %7d helle Pixel (fade %.2f, Satz %d)\n",
-             ltFrame - 1, sqrtf(ddx * ddx + ddz * ddz), lit, treeFadeNew, drawSet);
+             ltFrame - 1, dCov, lit, treeFadeNew, drawSet);
       fflush(stdout);
     }
 

@@ -44,6 +44,14 @@ float treeLodWMesh(const TreeLod *L, float d){
 float treeLodLeafCut(const TreeLod *L){
   return L->R1 * LOD_MARGIN + LOD_BUILD_LAG;
 }
+float treeLodWBranch(const TreeLod *L, float rad, float d){
+  float px = 2.0f * rad * L->focalPx / (d > 0.01f ? d : 0.01f);
+  return treeLodSmoothstep(LOD_PX_LO, LOD_PX_HI, px);
+}
+float treeLodRadCut(const TreeLod *L, float rad){
+  if(L->focalPx <= 0.0f || rad <= 0.0f) return LOD_NO_CUT;
+  return 2.0f * rad * L->focalPx / LOD_PX_LO;
+}
 float treeLodBranchCut(const TreeLod *L){
   if(!L->bb) return LOD_NO_CUT;   // Geruest blendet ohne Kacheln nie aus
   return L->R2 * LOD_MARGIN + LOD_BUILD_LAG;

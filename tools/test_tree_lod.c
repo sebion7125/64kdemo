@@ -143,6 +143,31 @@ int main(void){
     }
   }
 
+  /* 3c: Bildgroessen-LOD des Holzes. Gewicht faellt mit der Entfernung, und der
+     * Existenz-Schnitt liegt genau dort, wo es 0 wird (doppelte Randzunaehme:
+     * direkt jenseits des Schnitts muss 0 stehen, direkt innerhalb darf es > 0). */
+  for(unsigned hi = 0; hi < sizeof(Hs)/sizeof(Hs[0]); hi++){
+    TreeLod L; treeLodInit(&L, Hs[hi], 0.0f); L.focalPx = 1836.0f;   // 1080p
+    float rads[4] = { 0.004f, 0.01f, 0.05f, 0.15f };
+    for(int ri = 0; ri < 4; ri++){
+      float cut = treeLodRadCut(&L, rads[ri]);
+      ok(cut > 0.0f && cut < 1e8f, "RadCut positiv und endlich (rad %.3f)", rads[ri]);
+      ok(treeLodWBranch(&L, rads[ri], cut * 1.05f) == 0.0f,
+         "jenseits des Schnitts Gewicht 0 (rad %.3f, cut %.1f)", rads[ri], cut);
+      ok(treeLodWBranch(&L, rads[ri], cut * 0.95f) > 0.0f,
+         "innerhalb des Schnitts Gewicht > 0 (rad %.3f, cut %.1f)", rads[ri], cut);
+      float prev = 2.0f;   // Startwert ueber dem maximum, sonst ist der erste Vergleich eine Stufe
+      for(float d = 1.0f; d <= 400.0f; d += 1.0f){
+        float w = treeLodWBranch(&L, rads[ri], d);
+        ok(w <= prev + 1e-6f, "Ast-Gewicht nicht monoton (rad %.3f bei %.0f m)", rads[ri], d);
+        prev = w;
+      }
+    }
+    /* Brennweite 0 = nicht gesetzt -> kein Schnitt (nichts darf verschwinden). */
+    TreeLod Z; treeLodInit(&Z, Hs[hi], 0.0f); Z.focalPx = 0.0f;
+    ok(treeLodRadCut(&Z, 0.01f) >= 1e8f, "ohne Brennweite kein Schnitt");
+  }
+
   /* 4: Hysterese — Kamera wackelt an einer Schaltgrenze */
   for(unsigned hi = 0; hi < sizeof(Hs)/sizeof(Hs[0]); hi++){
     TreeLod L; treeLodInit(&L, Hs[hi], 0.0f);

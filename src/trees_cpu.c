@@ -52,6 +52,14 @@ int   treeFocusValid = 0;
 // aufgerufen werden und die Kette dafuer nicht voll durchgereicht wird.
 static float gLodR = 30.0f;
 static float gTreeDist = 0.0f, gBranchCut = 0.0f;
+// Bildgroessen-LOD des Holzes: Brennweite in Pixeln (Main-Thread setzt sie, damit
+// Build und Shader dasselbe Bildformat haben) und der pro Ast stabile
+// Aufloes-Schwellwert. diss kommt aus dem Ast-Seed — bei jedem Build identisch,
+// haengt an keiner Bildschirmposition (kein Schimmern), und derselbe Wert sitzt
+// auf allen Vertices des Astes (der Ast loest sich als Ganzes auf, nicht stuckweise).
+static float gFocalPx = 0.0f, gDiss = 0.0f;
+static TreeLod gTL;
+void trees_set_focal_px(float f){ gFocalPx = f; }
 // Lotpunkt DES BAUMS, zu dem die gerade geschriebenen Datensaetze gehoeren.
 // Alle drei Shader blenden damit gegen ein und dieselbe Entfernung ein
 // (Strategie A, siehe scene.h). Vorher: Blattposition / Kartenmitte / Vertex.
@@ -218,6 +226,7 @@ static void emit_tube(const Ring *a, const Ring *b, int sides,
                            // selben Band aus, damit Stamm und Ganzbaumbild nicht
                            // gleichzeitig zu sehen sind (Nutzer)
   d[13] = gAnchorX; d[14] = gAnchorZ;   // kanonischer LOD-Anker = Lotpunkt des Baums
+      d[15] = ring[m] ? b->r : a->r; d[16] = gDiss;   // Bildgroessen-LOD
       nTreeVerts++;
     }
   }
@@ -257,6 +266,7 @@ static void emit_cap(const Ring *a, int sides, float sway,
       d[11] = v0;
       d[12] = gLodR2;      // Schaltweite Billboard (siehe emit_tube)
   d[13] = gAnchorX; d[14] = gAnchorZ;   // kanonischer LOD-Anker = Lotpunkt des Baums
+      d[15] = a->r; d[16] = gDiss;   // Bildgroessen-LOD
       nTreeVerts++;
     }
   }
@@ -832,6 +842,11 @@ static void ez_norm3(float *x, float *y, float *z){
 static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
                     float seed, int tier, float btone, int secOv, int segOv){
   int S = (secOv > 0) ? secOv : P->sections[lvl];
+  // Aufloes-Schwelle DIESES Astes: haelt nur vom Ast-Seed ab, also bei jedem
+  // Build identisch und unabhaengig von Kamera, Stufe und Bildschirmposition.
+  // Alle Vertices dieses Astes bekommen denselben Wert -> der Ast loest sich als
+  // Ganzes auf, nie stuckweise.
+  gDiss = c_hash12(seed * 1.913f + 3.37f, seed * 0.731f + 9.11f);
   int G = (segOv > 0) ? segOv : P->segments[lvl];
   // Detail wie bei EZ-Tree: NUR die Vernetzung aendert sich, nie die Struktur.
   // sectionStride = jeden N-ten Ring vernetzen (erster/letzter bleibt),
@@ -993,7 +1008,18 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
   // Aeste fehlen erst JENSEITS deraeussersten Blende (1,15 R2), nicht schon ab
   // der Build-Stufe: innerhalb der Blende muss die Geometrie existieren, sonst
   // ist der Uebergang eine Stufe (Regelwerk C).
-  int meshBranch = !(gBranchCut > 0.0f && gTreeDist > gBranchCut && lvl > 0);
+  // Bildgroessen-LOD des Holzes statt Stufen-Schnitt: ein Ast fehlt im Puffer
+  // erst, wenn seine projizierte Dicke nirgends mehr ueber LOD_PX_LO Pixel liegt,
+  // sein Gewicht also 0 ist. Existenz und Sichtbarkeit fallen zusammen — ein
+  // Satz-Wechsel oder ein Rebuild kann damit nichts Sichtbares mehr aendern
+  // (das war die Pumpe alle 17 m). Rand = Baumausdehnung + Build-Nachlauf,
+  // weil d zum Build-Zentrum zeigt, der Shader aber gegen die Kamera rechnet.
+  float baseRad = sec[0].rg.r;
+  int meshBranch = (lvl == 0) ||
+                   (gTreeDist <= treeLodRadCut(&gTL, baseRad) + LOD_BUILD_LAG + 0.5f * gTL.H);
+  { static int raddbg = -1; if(raddbg < 0) raddbg = getenv("DEMO_RADDBG") ? 1 : 0;   // getenv pro Ast waere zu teuer
+    if(raddbg) printf("RADDBG lvl %d baseRad %.4f focal %.1f cut %.1f dist %.1f -> %d\n",
+      lvl, baseRad, gTL.focalPx, treeLodRadCut(&gTL, baseRad), gTreeDist, meshBranch); }
   float tone = btone * (0.86f + 0.05f * (float)lvl);
   float cr = (0.30f - 0.03f * (float)lvl) * tone;
   float cg = (0.24f + 0.03f * (float)lvl) * tone;
@@ -1003,6 +1029,14 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
     int prev = 0;
     for(;;){
       int cur = prev + stride; if(cur > S) cur = S;
+      // Aufloes-Schwelle pro ABSCHNITT (nicht pro Ast). Gemessen: pro Ast war der
+      // groesste Deckungs-Sprung -5,2 % bei 30,9 m — ein einzelner Ast (2,3 cm
+      // Radius, ~2 m lang) klappte auf einmal weg. Pro Abschnitt ist jeder Schritt
+      // nur noch wenige Pixel, und weil der Radius entlang des Astes abnimmt,
+      // verschwindet die Spitze vor der Basis: der Ast lichtet sich von selbst
+      // von innen nach aussen.
+      gDiss = c_hash12(seed * 1.913f + 3.37f + (float)prev * 0.713f,
+                       seed * 0.731f + 9.11f + (float)prev * 1.371f);
       emit_tube(&sec[prev].rg, &sec[cur].rg, G, sw, sw, cr, cg, cb2, 0.9f,
                 (float)cur * sl);
       prev = cur;
@@ -1364,6 +1398,7 @@ int trees_build_step(int maxTrees){
     // ALLE Entfernungs-Entscheidungen stammen aus src/tree_lod.c (Strategie B):
     // dieselben Funktionen, die tools/test_tree_lod.c ohne GL prueft.
     TreeLod TL; treeLodInit(&TL, H, treeLodScale); TL.bb = treeBillboard0;
+    TL.focalPx = gFocalPx; gTL = TL;   // gTL braucht ez_grow fuer den Ast-Schnitt
     float R1 = TL.R1, R2 = TL.R2;
     int tier;
     if(treeForceTier >= 0) tier = treeForceTier;

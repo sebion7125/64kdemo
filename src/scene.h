@@ -38,9 +38,10 @@ float c_terrainH(float px, float py);
 // Shadern drei verschiedene Anker (Blattposition, Kartenmittelpunkt, Vertex),
 // die Baelen derselben Schicht konnten dadurch nie komplementaer laufen.
 // Siehe src/tree_lod.h (reine Funktion) und tools/test_tree_lod.c (Wirtstest).
-#define TREE_FLOATS  15   // pos3, nrm3, col3, sway, u (um den Ring), v (Bogenlaenge),
+#define TREE_FLOATS  17   // pos3, nrm3, col3, sway, u (um den Ring), v (Bogenlaenge),
                             // R2 (Schaltweite Ganzbaum-Billboard dieses Baums),
-                            // anchorX, anchorZ (Lotpunkt des Baums)
+                            // anchorX, anchorZ (Lotpunkt des Baums),
+                            // rad (Ast-Radius m), diss (Aufloes-Schwelle pro Ast)
 // Kronen-Karte: center(3) off(2) size rotY seed variant lodR col(3) = 13 floats.
 // lodR = Radius, ab dem diese Karte die Einzelblaetter dieses Baumes eretzt
 // (blendet um lodR +/- 10 % ein). col = Blattfarbe DIESES Baumes: der Atlas ist
@@ -121,6 +122,7 @@ void trees_build(float tx, float tz);
 void trees_build_begin(float tx, float tz);
 int  trees_build_step(int maxTrees);      // 1 = fertig
 void trees_build_finish(void);            // Schreib-/Zeichenseite tauschen
+void trees_set_focal_px(float f);   // Brennweite in Pixeln fuer das Ast-Bildgroessen-LOD
 void trees_build_request(float tx, float tz, const float lodRef[3]);
 int  trees_build_busy(void);
 void trees_build_finished_snapshot(float **tv, float **cv, float **lv,

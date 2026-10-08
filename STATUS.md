@@ -2861,3 +2861,37 @@ Schnitt dort erlaubt) und/oder den Bau-Radius verkleinern. crown.vert blendet
 Karten bei 190-250 m aus, die Bau-Grenze liegt aber bei 180 m — der Fade wirkt
 also nie, und das Geruest hat am Bau-Rand gar keinen Fade (Baum verschwindet
 hart). Das haengt mit dem Cache-Thema zusammen.
+
+## Holz-LOD nach Bildgroesse, Aufloesung ohne Transparenz (2026-10-08)
+
+Kriterium statt geratener Baelen: ein Ast mit Radius r deckt in der Dicke 2r
+px = 2*r*focalPx/d Pixel ab (focalPx = 1,7 * Bildhoehe, weil build_mvp mit
+fy = 3.4 NDC rechnet). Gewicht = smoothstep(0,6 px, 1,6 px, px) — dasselbe in
+tree_lod.c (treeLodWBranch) und lod.glsl (lodBranchW), Konstanten im Wirtstest
+verglichen. Bandbreite ergibt sich von selbst (r = 1 cm bei 1080p: 37..98 m).
+
+Aufgeloest wird OHNE Blende: jeder Abschnitt bekommt einen stabilen Schwellwert
+aus dem Ast-Seed (derselbe Wert auf allen seinen Vertices), und im Shader gilt
+`if(diss > w) -> Dreieck weg`. Fragmente bleiben opak, Depth-Write an. Damit gibt
+es im Holz keine Transparenz, keine Sortierfrage, keine Z-Artefakte und kein
+a - a^2 f (1-f)-Problem. Die Gesamtabdeckung sinkt sanft, weil die duennsten
+Abschnitte zuerst fallen (der Radius nimmt entlang des Astes ab -> Spitze vor
+Basis).
+
+Existenz und Sichtbarkeit fallen zusammen: treeLodRadCut(rad) = 2*rad*focalPx/
+LOD_PX_LO ist genau die Entfernung, ab der das Gewicht 0 ist; der Build schneidet
+einen Ast erst dahinter (plus Build-Nachlauf und Baumausdehnung). Ein Rebuild oder
+Satz-Wechsel kann damit nichts Sichtbares mehr aendern.
+
+Gemessen (Standard-Szene, 648 Baeume):
+  Geruest 9 863 016 -> 1 543 533 Vertices (-84 %), 0 Cap-Treffer, 0 uebersprungen
+  Deckung ein Baum (Bildmessung): 140 m 87 -> 80 px, 60 m 468 -> 460,
+  30 m 1588 -> 1582, 10 m 2756 -> 2756, 3 m 18425 -> 18425 (Nahe unveraendert)
+Wirtstest 30 080 Pruefungen, 0 Fehler (Monotonie, Schnitt genau bei Gewicht 0,
+ohne Brennweite kein Schnitt).
+
+Neue harte Zahl im Ein-Baum-Test: `LT-SUMME groesste Deckungs-Delle` (Bild,
+lineare Nachbarschaft). Aktuell -5,26 % bei 30,8 m. Ursache ist NICHT das Holz
+(unchanged gegen Vorversion), sondern die Uebergabe Einzelblatt -> Karte bei
+R1 = 31 m: 12 600 Einzelblaetter gegen 840 Karten, die Karten decken weniger.
+Das ist der naechste Punkt.

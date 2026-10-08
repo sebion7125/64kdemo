@@ -34,6 +34,17 @@
 /* Kein Schnitt: die Geometrie reicht bis an die Bau-Grenze. */
 #define LOD_NO_CUT 1e9f
 
+/* Ast-Aufloesung nach BILDGROESSE statt nach Entfernung.
+ * Ein Ast mit Radius r hat die Dicke 2r; projiziert sind das
+ *   px = 2*r*focalPx/d
+ * Pixel. focalPx = vertikale Brennweite in Pixeln (hier 1,7 * Bildhoehe, weil
+ * build_mvp mit fy = 3.4 = 2*1,7 NDC rechnet). Unter LOD_PX_LO ist der Ast
+ * subpixelig, ueber LOD_PX_HI voll aufloesbar. Das Band ist damit von selbst
+ * breit (r = 1 cm bei 1080p: 37 m bis 98 m) — gleichmaessigeres, langsameres
+ * Ausblenden ohne geratene Bandkonstanten. */
+#define LOD_PX_LO 0.6f
+#define LOD_PX_HI 1.6f
+
 typedef struct {
   float H;         // Wuchshoehe des Baums
   float R1;        // Einzelblaetter -> Karten
@@ -44,6 +55,7 @@ typedef struct {
                    // Das ist keine Shader-Spezialitaet: ohne dieses Feld
                    // rechnete der Ein-Baum-Test "Billboard 1,000 / Karten 0,000"
                    // fuer einen Baum, der im Bild sehr wohl stand.
+  float focalPx;  // Brennweite in Pixeln (1,7 * Bildhoehe) — Ast-LOD nach Bildgroesse
 } TreeLod;
 
 /* Schaltweiten aus der Wuchshoehe; lodScale != 0 ist die Messbank
@@ -69,6 +81,14 @@ float treeLodLeafCut(const TreeLod *L);      // Einzelblatt-Instanzen
  * dabei Geruest 45 <-> 10 164 Vertices, Ueberblendung mischt zwei verschiedene
  * Gerueste). Ohne Ganzbaum-Kacheln blendet das Geruest nie aus (Gewicht 1 bis
  * zur Bau-Grenze) -> dann darf es gar nicht geschnitten werden. */
+/* Gewicht eines Asts mit Radius rad bei raumlicher Entfernung d:
+ * 0 = subpixelig, 1 = aufloesbar. lod.glsl hat dasselbe (lodBranchW). */
+float treeLodWBranch(const TreeLod *L, float rad, float d);
+/* Bis hierhin hat ein Ast dieses Radius noch Bildgroesse > LOD_PX_LO. JENSEITS
+ * ist sein Gewicht 0, er darf also im Puffer fehlen — die Existenz-Regel faellt
+ * damit mit der Sichtbarkeitsregel zusammen, und ein Satz-Wechsel kann nichts
+ * mehr sichtbar veraendern. */
+float treeLodRadCut(const TreeLod *L, float rad);
 float treeLodBranchCut(const TreeLod *L);
 float treeLodMeshCut(const TreeLod *L);
 

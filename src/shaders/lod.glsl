@@ -25,3 +25,9 @@ float lodWLeaf(float R1, float d){ return lodBandOut(R1, d); }
 float lodWCard(float R1, float R2, float d, float bb){ return lodBandIn(R1, d) * (bb > 0.5 ? lodBandOut(R2, d) : 1.0); }
 float lodWBillboard(float R2, float d, float bb){ return bb > 0.5 ? lodBandIn(R2, d) : 0.0; }
 float lodWMesh(float R2, float d, float bb){ return bb > 0.5 ? lodBandOut(R2, d) : 1.0; }
+
+// Ast-Aufloesung nach BILDGROESSE — Spiegelbild von treeLodWBranch/treeLodRadCut
+// (Konstanten 0,6/1,6 Pixel; tools/test_tree_lod.c vergleicht beide Seiten).
+float lodBranchW(float rad, float d, float focalPx){
+  return smoothstep(0.6, 1.6, 2.0 * rad * focalPx / max(d, 0.01));
+}
