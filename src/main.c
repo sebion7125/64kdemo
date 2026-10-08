@@ -562,68 +562,124 @@ static const float leafBase[6][2] = {
 #define FOL_VAR   4
 static GLuint folTex = 0, folFbo = 0, folDepth = 0, vboFol = 0, vaoFol = 0;
 
-// ---------- Ganzbaum-Kronen-Kacheln (TODO 23, Runde 29) ----------
-// Die groebste Detailstufe (tier 0, ab 20x Wuchshoehe ~ 135 m) zeichnet statt
-// hunderter Einzelkarten EIN Quad pro Baum, beklebt mit einer Kronen-Kachel.
-// Gemessen (Runde 28): tier 0 hielt 246 535 von 545 871 Karten — der groesste
-// Full-Rate-Posten. Eine Kachel pro Baum = 364 Quads.
-// Die Kachel ist prozedural: Silhouette einer Laubkrone (breiter als hoch,
-// ausgefranster Rand aus Buscheln), innen Buschel-Sprenkel statt flacher
-// Scheibe. Farbneutral — die Blattfarbe des Baumes kommt als Tint.
-#define CRN_N   2                 // 2x2 Kacheln
-#define CRN_PX  128               // Pixel pro Kachel
+// ---------- Ganzbaum-Impostoren (TODO 23) ----------
+// Der Nutzer wollte keine prozedurale "Kronen-Kachel" (sieht nicht aus wie die
+// Krone und wabert im Wind). Stattdessen wird der ECHTE Baum in die Kachel
+// gerendert: 8x8 Kacheln a 128 px in einer 1024er Textur, eine Kachel pro
+// Arten-/Form-Variante (4 Presets x 16 Formen = 64), aufgenommen aus einer
+// Richtung. Reingerendert wird die Karten-Stufe des Baumes (kein Einzelblatt):
+// in 128 px waere das Matsch, und es kostet genau die Fuellrate und
+// Geometrie-Transformation, die der Nutzer sparen will.
 static GLuint crnTex = 0;
-static float crnHash2(float x, float y){
-  float r = sinf(x * 12.9898f + y * 78.233f) * 43758.5453f;
-  return r - floorf(r);
-}
-static float crnNoise(float x, float y){
-  float ix = floorf(x), iy = floorf(y), fx = x - ix, fy = y - iy;
-  float a = crnHash2(ix, iy), b = crnHash2(ix + 1, iy);
-  float c = crnHash2(ix, iy + 1), d = crnHash2(ix + 1, iy + 1);
-  float ux = fx * fx * (3.0f - 2.0f * fx), uy = fy * fy * (3.0f - 2.0f * fy);
-  return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
-}
-static float crnSstep(float e0, float e1, float x){
-  float t = (x - e0) / (e1 - e0); if(t < 0.0f) t = 0.0f; if(t > 1.0f) t = 1.0f;
-  return t * t * (3.0f - 2.0f * t);
-}
+static GLuint impFbo = 0, impDepthRb = 0;
+static int    envImpDump = 0;
+static int    impNext = 0, impOn = 1;
 static void build_crown_tiles(void){
-  static unsigned char img[CRN_N * CRN_PX * CRN_N * CRN_PX * 4];
-  for(int ty = 0; ty < CRN_N; ty++)
-  for(int tx = 0; tx < CRN_N; tx++)
-  for(int py = 0; py < CRN_PX; py++)
-  for(int px = 0; px < CRN_PX; px++){
-    float u = (px + 0.5f) / CRN_PX * 2.0f - 1.0f;
-    float v = (py + 0.5f) / CRN_PX * 2.0f - 1.0f;
-    float ang = atan2f(v, u);
-    float r0 = 0.80f + 0.07f * sinf(3.0f * ang + tx * 1.7f + ty * 2.3f)
-                    + 0.05f * cosf(5.0f * ang - tx * 0.9f + ty * 1.1f);
-    if(v < 0.0f) r0 *= 1.0f - 0.18f * (-v);          // Unterseite flacher
-    float rr = sqrtf(u * u * 0.92f + v * v * 1.12f);
-    float edge = crnNoise(px * 0.11f + tx * 7.0f, py * 0.11f + ty * 5.0f);
-    float a = r0 + (edge - 0.5f) * 0.30f;            // Buschel ragen ueber die Silhouette
-    float cov = 1.0f - crnSstep(a - 0.14f, a + 0.06f, rr);
-    float n2 = crnNoise(px * 0.22f + tx * 3.0f, py * 0.22f + ty * 9.0f);
-    float n3 = crnNoise(px * 0.55f + tx * 11.0f, py * 0.55f + ty * 13.0f);
-    cov *= 0.88f + 0.12f * n2;                       // innen fast dicht, leicht gefleckt
-    float lum = 0.76f + 0.24f * (0.6f * n2 + 0.4f * n3);
-    lum *= 0.86f + 0.14f * crnSstep(-0.9f, 0.9f, v); // unten dunkler
-    int o = ((ty * CRN_PX + py) * (CRN_N * CRN_PX) + tx * CRN_PX + px) * 4;
-    unsigned char cc = (unsigned char)(lum * 255.0f);
-    img[o] = cc; img[o+1] = cc; img[o+2] = cc;
-    img[o+3] = (unsigned char)(cov * 255.0f);
-  }
   p_glGenTextures(1, &crnTex);
   p_glBindTexture(GL_TEXTURE_2D, crnTex);
-  p_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, CRN_N * CRN_PX, CRN_N * CRN_PX, 0,
-                 GL_RGBA, GL_UNSIGNED_BYTE, img);
+  // 8x8 Kacheln a 128 px = 1024x1024, initiat vollstaendig transparent (die
+  // Kacheln fuellen sich erst, wenn der zugehoerige Baum im Puffer liegt).
+  p_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, IMP_COLS * IMP_TILEPX,
+                 IMP_COLS * IMP_TILEPX, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
   p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  printf("Kronen-Kacheln: %dx%d Kacheln a %d px, prozedural (%.2f s)\n",
-         CRN_N, CRN_N, CRN_PX, now_sec() - 0.0);
+  printf("Impostor-Atlas: %dx%d Kacheln a %d px (%dx%d px)\n",
+         IMP_COLS, IMP_COLS, IMP_TILEPX, IMP_COLS * IMP_TILEPX, IMP_COLS * IMP_TILEPX);
+}
+
+// FBO fuer die Kachel-Aufnahme (Farbe = crnTex, eigene Depth-Renderbuffer)
+static void impostor_init(void){
+  if(impFbo || !crnTex) return;
+  p_glGenFramebuffers(1, &impFbo);
+  p_glBindFramebuffer(GL_FRAMEBUFFER, impFbo);
+  p_glGenRenderbuffers(1, &impDepthRb);
+  p_glBindRenderbuffer(GL_RENDERBUFFER, impDepthRb);
+  p_glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24,
+                          IMP_COLS * IMP_TILEPX, IMP_COLS * IMP_TILEPX);
+  p_glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                              GL_RENDERBUFFER, impDepthRb);
+  p_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                           GL_TEXTURE_2D, crnTex, 0);
+  if(p_glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE){
+    printf("Impostor-FBO unvollstaendig — Billboard bleibt leer\n");
+    impOn = 0;
+  }
+  p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+// Ein Kachel-Aufnahme-Pass. Aufgenommen wird der Slice DESSES Baumes, der die
+// Kachel repraesentiert: Geruest (Stamm/Aeste) + Karten, mit Kamera auf den
+// Baum angesetzt. Wind auf Zeit 0, Entfernungsblenden aus (uImpostor).
+static void build_mvp(const float camPos[3], const float camTgt[3], int w, int h, float out[16]);
+struct ImpLoc {
+  GLuint pTree, pCrown;
+  GLint tMVP, tCam, tTime, tFade;
+  GLint cMVP, cCam, cTime, cFade, cFol, cFol2, cImp, cLFace;
+};
+
+static void impostor_step(double budgetMs, int set, const struct ImpLoc *L){
+  if(!impOn || !impFbo || impNext >= IMP_TILES) return;
+  if(!p_glDrawArraysInstancedBaseInstance){
+    impOn = 0; return;      // ohne Basis-Instanz lassen sich Karten-Slices nicht zeichnen
+  }
+  double t0 = now_sec() * 1000.0;
+  p_glBindFramebuffer(GL_FRAMEBUFFER, impFbo);
+  p_glEnable(GL_SCISSOR_TEST);
+  while(impNext < IMP_TILES){
+    int idx = impNext++;
+    const struct ImpRep *ir = &treeImp[idx];
+    if(!ir->valid) continue;
+    int tx = (idx % IMP_COLS) * IMP_TILEPX, ty = (idx / IMP_COLS) * IMP_TILEPX;
+    p_glViewport(tx, ty, IMP_TILEPX, IMP_TILEPX);
+    p_glScissor(tx, ty, IMP_TILEPX, IMP_TILEPX);
+    p_glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    p_glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    // Aufnahme-Kamera: fester Blickwinkel, Abstand so, dass die Huellkugel
+    // genau in die Kachel passt (NDC-Halblaenge 1 = rad * 3.4 / dist).
+    float tgt[3] = { ir->cx, ir->cy + ir->rad * 0.55f, ir->cz };
+    float dir[3] = { 0.86f, 0.30f, 0.42f };
+    // 1.30 Rand: mit 1.02 schnitt die Aufnahme bei manchen Baumen den Rand ab
+    // (Kachel-BBox 128 von 128 px gemessen). Der Billboard-Quad ist gegenueber
+    // dem Baum ohnehin so gross wie die Huellkugel, die transparenzige Kachel-
+    // randzone passt also auf den Quad-Rand.
+    float dist = ir->rad * 3.4f * 1.30f;
+    float eye[3] = { tgt[0] + dir[0] * dist, tgt[1] + dir[1] * dist, tgt[2] + dir[2] * dist };
+    float mvp[16];
+    build_mvp(eye, tgt, IMP_TILEPX, IMP_TILEPX, mvp);
+    p_glEnable(GL_DEPTH_TEST);
+    p_glUseProgram(L->pTree);
+    p_glBindVertexArray(vaoTree[set]);
+    p_glUniformMatrix4fv(L->tMVP, 1, GL_FALSE, mvp);
+    p_glUniform3f(L->tCam, eye[0], eye[1], eye[2]);
+    p_glUniform1f(L->tTime, 0.0f);
+    p_glUniform1f(L->tFade, 1.0f);
+    p_glDrawArrays(GL_TRIANGLES, ir->vStart, ir->vCount);
+    p_glUseProgram(L->pCrown);
+    p_glBindVertexArray(vaoCrown[set]);
+    p_glUniformMatrix4fv(L->cMVP, 1, GL_FALSE, mvp);
+    p_glUniform3f(L->cCam, eye[0], eye[1], eye[2]);
+    p_glUniform1f(L->cTime, 0.0f);
+    p_glUniform1f(L->cFade, 1.0f);
+    p_glUniform1f(L->cImp, 1.0f);
+    p_glUniform1f(L->cLFace, 0.0f);
+    p_glUniform1i(L->cFol, 0);
+    p_glUniform1i(L->cFol2, 1);
+    p_glActiveTexture(GL_TEXTURE0); p_glBindTexture(GL_TEXTURE_2D, folTex);
+    // WAHRNEHMER: crnTex haengt hier als Sampler, obwohl IN sie gerendert wird —
+    // genauen Messungen liefert der Treiber dabei NICHTS (Atlas blieb leer). Die
+    // aufgenommenen Karten haben vCrown = 0 und brauchen uCrownTex nicht, also
+    // waehrend der Aufnahme eine andere Textur draufbinden.
+    p_glActiveTexture(GL_TEXTURE1); p_glBindTexture(GL_TEXTURE_2D, folTex);
+    p_glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 6, ir->cCount,
+                                        (GLuint)ir->cStart);
+    if(now_sec() * 1000.0 - t0 >= budgetMs) break;
+  }
+  p_glUniform1f(L->cImp, 0.0f);
+  p_glDisable(GL_SCISSOR_TEST);
+  p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  p_glBindVertexArray(0);
 }
 // Shadow-Map: eine orthogliche Licht-Kaskade um die Kamera. Geworfen werden
 // Baum-Mesh, Kronen-Quads und Einzelblaetter — die Kronen sind der
@@ -900,6 +956,7 @@ static int upload_step(double frameMs){
   drawSet = upNextSet;
   nTreeVertsCur = nTreeVertsD; nCrownVertsCur = nCrownVertsD; nLeafInstCur = nLeafInstD;
   treeSwapT = now_sec();
+  impNext = 0;                 // Atlas-Kacheln hoeren sich mit dem neuen Satz
   if(treeDbg) printf("  Satz-Wechsel: alt=Satz %d (%d V / %d K / %d B), neu=Satz %d "
                      "(%d V / %d K / %d B), Ueberblendung %.2f s\n",
                      treeOldSet, nTreeVertsOld, nCrownVertsOld, nLeafInstOld,
@@ -1646,8 +1703,14 @@ int main(int argc, char **argv) {
   GLint locCTime   = p_glGetUniformLocation(progCrown, "uTime");
   GLint locCMask   = p_glGetUniformLocation(progCrown, "uCrownMask");
   GLint locCFade   = p_glGetUniformLocation(progCrown, "uTreeFade");
+  GLint locCImp    = p_glGetUniformLocation(progCrown, "uImpostor");
   GLint locCOld    = p_glGetUniformLocation(progCrown, "uTreeOld");
   GLint locCLFace  = p_glGetUniformLocation(progCrown, "uLightFace");
+  struct ImpLoc impLoc;
+  impLoc.pTree = progTMesh; impLoc.pCrown = progCrown;
+  impLoc.tMVP = locTMVP; impLoc.tCam = locTCam; impLoc.tTime = locTTime; impLoc.tFade = locTFade;
+  impLoc.cMVP = locCMVP; impLoc.cCam = locCCam; impLoc.cTime = locCTime; impLoc.cFade = locCFade;
+  impLoc.cFol = locCFol; impLoc.cFol2 = locCFol2; impLoc.cImp = locCImp; impLoc.cLFace = locCLFace;
   GLint locLMVP    = p_glGetUniformLocation(progLeaf, "uMVP");
   GLint locLCam    = p_glGetUniformLocation(progLeaf, "uCamPos");
   GLint locLLod    = p_glGetUniformLocation(progLeaf, "uLodCam");
@@ -1688,6 +1751,7 @@ int main(int argc, char **argv) {
   envTreeJump = getenv("DEMO_TREE") ? 1 : 0;
   if (getenv("DEMO_TREEMASK")) dbgTreeMask = 1;
   { const char *es = getenv("DEMO_SHOT"); if (es) envShotAt = (float)atof(es); }
+  envImpDump = getenv("DEMO_IMPDUMP") ? 1 : 0;
   { const char *ef = getenv("DEMO_FREEZE"); if (ef) envFreeze = (float)atof(ef); }
   // DEMO_TREEFADE=<sek>: Ueberblendzeit beim LOD-Satzwechsel (0 = hart schneiden)
   { const char *tf = getenv("DEMO_TREEFADE"); if (tf) treeFadeDur = (double)atof(tf); }
@@ -1708,6 +1772,8 @@ int main(int argc, char **argv) {
   { const char *cp = getenv("DEMO_CARDT0");
     if(cp) { int d = 3; float sc = 1.30f;
       if(sscanf(cp, "%d %f", &d, &sc) == 2){ treeCardDiv0 = d < 1 ? 1 : d; treeCardScale0 = sc; } } }
+  { const char *ls = getenv("DEMO_LEAFSC"); if (ls) ezLeafScale = (float)atof(ls); }
+  { const char *lp = getenv("DEMO_LEAFPER"); if (lp) ezLeafPer = (float)atof(lp); }
   { const char *c2 = getenv("DEMO_CARDT2");
     if(c2) { int d = 2; float sc = 1.25f;
       if(sscanf(c2, "%d %f", &d, &sc) == 2){ treeCardDivN = d < 1 ? 1 : d; treeCardScaleN = sc; } } }
@@ -1778,7 +1844,8 @@ int main(int argc, char **argv) {
   envLeafMask = getenv("DEMO_LEAFMASK") ? atoi(getenv("DEMO_LEAFMASK")) : 0;  // 1=rot, 2=nur Albedo
   if (envTreeJump) tree_jump();
   build_foliage_atlas(progLeaf);   // Atlas braucht vboLeafBase (build_tree_lines) + progLeaf
-  build_crown_tiles();             // Ganzbaum-Kacheln fuer die groebste Detailstufe
+  build_crown_tiles();             // Impostor-Atlas (Ganzbaum-Kacheln)
+  impostor_init();
   init_shadow();
   ShadowLoc slScene, slTree, slGrass, slLeaf, slCrown;
   fillShadowLoc(progScene, &slScene); fillShadowLoc(progTMesh, &slTree);
@@ -2256,6 +2323,37 @@ int main(int argc, char **argv) {
         }
       }
       { double u0 = now_sec(); upload_step(rawDt * 1000.0); double u1 = now_sec();
+        // Kacheln des neuen Satzes fuellen (gestueckelt, Budget 12 % der Framezeit)
+        impostor_step(rawDt * 1000.0 * 0.12, drawSet, &impLoc);
+        // DEMO_IMPDUMP=1: Atlas auf die Platte, damit man die Kacheln sehen kann
+        if(envImpDump && impNext >= IMP_TILES){
+          static int dumped = 0;
+          if(!dumped){
+            dumped = 1;
+            static unsigned char ab[IMP_COLS * IMP_TILEPX * IMP_COLS * IMP_TILEPX * 4];
+            p_glBindFramebuffer(GL_FRAMEBUFFER, impFbo);
+            p_glReadPixels(0, 0, IMP_COLS * IMP_TILEPX, IMP_COLS * IMP_TILEPX,
+                           GL_RGBA, GL_UNSIGNED_BYTE, ab);
+            p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            int A = IMP_COLS * IMP_TILEPX;
+            FILE *f = fopen("/tmp/64kdemo_impostor.ppm", "wb");
+            if(f){
+              fprintf(f, "P6\n%d %d\n255\n", A, A);
+              for(int y = 0; y < A; y++)
+                for(int x = 0; x < A; x++){
+                  int o = ((A - 1 - y) * A + x) * 4;
+                  unsigned char c = ab[o+3] ? ab[o] : 40;
+                  unsigned char px[3] = { c, ab[o+3] ? ab[o+1] : 40, ab[o+3] ? ab[o+2] : 40 };
+                  fwrite(px, 1, 3, f);
+                }
+              fclose(f);
+              int filled = 0;
+              for(int q = 0; q < IMP_TILES; q++) if(treeImp[q].valid) filled++;
+              printf("Impostor-Atlas geschrieben: %d/%d Kacheln gefuellt\n", filled, IMP_TILES);
+              fflush(stdout);
+            }
+          }
+        }
         static double upMax = 0.0, upSum = 0.0; static int upN = 0;
         double ms = (u1 - u0) * 1000.0;
         if(ms > 0.5){ upSum += ms; upN++; if(ms > upMax) upMax = ms; }

@@ -223,6 +223,7 @@ static void emit_cap(const Ring *a, int sides, float sway,
 #define EZ_SPRIGCAP 16384   // groesster Baum: 4 920 Laubansaetze (1 230 Karten bei Stride 4)
 static float ezSx[EZ_SPRIGCAP], ezSy[EZ_SPRIGCAP], ezSz[EZ_SPRIGCAP], ezSsize[EZ_SPRIGCAP];
 static int   ezNSprig = 0;
+static int   ezBucket = 0;   // Impostor-Eimer dieses Baums (0..IMP_TILES-1)
 // Kinderzahl-Faktor (1:1 = 100). DEMO_KIDPCT erlaubt Messungen. Wirkt auf alle
 // Stufen gleich, die Aststruktur wechselt also nicht mit der Detailstufe.
 int ezKidPct = 100;
@@ -240,6 +241,13 @@ int treeCardDiv0 = 3; float treeCardScale0 = 1.45f;   // gemessen: deckt wie tie
 // Pixel / bbox-Flaeche, Gras+Schilf aus: div 2 / scale 1,25 -> 38 % auf 25 m und
 // 39 % auf 40 m. div 3 / scale 2,0 -> 50 % / 52 % bei 18 % WENIGER Karten
 // (287 194 -> 234 129 im Wald). Wenige grosse Karten schlagen viele kleine.
+// Einzelblatt-Groesse/-Anzahl pro Buschel. Gemessen an einem 3,9-m-Baum,
+// Laubpixel bei 10 m: scale 1,0 -> 6 639, scale 2,0 -> 14 066, scale 3,0 ->
+// 18 652. Bei 1,0 sind die Blaetter 3-5 cm gross und die Krone durchsichtig;
+// 2,0 (6-10 cm) entspricht echten Eichen-/Eschenblaettern und fuellt sie.
+struct ImpRep treeImp[IMP_TILES];
+static struct ImpRep impRepD[IMP_TILES];   // Schreibseite des laufenden Builds
+float ezLeafScale = 2.0f, ezLeafPer = 1.0f;   // DEMO_LEAFSC / DEMO_LEAFPER
 int treeCardDivN = 3; float treeCardScaleN = 2.00f;    // DEMO_CARDT2 "<div> <scale>" 
 // DEMO_T2="<stride> <Gzaehler> <Gnenner>": Vernetzung der mittleren Detailstufe.
 // Sweep-Bank, um Geruest-Kosten gegen Silhouette-Qualitaet zu messen.
@@ -306,7 +314,7 @@ static void emit_crown_quads(float bx, float bz, float s, float hf,
 // statt hunderter Karten. Groesse/Mitte werden aus den echten Laubpositionen
 // abgeleitet, damit die Kachel die Krone dieses Baumes abdeckt. Die Kachel ist
 // Variante 4..7 (crown.frag nimmt dafuer eine andere Textur mit 2x2 Kacheln).
-static void emit_crown_billboard(float seed){
+static void emit_crown_billboard(float seed, float bx, float by, float bz, float treeH){
   if(ezNSprig <= 0) return;
   float mn[3] = { 1e30f, 1e30f, 1e30f}, mx[3] = {-1e30f,-1e30f,-1e30f};
   for(int i = 0; i < ezNSprig; i++){
@@ -318,6 +326,12 @@ static void emit_crown_billboard(float seed){
     if(ezSz[i] - r < mn[2]) mn[2] = ezSz[i] - r;
     if(ezSz[i] + r > mx[2]) mx[2] = ezSz[i] + r;
   }
+  // Der Quad muss STAMM + Krone abdecken — sonst schwebt in der Ferne ein
+  // gruener Fleck ohne Baum (Nutzerbefund).
+  if(bx < mn[0]) mn[0] = bx; if(bx > mx[0]) mx[0] = bx;
+  if(bz < mn[2]) mn[2] = bz; if(bz > mx[2]) mx[2] = bz;
+  if(by < mn[1]) mn[1] = by;
+  float top = by + treeH; if(top > mx[1]) mx[1] = top;
   float size = mx[0] - mn[0];
   if(mx[2] - mn[2] > size) size = mx[2] - mn[2];
   if(mx[1] - mn[1] > size) size = mx[1] - mn[1];
@@ -326,7 +340,7 @@ static void emit_crown_billboard(float seed){
   float *d = &crownVerts[nCrownVerts * CROWN_FLOATS];
   d[0] = (mn[0] + mx[0]) * 0.5f; d[1] = (mn[1] + mx[1]) * 0.5f; d[2] = (mn[2] + mx[2]) * 0.5f;
   d[3] = size; d[4] = 0.0f; d[5] = seed;
-  d[6] = (float)(4 + ((int)(fabsf(seed) * 7.31f) & 3));   // 4..7 = Ganzbaum-Kachel
+  d[6] = 4.0f + (float)ezBucket;   // 4..67 = Impostor-Kachel (8x8-Atlas)
   d[7] = gLodR; d[8] = ezLeafR; d[9] = ezLeafG; d[10] = ezLeafB; d[11] = gLodR2;
   nCrownVerts++;
 }
@@ -947,7 +961,8 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
       }
       if(ezWantLeaves && (i % leafStride) == 0){   // Einzelblaetter (NAHstufe)
         float rr = lsz * (0.30f + 0.25f * TH(430 + i));
-        leaf_cluster(cx, cy, cz, rr, 5, lsz * 0.45f, 0.85f, 0.55f,
+        leaf_cluster(cx, cy, cz, rr * ezLeafScale, (int)(5.0f * ezLeafPer),
+                     lsz * 0.45f * ezLeafScale, 0.85f, 0.55f,
                      seed + (float)i * 7.3f, 500 + i * 3, lcr, lcgg, lcb);
       }
     }
@@ -977,6 +992,9 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
   (void)d; (void)R1;   // frueher steuerte die Distanz noch, ob Karten gebaut werden
   int pidx = (int)(TH(0) * (float)(EZ_NPRESETS - 0.001f));
   if(treeEzPreset >= 0 && treeEzPreset < EZ_NPRESETS) pidx = treeEzPreset;
+  // Impostor-Eimer: Art x Form. 4 Presets x 16 Formen = 64 Kacheln.
+  ezBucket = pidx * (IMP_TILES / EZ_NPRESETS) +
+             ((int)(TH(903) * (float)(IMP_TILES / EZ_NPRESETS))) % (IMP_TILES / EZ_NPRESETS);
   const EzPreset *P = &EZ_PRESETS[pidx];
   float hf = 0.80f + TH(1) * 2.20f;
   // dieselbe Groessenlogik wie Generator A: Kronenmittelpunkt-Hoehe ueber Basis
@@ -1022,13 +1040,17 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
   // als Detailschicht darueber, das Billboard ersetzt sie in der Ferne. Eine
   // Stufe ohne Karten (frueher tier 0) laesst beim Annaehern nichts einblenden.
   // Weniger Karten in der groebsten Stufe, aber grosse: Deckung bleibt gleich.
+  // Karten werden bis 0,7 R1 gebaut, obwohl der Shader sie erst ab 0,9 R1
+  // einblendet: der Build ist bis 12 m Kameraweg alt, ohne Vorrat waere beim
+  // Annaehern nichts zum Einblenden da (derselbe Fehler, den die Einzelblaetter
+  // mit 1,3 R1 Puffer hatten).
   int cardDiv = (tier >= 2) ? treeCardDivN : (tier == 1 ? treeCardDiv0 : (treeBB0Cards > 0 ? treeBB0Cards : 8));
   int wantCards = ezNSprig / cardDiv;
   if(treeBillboard0 && tier <= 2){
     // Das Billboard liegt auch in Stufe 2 im Puffer: der Shader blendet es ab
     // 0,7 R2 ein und die Karten bis 1,1 R2 aus — der Uebergang laeuft mit der
     // Entfernung, nicht mit dem Build (kein Dichtesprung an der Schaltweite).
-    emit_crown_billboard(seed);
+    emit_crown_billboard(seed, bx, by, bz, treeH);
     // DEMO_BB0CARDS=<div>: zusaetzliche Einzelkarten unter dem Billboard der
     // groebsten Stufe (0 = nur Billboard). Mit div 8 bekommt die ferne Krone
     // wieder etwas Parallax-Struktur, fuer 364 Baeume ~1/3 der alten Kartenzahl.
@@ -1151,6 +1173,7 @@ static int treeNCand = 0, treeCandPos = 0;
 
 void trees_build_begin(float tx, float tz){
   nTreeVerts = 0; nCrownVerts = 0; nWireVerts = 0; nTrees = 0; nLeafInst = 0;
+  for(int q = 0; q < IMP_TILES; q++) impRepD[q].valid = 0;
   #define CAND_CAP TREE_CAND_CAP
   TreeCand *cand = treeCand;
   int nc = 0;
@@ -1281,6 +1304,17 @@ int trees_build_step(int maxTrees){
     // ein Baum, der mitten im Ast endet, zeigt eine offene Ringkante (eine
     // Schnittflaeche) und hoert sich fuer den Nutzer "abgebrochener Baum" an.
     // Die Puffer werden pro Baum nur angehaengt, zurueckrollen ist also billig.
+    // Repraesentant fuer den Impostor-Eimer: der NAHSTE Baum der Sorte (wir
+    // bauen nah vor fern), weil von ihm Geruest UND Karten im Puffer liegen.
+    if(ezBucket >= 0 && ezBucket < IMP_TILES && !impRepD[ezBucket].valid &&
+       nTreeVerts > vertBefore && nCrownVerts > quadBefore){
+      struct ImpRep *ir = &impRepD[ezBucket];
+      ir->valid = 1;
+      ir->vStart = vertBefore; ir->vCount = nTreeVerts - vertBefore;
+      ir->cStart = quadBefore; ir->cCount = nCrownVerts - quadBefore;
+      ir->cx = cand[i].p[0]; ir->cy = cand[i].p[1]; ir->cz = cand[i].p[2];
+      ir->rad = H * 0.75f;
+    }
     if(treeCapTree || treeCapCrown || treeCapLeaf || treeCapSprig){
       nTreeVerts = vertBefore; nCrownVerts = quadBefore; nLeafInst = leafBefore;
       treeSkipped++;
@@ -1319,6 +1353,8 @@ void trees_build_finish(void){
   tp = leafInst;    leafInst = leafInstD;     leafInstD = tp;
   nTreeVertsD = nTreeVerts; nCrownVertsD = nCrownVerts;
   nLeafInstD = nLeafInst;   nTreesD = nTrees;
+  // die Kachel-Repraesentanten gehoeren zum Puffer, also mit tauschen
+  for(int q = 0; q < IMP_TILES; q++) treeImp[q] = impRepD[q];
   treeBuildDone = 1; treeBuilding = 0;
   pthread_mutex_unlock(&treeMu);
 }

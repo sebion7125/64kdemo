@@ -16,6 +16,8 @@ uniform float uTreeFade = 1.0; // Ueberblendung beim LOD-Wechsel (Runde 27):
                                // 0 = dieser Satz verschwindet, 1 = voll sichtbaruniform float uTreeFade = 1.0; // Ueberblendung beim LOD-Wechsel (Runde 27):
                                // 0 = dieser Satz verschwindet, 1 = voll sichtbar
 uniform float uTreeOld = 0.0;    // 1 = dieser Satz blendet AUS (der alte)
+uniform float uImpostor = 0.0;   // 1 = Aufnahme in die Impostor-Textur (keine
+                                 // Entfernungsblenden, kein Wind, feste Kamera)
 out vec2 vUV;
 out vec3 vPos;
 out float vSeed;
@@ -60,16 +62,25 @@ void main(){
   float gust = vnoise(gp * 2.3 + 7.7) * smoothstep(0.55, 0.85, vnoise(gp));
   float ph = hash12(floor(aCenter.xz / 15.0)) * 6.283;
   float wnd = sin(uTime * 1.8 + ph + aCenter.x * 0.35 + aCenter.z * 0.27);
-  float amp = aData.x * (0.06 + 0.16 * gust);
+  // Das Ganzbaum-Billboard (Kachel >= 4) steht STILL: ein 20 m grosser,
+  // mitschwingender Lappen "wabert" und wirkt albern (Nutzer). Die Blueten- und
+  // Blattbewegung steckt in den Karten und Einzelblaettern.
+  float amp = aData.x * ((aData.w >= 4.0) ? 0.0 : (0.06 + 0.16 * gust));
   p.x += (wnd * 0.5 + gust) * amp;
   p.z += cos(uTime * 1.3 + ph * 1.7) * amp * 0.7;
   p.y += sin(uTime * 2.2 + ph) * amp * 0.35;
   float d = length(aCenter - uCamPos);
-  // Karten sind die Basisstufe: sie werden NICHT mehr per Entfernung weggeblendet
-  // (vorher smoothstep(0,9 R1 .. 1,1 R1) -> unterhalb von R1 war die Karte aus,
-  // die Einzelblaetter deckten da aber schon lange nicht mehr, gemessen Loch von
-  // 60..86 m). Einzelblaetter sind jetzt eine Zusatzschicht, keine Ersetzung.
-  float near = 1.0;
+  // Die drei Kronen-Stufen schliessen sich AUS und ueberblenden nur im Band:
+  //   Einzelblaetter   bis 0,9 R1 ... aus bei 0,9..1,1 R1   (leaf.vert)
+  //   Karten           ein bei 0,9..1,1 R1, aus bei 0,85..1,1 R2
+  //   Baum-Billboard   ein bei 0,70..0,95 R2
+  // Vorher (Runde 32) waren die Karten eine durchgehende Basis, die Blaetter
+  // lagen DARUEBER -> nah sieht man die feinen Blaetter nicht, weil die groben
+  // Karten dahinter die Krone fuellen (Nutzer: "quatsch"). Das Loch, das die
+  // Karten bei R1 vorher rissen, kommt nicht wieder: R1 liegt jetzt bei 5x
+  // Wuchshoehe, genau an der Stelle, an der die Einzelblaetter aufhoeren zu
+  // decken (gemessen), und die Karten sind dichter (div 3 / scale 2,0).
+  float near = (uLightFace > 0.5) ? 1.0 : smoothstep(iLodR * 0.90, iLodR * 1.10, d);
   // Uebergang Karten -> Ganzbaum-Billboard (Runde 29): in Stufe 2 liegen beide im
   // Puffer, das Billboard faellt ab 0,7 R2 ein, die Karten duennen bis 1,1 R2 aus.
   // Laeuft ueber die Entfernung, also kontinuierlich und unabhaengig davon, wann
@@ -78,6 +89,9 @@ void main(){
     if(aData.w >= 4.0) near *= smoothstep(iLodR2 * 0.70, iLodR2 * 0.95, d);
     else               near *= 1.0 - smoothstep(iLodR2 * 0.85, iLodR2 * 1.10, d);
   }
+  // Aufnahme-Pass: keine Entfernungsschwelle, sonst verschwindet genau das,
+  // was in die Kachel gehoert.
+  if(uImpostor > 0.5) near = 1.0;
   // Build-Rand: Baeume werden bis RANGE=20 Zellen a 9 m gebaut (180 m halbe
   // Kantenlaenge, Ecken ~255 m). Bis 2026-10-07 endete das Blattdach bei 185 m,
   // die Staemme gingen aber bis ~255 m -> kahle Stummel in der Ferne.
@@ -94,9 +108,10 @@ void main(){
   // Kachel nach Blickrichtung: aData.w = Kronen-Variante (0..3), azIdx = eine von
   // 16 Aufnahmerichtungen. Die Krone parallaxiert also, wenn man sie umlaeuft.
   if(aData.w >= 4.0){
-    // Ganzbaum-Kachel (tier 0): 4 Kacheln in 2x2, keine Aufnahmerichtung
+    // Ganzbaum-Impostor: 64 Kacheln in 8x8 (Art x Form), aufgenommen aus einer
+    // Richtung. Ferne Baume sind 20-30 px, eine Richtung reicht dort.
     float ci = aData.w - 4.0;
-    vTile = vec2(mod(ci, 2.0), floor(ci * 0.5));
+    vTile = vec2(mod(ci, 8.0), floor(ci * 0.125));
     vCrown = 1.0;
   } else {
     float az = atan(aCenter.x - uCamPos.x, aCenter.z - uCamPos.z);

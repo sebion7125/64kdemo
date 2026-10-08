@@ -70,6 +70,25 @@ float c_terrainH(float px, float py);
 // Doppel-Puffer: der Build-Thread schreibt in die ohne Suffix, gezeichnet wird
 // aus den D-Puffern (Swap in trees_build_finish(), unter Mutex).
 extern float *treeVerts, *crownVerts, *leafInst;
+// ---- Ganzbaum-Impostoren (TODO 23, Nutzer: "den Baum als Ganzes in eine
+// Textur rendern und daraus ein Billboard bauen") --------------------------
+// 8x8 Kacheln a 128 px in einer 1024x1024-Textur. Eine Kachel = eine
+// Arten-/Form-Variante (4 Presets x 16 Formen), NICHT pro Baum: ferne Baume
+// sind 20-30 px gross, dort darf Art+Groesse gleich aussehen. Das spart genau
+// das, was der Nutzer nennt: Fuellrate und Geometrie-Transformation.
+// Gerendert wird die KARTEN-Stufe dieses Baumes (div 3, ~250 Quads + Stamm),
+// nie das Einzelblatt — in 128 px waere es Matsch.
+#define IMP_COLS   8
+#define IMP_TILES  64
+#define IMP_TILEPX 128
+struct ImpRep {
+  int valid;
+  int vStart, vCount;            // Geruest-Slice im Baum-Puffer
+  int cStart, cCount;            // Karten-Slice (Instanzen)
+  float cx, cy, cz, rad;         // Baum-Position, Radius der Huellkugel
+};
+extern struct ImpRep treeImp[IMP_TILES];   // Zeichenseite (getauscht im Finish)
+
 extern float *treeVertsD, *crownVertsD, *leafInstD;
 extern int   nLeafInst;
 extern float wireVerts[WIRE_CAP * WIRE_FLOATS];
@@ -89,6 +108,7 @@ void trees_build_finished_snapshot(float **tv, float **cv, float **lv,
 int  trees_thread_start(void);
 extern int treeBuildRange;   // Zellen-Radius, in dem Baeume gebaut werden
 extern int treeCardDiv0; extern float treeCardScale0;   // DEMO_CARDT0 (Sweep-Bank)
+extern float ezLeafScale, ezLeafPer;   // DEMO_LEAFSC / DEMO_LEAFPER
 extern int treeCardDivN; extern float treeCardScaleN;   // DEMO_CARDT2 (Basisstufe)
 extern int treeBillboard0;   // tier 0 als Ganzbaum-Billboard (TODO 23)
 extern int treeBB0Cards;     // Zusatzkarten darunter (DEMO_BB0CARDS)

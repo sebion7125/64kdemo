@@ -93,9 +93,9 @@ void main(){
   vec4 tx = textureLod(uFoliage, (vTile + cell) * (1.0 / 8.0), lod);
   // Ganzbaum-Kachel (groebste Detailstufe): andere Textur, 2x2 Kacheln a 128 px
   if(vCrown > 0.5){
-    float cinset = exp2(lod) * 0.5 / 128.0;
+    float cinset = exp2(lod) * 0.5 / 1024.0;   // Atlas 8x8 a 128 px = 1024
     vec2 cc = clamp(cell, cinset, 1.0 - cinset);
-    tx = textureLod(uCrownTex, (vTile + cc) * 0.5, lod);
+    tx = textureLod(uCrownTex, (vTile + cc) * (1.0 / 8.0), lod);
   }
   // Harte Polygonkanten an fernen Kronen (alter Nutzerbefund): mit steigender
   // Distanz wird die UV in die Kachelmitte zurueckgezogen, dadurch fuellt die
