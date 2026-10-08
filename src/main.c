@@ -1619,6 +1619,7 @@ int main(int argc, char **argv) {
   { const char *br = getenv("DEMO_TREEBUILDRANGE"); if (br) treeBuildRange = atoi(br); }
   { const char *td = getenv("DEMO_TREEDEBUG"); if (td) treeDbg = atoi(td); }
   { const char *nb = getenv("DEMO_NOBB0"); if (nb) treeBillboard0 = atoi(nb); }
+  { const char *bc = getenv("DEMO_BB0CARDS"); if (bc) treeBB0Cards = atoi(bc) < 0 ? 0 : atoi(bc); }
   { const char *t2 = getenv("DEMO_T2");
     if(t2){ int a = 3, b = 3, c = 4;
       if(sscanf(t2, "%d %d %d", &a, &b, &c) == 3 && a > 0 && c > 0){

@@ -240,6 +240,7 @@ int treeCardDiv0 = 3; float treeCardScale0 = 1.45f;   // gemessen: deckt wie tie
 // Sweep-Bank, um Geruest-Kosten gegen Silhouette-Qualitaet zu messen.
 int treeT2Stride = 3, treeT2Gnum = 3, treeT2Gden = 4;
 int treeDowngraded = 0;   // Baeume, die wegen Budget auf die groebste Stufe fielen
+int treeBB0Cards = 0;    // Zusatzkarten unter dem tier-0-Billboard (DEMO_BB0CARDS)
 int treeBillboard0 = 1;      // DEMO_NOBB0=1: tier 0 wieder mit Einzelkarten
 // Blattfarbe des gerade gebauten Baumes. Der EZ-Generator wuerfelte sie vorher
 // pro Terminalast (0,10..0,26 / 0,26..0,52 / 0,05..0,15) — deshalb sahen die
@@ -1015,7 +1016,10 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
     // 0,7 R2 ein und die Karten bis 1,1 R2 aus — der Uebergang laeuft mit der
     // Entfernung, nicht mit dem Build (kein Dichtesprung an der Schaltweite).
     emit_crown_billboard(seed);
-    if(tier == 0) wantCards = 0;
+    // DEMO_BB0CARDS=<div>: zusaetzliche Einzelkarten unter dem Billboard der
+    // groebsten Stufe (0 = nur Billboard). Mit div 8 bekommt die ferne Krone
+    // wieder etwas Parallax-Struktur, fuer 364 Baeume ~1/3 der alten Kartenzahl.
+    if(tier == 0) wantCards = treeBB0Cards > 0 ? ezNSprig / treeBB0Cards : 0;
   }
   if(wantCards > 0) emit_sprig_quads(seed, wantCards);
 }

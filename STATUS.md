@@ -587,6 +587,21 @@ Gemessen: Faktoren laufen 0.00 -> 0.63 -> 1.00 mit Summe 1 (Protokoll der
 Satz-Wechsel). Visuelle Beurteilung steht auf dem GPU-Host aus — in der VM laeuft
 die Ueberblendung wegen 1,4 s/Frame innerhalb eines Frames ab.
 
+## Zu prüfen, nachdem die Bäume umgebaut sind (Runde 27–30)
+
+Knöpfe dafür (alle Umgebungsvariablen, kein Neubauen nötig):
+
+| Knopf | Wirkung |
+|---|---|
+| `DEMO_TREEFADE=<s>` | Dauer der LOD-Überblendung (Default 0,9 s; 0 = hartes Umschalten) |
+| `DEMO_NOBB0=1` | gröbste Stufe wieder mit Einzelkarten statt Ganzbaum-Billboard |
+| `DEMO_BB0CARDS=<div>` | Zusatzkarten **unter** dem Billboard der gröbsten Stufe (0 = nur Billboard; 8 = etwas Parallax-Struktur, kostet +92 000 Karten und +3 % Frame) |
+| `DEMO_CARDT0="<div> <scale>"` | Kartenanzahl/-größe der gröbsten Stufe, wenn Billboards aus sind |
+| `DEMO_T2="<stride> <Zähler> <Nenner>"` | Vernetzung der mittleren Detailstufe (Default `3 3 4`) |
+| `DEMO_TREEBUILDRANGE=<Zellen>` | Radius, in dem Bäume gebaut werden |
+| `DEMO_TIERSWITCH=<s>` / `DEMO_TREEDEBUG=1` | Protokoll der Stufe-Wechsel und Satz-Wechsel |
+| `tools/selftest.sh` | harte Prüfungen (0 übersprungene Bäume, keine Cap-Treffer, Bild deterministisch) |
+
 ## Session 2026-10-08, Runde 30 (Selbsttest-Bank, Herabstufung statt Weglassen, Sweep-Bänke)
 
 **`tools/selftest.sh` (neu):** fährt feste Konfigurationen (Standardszene, Wiederholung,

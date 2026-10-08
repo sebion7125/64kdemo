@@ -87,6 +87,7 @@ int  trees_thread_start(void);
 extern int treeBuildRange;   // Zellen-Radius, in dem Baeume gebaut werden
 extern int treeCardDiv0; extern float treeCardScale0;   // DEMO_CARDT0 (Sweep-Bank)
 extern int treeBillboard0;   // tier 0 als Ganzbaum-Billboard (TODO 23)
+extern int treeBB0Cards;     // Zusatzkarten darunter (DEMO_BB0CARDS)
 extern int treeDowngraded;   // wegen Budget auf die groebste Stufe herabgestuft
 extern int treeT2Stride, treeT2Gnum, treeT2Gden;   // DEMO_T2 (Sweep-Bank)
 extern int treeOneShot;
