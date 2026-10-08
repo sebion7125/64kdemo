@@ -2895,3 +2895,7 @@ lineare Nachbarschaft). Aktuell -5,26 % bei 30,8 m. Ursache ist NICHT das Holz
 (unchanged gegen Vorversion), sondern die Uebergabe Einzelblatt -> Karte bei
 R1 = 31 m: 12 600 Einzelblaetter gegen 840 Karten, die Karten decken weniger.
 Das ist der naechste Punkt.
+
+Nachtrag: TREE_VERT_CAP 12 Mio -> 4 Mio (gemessenes Maximum 1 785 495 ueber vier
+Kamerapositionen, 124 % Luft). RSS 2,40 GB -> 1,19 GB, 0 Cap-Treffer, 0
+uebersprungene Baeume (auch Stress DEMO_LODRSCALE=2.0).
