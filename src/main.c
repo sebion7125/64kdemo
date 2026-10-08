@@ -520,7 +520,7 @@ static float reedBaseTpl[REED_TEMPLATE_VERTS * 3];
 static int   reedTplVerts = 0;
 static float reedCX = 1e30f, reedCZ = 1e30f;
 static int   reedPassOn = 1;      // DEMO_REEDPASS=0: Schilf bleibt im Gras-Pass
-static float reedMaxDist = 45.0f; // eigener Cull-Abstand
+static float reedMaxDist = 34.0f;   // fade 22-34 m, Build-Radius 35 m — die Riede blendet aus, // eigener Cull-Abstand
 static GLuint vboWire = 0, vaoWire = 0;
 
 // Grundformen (per-Vertex-Attribute der Instanz-Shader)
