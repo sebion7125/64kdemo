@@ -2953,3 +2953,8 @@ A2C wieder aus (Standard). Pruefungen umgestellt: nicht die SUMME der Gewichte,
 sondern die ABDECKUNG cov = 1-(1-Karten)(1-Billboard)(1-Blaetter) muss ~1 sein,
 und ihre Steigung muss stetig sein. Wirtstest 30 090 Pruefungen, 0 Fehler
 (|cov-1| max 0,0078, Sprung pro 0,5 m max 0,0027). Ein-Baum-Test LT-ERGBNIS OK.
+
+Ganzer Anflug 140->3 m (1370 Frames, 11 Bauten) nach dieser Runde: groesste
+Deckungs-Delle -3,65 % bei 13,2 m (vorher -8,16 % bei 31,1 m), Abdeckungsfehler
+der Gewichte 0,77 %, Abdeckungssteigung 0,046/m (Schranke 0,223), 0 Pump-Frames,
+LT-ERGBNIS OK. Selbsttest: ALLE PRUEFUNGEN OK.
