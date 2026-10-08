@@ -1303,7 +1303,12 @@ int trees_build_step(int maxTrees){
     // Laubpixel auf 86 m gegen 12828 auf 90 m fuer denselben Baum.
     gLodR = R1;
     gLodR2 = R2;
-    ezWantLeaves = (d <= R1 * 1.30f);
+    // Der Rand muss die Nachlaufzeit des Builds abdecken: d ist der Abstand zum
+    // BUILD-ZENTRUM, der Shader blendet aber gegen die KAMERA aus (bis 1,15 R1),
+    // und das Build-Zentrum hinkt der Kamera bis 12 m nach. Bei 1,3 R1 (bei
+    // R1 = 20 m also 6 m) fehlten Blaetter, obwohl die Kamera schon innerhalb der
+    // Blende war -> Blätter verschwanden schlagartig (Nutzerbefund).
+    ezWantLeaves = (d <= R1 * 1.15f + 16.0f);
     // Budget: passt ein BAUM nicht mehr in die Puffer, wird er uebersprungen —
     // und nicht mitten im Ast abgebrochen. Ein abgebrochener Baum sieht aus wie
     // ein abgesaegter Stamm ohne Laub (Nutzerbefund; gemessen: 54 Cap-Abbrueche,

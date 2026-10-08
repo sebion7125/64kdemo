@@ -11,6 +11,7 @@ in vec3 vRight, vUp;
 in vec3 vCol;       // Blattfarbe des Baumes (Atlas-Kachel ist farbneutral)
 uniform vec3 uCamPos;
 uniform sampler2D uFoliage;
+uniform float uDepthOnly = 0.0;
 uniform sampler2D uCrownTex;   // 2x2 Ganzbaum-Kronen-Kacheln (tier 0)   // Atlas: 8x8 Kacheln echter Blattwerk-Aufnahmen
 uniform float uCrownMask;   // DEBUG: Kronen-Quads als reines Rot -> exakte Maske
 out vec4 O;
@@ -132,7 +133,11 @@ void main(){
   float thr = 0.5 + (hash12(gl_FragCoord.xy + vTile * 37.0) - 0.5) * 0.75;
   if(a < thr) discard;
   cov = a * vFade;
-  if(cov < 0.02) discard;
+  // Depth-only-Nachpass (Z-Buffer-Trick, Nutzer): die gemischte Krone soll den
+  // Hintergrund trotzdem verdecken. Im Nachpass wird nur geschrieben, was wenig
+  //stens halb deckt.
+  if(uDepthOnly > 0.5){ if(cov < 0.5) discard; }
+  else if(cov < 0.02) discard;
   // Masken-Diagnose erst nach dem Discard: sonst zaehlt sie auch die leeren
   // areas der Kachel und die Farbmessung mittelt den Hintergrund mit.
   if(uCrownMask > 0.5 && uCrownMask < 1.5){ O = vec4(1.0, 0.0, 0.0, 1.0); return; }

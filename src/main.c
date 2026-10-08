@@ -1061,6 +1061,10 @@ static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: t
   p_glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, TREE_FLOATS * 4, (const void *)24);
   p_glEnableVertexAttribArray(3);
   p_glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, TREE_FLOATS * 4, (const void *)36);  // sway,u,v
+  // ENABLE fehlt: ohne das ist Attribut 4 kein Buffer-Attribut, der Shader liest
+  // aR2 = Generic-Attribut (0) -> smoothstep(0,0,d) = 1 -> GERUEST WEGCULLT,
+  // keine Staemme/Aeste im Bild (Nutzerbefund)
+  p_glEnableVertexAttribArray(4);
   p_glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, TREE_FLOATS * 4, (const void *)48);  // R2
 
   // Kronen-Billboards: aCenter(3) aOff(2) aData(4)
@@ -1712,6 +1716,8 @@ int main(int argc, char **argv) {
   GLint locTMask   = p_glGetUniformLocation(progTMesh, "uTreeMask");
   GLint locTFade   = p_glGetUniformLocation(progTMesh, "uTreeFade");
   GLint locTMeshF  = p_glGetUniformLocation(progTMesh, "uMeshFade");
+  GLint locCDepth  = p_glGetUniformLocation(progCrown, "uDepthOnly");
+  GLint locLDepth  = p_glGetUniformLocation(progLeaf, "uDepthOnly");
   GLint locGMVP    = p_glGetUniformLocation(progGrass, "uMVP");
   GLint locGCam    = p_glGetUniformLocation(progGrass, "uCamPos");
   GLint locGTime   = p_glGetUniformLocation(progGrass, "uTime");
@@ -2450,6 +2456,13 @@ int main(int argc, char **argv) {
               int filled = 0;
               for(int q = 0; q < IMP_TILES; q++) if(treeImp[q].valid) filled++;
               printf("Impostor-Atlas geschrieben: %d/%d Kacheln gefuellt\n", filled, IMP_TILES);
+              { float mn = 1e30f, mx = -1e30f, zero = 0.0f;
+                for(int i = 0; i < nTreeVertsD; i++){
+                  float r = treeVertsD[i * TREE_FLOATS + 12];
+                  if(r < mn) mn = r; if(r > mx) mx = r; if(r <= 0.0f) zero++;
+                }
+                printf("R2 im Geruest-Puffer: min %.1f max %.1f  null/ungueltig %d von %d\n",
+                       mn, mx, (int)zero, nTreeVertsD); }
               // Diagnose: was steckt in einer Kachel? Kartenanzahl und -groesse
               // entscheiden, ob sie als Laubmasse oder als paar grosse Lappen
               // aussieht (im Atlas deutlich zu sehen).
@@ -2902,6 +2915,12 @@ int main(int argc, char **argv) {
       if(locCFade >= 0) p_glUniform1f(locCFade, treeFadeNew);
       if(locCCards >= 0) p_glUniform1f(locCCards, (float)layCard);
       if(locCBB >= 0) p_glUniform1f(locCBB, (float)layBB);
+      // Z-Buffer-Trick (Nutzer) waehrend einer Ueberblendung: gemischt wird ohne
+      // Depth-Write (sonst verdeckt eine halb durchsichtige Karte den Hintergrund,
+      // der erst danach kommt), und danach schreibt ein Farbmaske-aus-Pass die
+      // Tiefe derjenige Fragmente, die mindestens halb decken.
+      p_glUniform1f(locCDepth, 0.0f);
+      if(treeFadeNew < 1.0f && treeOldSet >= 0) p_glDepthMask(GL_FALSE);
       p_glBindVertexArray(vaoCrown[drawSet]);
       p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nCrownVertsCur);
       if(treeFadeNew < 1.0f && treeOldSet >= 0 && nCrownVertsOld > 0){
@@ -2912,6 +2931,20 @@ int main(int argc, char **argv) {
         if(locCOld >= 0) p_glUniform1f(locCOld, 0.0f);
       }
       if(locCFade >= 0) p_glUniform1f(locCFade, 1.0f);
+      if(treeFadeNew < 1.0f && treeOldSet >= 0 && nCrownVertsOld > 0){
+        p_glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        p_glDisable(GL_BLEND);
+        p_glDepthMask(GL_TRUE);
+        p_glUniform1f(locCDepth, 1.0f);
+        p_glBindVertexArray(vaoCrown[drawSet]);
+        p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nCrownVertsCur);
+        p_glBindVertexArray(vaoCrown[treeOldSet]);
+        p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nCrownVertsOld);
+        p_glUniform1f(locCDepth, 0.0f);
+        p_glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        p_glEnable(GL_BLEND);
+      }
+      p_glDepthMask(GL_TRUE);
       p_glDisable(GL_BLEND);
     }
 
@@ -2925,6 +2958,7 @@ int main(int argc, char **argv) {
       // wird (Gras). Ohne laufende Ueberblendung bleibt alles wie vorher.
       p_glEnable(GL_BLEND);
       p_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+      p_glUniform1f(locLDepth, 0.0f);
       p_glDepthMask(treeFadeNew < 1.0f ? GL_FALSE : GL_TRUE);
       p_glUseProgram(progLeaf);
       p_glUniformMatrix4fv(locLMVP, 1, GL_FALSE, mvp);
@@ -2944,6 +2978,19 @@ int main(int argc, char **argv) {
         if(locLOld >= 0) p_glUniform1f(locLOld, 0.0f);
       }
       if(locLFade >= 0) p_glUniform1f(locLFade, 1.0f);
+      if(treeFadeNew < 1.0f && treeOldSet >= 0 && nLeafInstOld > 0){
+        p_glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        p_glDisable(GL_BLEND);
+        p_glDepthMask(GL_TRUE);
+        p_glUniform1f(locLDepth, 1.0f);
+        p_glBindVertexArray(vaoLeaf[drawSet]);
+        p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInstCur);
+        p_glBindVertexArray(vaoLeaf[treeOldSet]);
+        p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInstOld);
+        p_glUniform1f(locLDepth, 0.0f);
+        p_glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        p_glEnable(GL_BLEND);
+      }
       // DepthMask ZURUECKsetzen: bleibt sie bei laufender Ueberblendung auf
       // FALSE, schreibt im NAechsten Frame der Raymarch-Terrain-Pass keine Tiefe
       // mehr — alle Meshes testen gegen eine kaputte Tiefenbuffer (Nutzerbefund

@@ -9,6 +9,7 @@ in float vW;
 in float vAsp;
 uniform vec3 uCamPos;
 uniform float uLeafMask;   // DEBUG: Blatt als Maske (reines Rot)
+uniform float uDepthOnly = 0.0;
 uniform float uAlbedoOnly; // Atlas-Kapture: nur Albedo + Abdeckung (keine Beleuchtung)
 out vec4 O;
 const vec3 SUN = normalize(vec3(0.55, 0.38, -0.62));
@@ -91,7 +92,9 @@ void main(){
   if(e > 1.0) discard;
   // Ueberblendung als echtes Alpha (nicht gedithert): die Silhouette bleibt
   // harte Kante (MSAA), die Ueberblendung multipliziert das Alpha.
-  if(vAlpha < 0.02) discard;
+  // Depth-only-Nachpass: siehe crown.frag
+  if(uDepthOnly > 0.5){ if(vAlpha < 0.5) discard; }
+  else if(vAlpha < 0.02) discard;
   if(uLeafMask > 0.5 && uLeafMask < 1.5){ O = vec4(1.0, 0.0, 0.0, 1.0); return; }
   float midrib = 1.0 - smoothstep(0.0, 0.055, abs(vW)); // Mittelrippe
   float vein   = 1.0 - smoothstep(0.0, 0.05,

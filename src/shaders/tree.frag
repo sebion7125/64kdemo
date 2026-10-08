@@ -164,5 +164,8 @@ void main(){
   // ueber die schon tonemapte Szene geblendet/geschrieben wird)
   col = 1.0 - exp(-col * 1.25);
   col = pow(col, vec3(0.4545));
+#if EXP_FORCE_RED
+  O = vec4(1.0, 0.0, 0.0, 1.0); return;
+#endif
   O = vec4(col, vMeshFade >= 0.999 ? 1.0 : vMeshFade);
 }
