@@ -951,6 +951,9 @@ static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: t
   p_glEnableVertexAttribArray(4);
   p_glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, CROWN_FLOATS * 4, (const void *)32); // Blattfarbe
   p_glVertexAttribDivisor(4, 1);
+  p_glEnableVertexAttribArray(5);
+  p_glVertexAttribPointer(5, 1, GL_FLOAT, GL_FALSE, CROWN_FLOATS * 4, (const void *)44); // lodR2
+  p_glVertexAttribDivisor(5, 1);
 
   // Einzelblaetter naher Baeume: aBase(2) statisch + iPos(3) iData(4) iCol(3) [instanzen]
   p_glGenVertexArrays(1, &vaoLeaf[k]);

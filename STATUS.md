@@ -82,7 +82,7 @@ Screenshot unsichtbar (siehe oben).
 | 21 | **Feinast-Gerüst**: zu wenige feine Äste, Krone zu klein („Cheerleader“) (Nutzer, Runde 23) | 🔶 Runde 23f — **neue Messbank: `DEMO_ONETREE=1`** (ein Baum, kein Gras) + **`DEMO_TIER=0|2|3`** (Detailstufe erzwingen) + **`DEMO_TREEDIST=<m>`** (Ganzbaum-Abstand). Damit 10–16 fps statt 1,3. Umsetzung in `trees_cpu.c`: vierte Stufe **Feinaeste** (2–4 pro Zweig, eigene Röhren 3 Segmente + eigener kleiner Buschel), Zweige pro Ast `6..16 → 9..19`, Astlänge `0,45+0,55·TH → 0,60+0,65·TH` (Krone größer), Blätter neu verteilt (Zweig-Buschel 200→120/55, Spitze 300→180/82, je Feinast 60/30). Messung (ein Baum, `DEMO_TIER=3`, 12 m Abstand): Gerüst-BBox **187→253 px** (+35 %), Gerüst-Run-Median **24,0→11,0 px** (viel feiner), Gerüst-Runs 647→862, Kronen-BBox **274→317 px**, Blattmaske 12,48 %→**14,78 %**, Baum-Vertices 2100→7716, Blätter 29 580→41 460. Ganze Szene: Vertices 580 746→586 362, Blätter 233 510→**323 027**, fps 0,77→0,74 (llvmpipe). **Optik prüft der Nutzer** |
 | 27 | **EZ-Tree-Port**: Baumgenerator nach `github.com/dgreenheck/ez-tree` (MIT) 1:1 nachgebaut (Nutzerwunsch Runde 24) | 🔶 Runde 24 — neuer Generator in `trees_cpu.c` (`ez_grow`), umschaltbar mit **`DEMO_TREEGEN=alt|ez`** (Standard: ez). Portiert: Abschnitts-Ast, Gnarliness mit `1/sqrt(Radius)`, Wachstums-Kraft `strength/radius` um `cross(Astachse,up)`, Twist, geschichtete Kinder + vertauschte Radial-Slots, Radius immer aus dem Elternast, `taper` pro Level aus ihren Presets, `closeTip`. Presets: oak/ash/aspen/pine aus `*_medium.json`. **Zwei eigene Fehler gefunden und behoben:** (a) `force/radius` und `1/sqrt(radius)` sind einheitenabhängig — nach unserem `unit`-Scaling wirkten sie 10× zu stark, Krone fiel auf 26 px zusammen; Radien werden jetzt in Preset-Einheiten gerechnet. (b) `taper` war geraten (0,35) statt ihrer Werte (Eiche 0,73/0,42/0,69/0,75) — deshalb endete der Stamm dick und "abgesägt"; zusätzlich hatte ich eine da-Vinci-Flächenabrechnung erfunden, die den Stamm auf 2 cm einbrechen ließ. Die ist wieder raus, Regel ist 1:1. Messbank erweitert: **`DEMO_EZPRESET=0..3`**, **`DEMO_EZSPREAD=`**, Welt-BBox + Stammradien im Log. Messung gleicher Baum: alt 4,26×6,71 m / ez 4,54×6,90 m; alt 6,44×11,87 / ez 8,16×9,94; alt 8,48×9,10 / ez 6,97×9,36. Ganze Szene: **586 362 → 65 646 Vertices**, fps 2,48 → 22,33 (Gras aus). **Runde 24b: LOD auf ihre Semantik umgestellt + hängende Zweige behoben (`971873e`)** — Struktur in allen Stufen gleich, nur `sectionStride` (1/3/6), `segmentFactor` (1/0,75/0,4), `leafStride` (1/2), `leafScale` (1/1,25/1,3); Kinderzahl fern 85 %/60 % (wegen 646 Bäumen). Selber Baum über die Stufen: tier 3 = 4008 Vertices / 8,24×13,52×8,85 m, tier 2 = 1080 / 7,55×12,86×7,63 m, tier 0 = 306 / 5,91×9,60×7,76 m. Ganze Szene **496 104 Vertices**, 14 538 Canopy-Quads. **Offen: Atlas-Quads zeigen anderen Inhalt als die Einzelblätter (TODO 22) — Übergang nah→fern bleibt inhaltlich sichtbar. Optik prüft der Nutzer** |
 | 22 | **Buschel-Textur pro Blattfarbe** fürs mittlere LOD (statt Atlas-Fremdoptik) (Nutzer, Runde 23) | ✅ Runde 25 — Atlas-Kachel = **ein Blattbuschel** (9..13 unserer Blaetter, Deckung median 27 %) statt einer ganzen Referenzkrone, **farbneutral** aufgenommen (gemittelt 241/241/241); die Blattfarbe DIESES Baumes sitzt in der Karten-Instanz (`CROWN_FLOATS` 10 -> 13) und wird in `crown.frag` multipliziert. Log belegt gleiche Farbe ueber alle Stufen, Bildmessung: 16 m (94,130,48) / 40 m (87,124,46) / 60 m (87,124,47) / 100 m (87,121,60). **Nebenbefund behoben:** `uAlbedoOnly` blieb nach der Atlas-Kapture auf 1 -> die ganze Blatt-Rendrierung lief unbeleuchtet (rohe Albedo); 16 m Blätter vorher (39,82,11), jetzt (94,130,48) |
-| 23 | **Ganzer Baum als Billboard im gröbsten LOD** — sonst ferne Äste ohne Blätter (Nutzer, Runde 23) | ⬜ — gemessen (Runde 25, `DEMO_TREEMASK`, blindenfreie Richtung): 40 m = 81 Geruest-Pixel ueber 127 px Höhe, **80 m = 0** -> der Stamm ist ab ~80 m komplett von Karten verdeckt bzw. subpixelig, die Blätter bleiben. Plan: zwei gekreuzte Stamm-Billboards (Basis bis Kronenansatz) im Gerüst-Pass, damit Rinde/Schatten kostenlos mitkommen |
+| 23 | **Ganzer Baum als Billboard im gröbsten LOD** — sonst ferne Äste ohne Blätter (Nutzer, Runde 23) | ✅ Runde 29 — ein Kamera-Quad pro tier-0-Baum (Größe/Mitte aus den echten Laubpositionen), prozedurale Kronen-Kachel 2×2 à 128 px (Silhouette buschig ausgefranst, farbneutral, Blattfarbe als Tint), `DEMO_NOBB0=1` schaltet zurück auf Karten. Karten gesamt 545 871 → 299 700, Frame 1448 → 1331 ms, Laub in der Szene 2160 → 7606 grüne Pixel. **Optik prüft der Nutzer**; Dichtesprung an der Schaltweite 2→0 offen (siehe Runde 29) |
 | 24 | **LOD-Überblendung krisselig** → sauberer Alpha-Blend (Nutzer, Runde 23) | 🔶 Runde 27 — Satz-Wechsel ueberblendet jetzt: der alte Satz loest sich aus, der neue loest sich ein (0,9 s, `DEMO_TREEFADE`), Wuerfelentscheid statt Alpha-Blend (Draw-reihenfolge-unabhaengig). Ferne Baeume, die neu in den Build-Radius kommen, blenden damit langsam ein. **Optik muss der Nutzer auf dem GPU-Host prüfen** |
 | 28 | **Speicher/Datenmenge der Bäume senken** (nach Doppel-Puffer ~876 MB) | ✅ Runde 28 — Kronen-Karten instanziiert: 312 → 44 Byte pro Karte, Puffer 352 → 206 MB, Erstbuild 490 → 373 ms, Karten-Cap 4 Mio → 700 k. Bild bis auf 336 Pixel (0,15 %, Schattenkarten-Rand) unveraendert; ohne Schatten bitgleich |
 | 25 | **Schatten: ganzer Baum statt Stumpf**, bessere Auflösung (Nutzer, Runde 23) | ⬜ — Ist-Zustand und Wurzel-Analyse siehe „Schatten: Ist-Zustand“ unten |
@@ -586,6 +586,36 @@ nur den neuen Satz (stabile Schattenkarte). Messbank: `DEMO_TREEDEBUG`,
 Gemessen: Faktoren laufen 0.00 -> 0.63 -> 1.00 mit Summe 1 (Protokoll der
 Satz-Wechsel). Visuelle Beurteilung steht auf dem GPU-Host aus — in der VM laeuft
 die Ueberblendung wegen 1,4 s/Frame innerhalb eines Frames ab.
+
+## Session 2026-10-08, Runde 29 (Ganzbaum-Billboard in der gröbsten Stufe, TODO 23)
+
+**Umsetzung:** pro tier-0-Baum EIN Kamera-Quad statt hunderter Karten. Größe und
+Mitte werden aus den echten Laubpositionen dieses Baumes abgeleitet
+(`emit_crown_billboard`), die Beklebung kommt aus einer neuen prozedural erzeugten
+Textur (2×2 Kacheln à 128 px): Laubsilhouette etwas breiter als hoch, Unterseite
+flacher, Rand ausgefranst (Buschel ragen über die Silhouette hinaus), innen
+Buschel-Sprenkel statt flacher Scheibe, farbneutral (Blattfarbe als Tint).
+Abschaltbar mit `DEMO_NOBB0=1`.
+
+**Gemessen (648 Bäume):** Karten gesamt 545 871 → **299 700** (tier 0: 246 535 →
+**364**, eine pro Baum), Puffer 206 → 195 MB, Frame-Median 1448 → **1331 ms**.
+
+**Kronendeckung, ein Baum, Maske, Terrain aus:**
+
+| Abstand | tier 2 (Karten) | tier 0 (Billboard) |
+|---|---|---|
+| 100 m | 209 px | 517 px |
+| 134 m (Schaltweite 20× Wuchshöhe) | 66 px | 267 px |
+| 160 m | 31 px | 175 px |
+
+Der Sprung geht bewusst Richtung „voll“: eine 30 px hohe Krone in 134 m ist ein
+~16×16-px-Fleck (267 px), die Kartenstufe liefert dort nur 66 px — das war der
+Nutzerbefund „ferne Bäume verlieren ihre Blätter“. Ganze Szene: grünes Laub
+2160 → 7606 Pixel, 2,63 % der Pixel verändert.
+
+**Offen:** Der Dichtesprung an der Schaltweite 2→0 bleibt trotz Überblendung
+sichtbar (Karten dünnen aus, Billboard füllt). Gegenmaßnahme: Kartengröße oder
+-anzahl im äußeren Bereich der Stufe 2 shader-seitig hochregeln.
 
 ## Session 2026-10-08, Runde 28 (Kronen-Karten als echte Instanzen)
 

@@ -39,6 +39,10 @@ int   treeFocusValid = 0;
 // hier, weil add_leaf()/leaf_cluster() von beiden Generatoren aus tief unten
 // aufgerufen werden und die Kette dafuer nicht voll durchgereicht wird.
 static float gLodR = 30.0f;
+static float gLodR2 = 0.0f;   // Schaltweite der groebsten Stufe (20x Wuchshoehe).
+                        // sitzt pro Karte in der Instanz, damit der Uebergang
+                        // Karten -> Ganzbaum-Billboard im Shader kontinuierlich
+                        // ueber die Entfernung laufen kann (kein Stufensprung).
 // Doppel-Puffer (Runde 26): der Build laeuft im Worker-Thread und schreibt in
 // die Schreibseite, gezeichnet wird ungestoert aus der Zeichenseite. Getauscht
 // wird in trees_build_finish() unter Mutex — nie mitten im Build.
@@ -283,7 +287,7 @@ static void emit_crown_quads(float bx, float bz, float s, float hf,
     { float *d = &crownVerts[nCrownVerts * CROWN_FLOATS];
       d[0] = cc; d[1] = ccy2; d[2] = ccz2;
       d[3] = qsize; d[4] = qrot; d[5] = qseed; d[6] = (float)variant;
-      d[7] = gLodR; d[8] = ezLeafR; d[9] = ezLeafG; d[10] = ezLeafB;
+      d[7] = gLodR; d[8] = ezLeafR; d[9] = ezLeafG; d[10] = ezLeafB; d[11] = gLodR2;
       nCrownVerts++; }
   }
 }
@@ -313,7 +317,7 @@ static void emit_crown_billboard(float seed){
   d[0] = (mn[0] + mx[0]) * 0.5f; d[1] = (mn[1] + mx[1]) * 0.5f; d[2] = (mn[2] + mx[2]) * 0.5f;
   d[3] = size; d[4] = 0.0f; d[5] = seed;
   d[6] = (float)(4 + ((int)(fabsf(seed) * 7.31f) & 3));   // 4..7 = Ganzbaum-Kachel
-  d[7] = gLodR; d[8] = ezLeafR; d[9] = ezLeafG; d[10] = ezLeafB;
+  d[7] = gLodR; d[8] = ezLeafR; d[9] = ezLeafG; d[10] = ezLeafB; d[11] = gLodR2;
   nCrownVerts++;
 }
 
@@ -331,7 +335,7 @@ static void emit_sprig_quads(float seed, int want){
     { float *d = &crownVerts[nCrownVerts * CROWN_FLOATS];
       d[0] = ezSx[q]; d[1] = ezSy[q]; d[2] = ezSz[q];
       d[3] = ezSsize[q]; d[4] = qrot; d[5] = qseed; d[6] = (float)variant;
-      d[7] = gLodR; d[8] = ezLeafR; d[9] = ezLeafG; d[10] = ezLeafB;
+      d[7] = gLodR; d[8] = ezLeafR; d[9] = ezLeafG; d[10] = ezLeafB; d[11] = gLodR2;
       nCrownVerts++; }
   }
 }
@@ -1002,8 +1006,14 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
   // Gleiche Kartenanzahl wie tier 2 gleicht das aus; die eingesparten
   // Zweigroehren (meshBranch) finanzieren das.
   int wantCards = ezNSprig / (tier >= 2 ? 2 : treeCardDiv0);
-  if(tier == 0 && treeBillboard0) emit_crown_billboard(seed);
-  else                            emit_sprig_quads(seed, wantCards);
+  if(treeBillboard0 && tier <= 2){
+    // Das Billboard liegt auch in Stufe 2 im Puffer: der Shader blendet es ab
+    // 0,7 R2 ein und die Karten bis 1,1 R2 aus — der Uebergang laeuft mit der
+    // Entfernung, nicht mit dem Build (kein Dichtesprung an der Schaltweite).
+    emit_crown_billboard(seed);
+    if(tier == 0) wantCards = 0;
+  }
+  if(wantCards > 0) emit_sprig_quads(seed, wantCards);
 }
 
 // ---------- Platzierung (identisch zum alten SDF-System) ----------
@@ -1205,6 +1215,7 @@ int trees_build_step(int maxTrees){
     // Einzelblaetter bis 1,1 R1, Karten ab 0,9 R1. Im Band um R1 existieren
     // beide, der Shader blendet sie um R1 +/-10 % uebereinander.
     gLodR = R1;
+    gLodR2 = R2;
     ezWantLeaves = (d <= R1 * 1.10f);
     // Budget: passt ein BAUM nicht mehr in die Puffer, wird er uebersprungen —
     // und nicht mitten im Ast abgebrochen. Ein abgebrochener Baum sieht aus wie

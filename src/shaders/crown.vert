@@ -5,6 +5,7 @@ layout(location=2) in vec4 aData;    // size, rotY, seed, pad
 layout(location=3) in float iLodR;   // Radius, ab dem diese Karte das Laub dieses
                                      // Baumes eretzt (CPU: 10x Wuchshoehe)
 layout(location=4) in vec3 iCol;     // Blattfarbe DIESES Baum
+layout(location=5) in float iLodR2;  // Schaltweite der groebsten Stufe (20x Wuchshoehe)
 uniform mat4 uMVP;
 uniform vec3 uCamPos;
 uniform vec3 uCamTgt;
@@ -70,6 +71,14 @@ void main(){
   // waren unter 20 m ganz aus, die Blaetter hoerten schon viel frueher auf.
   // Im Schatten-Wurf ist uCamPos das Sonnenauge (63 m weg) -> dort immer 1.
   float near = (uLightFace > 0.5) ? 1.0 : smoothstep(iLodR * 0.90, iLodR * 1.10, d);
+  // Uebergang Karten -> Ganzbaum-Billboard (Runde 29): in Stufe 2 liegen beide im
+  // Puffer, das Billboard faellt ab 0,7 R2 ein, die Karten duennen bis 1,1 R2 aus.
+  // Laeuft ueber die Entfernung, also kontinuierlich und unabhaengig davon, wann
+  // der letzte Build passiert ist. (iLodR2 == 0: alter Generator -> ausblenden aus)
+  if(uLightFace < 0.5 && iLodR2 > 0.0){
+    if(aData.w >= 4.0) near *= smoothstep(iLodR2 * 0.70, iLodR2 * 0.95, d);
+    else               near *= 1.0 - smoothstep(iLodR2 * 0.85, iLodR2 * 1.10, d);
+  }
   // Build-Rand: Baeume werden bis RANGE=20 Zellen a 9 m gebaut (180 m halbe
   // Kantenlaenge, Ecken ~255 m). Bis 2026-10-07 endete das Blattdach bei 185 m,
   // die Staemme gingen aber bis ~255 m -> kahle Stummel in der Ferne.
