@@ -1500,6 +1500,7 @@ int main(int argc, char **argv) {
   GLint locCTime   = p_glGetUniformLocation(progCrown, "uTime");
   GLint locCMask   = p_glGetUniformLocation(progCrown, "uCrownMask");
   GLint locCFade   = p_glGetUniformLocation(progCrown, "uTreeFade");
+  GLint locCOld    = p_glGetUniformLocation(progCrown, "uTreeOld");
   GLint locCLFace  = p_glGetUniformLocation(progCrown, "uLightFace");
   GLint locLMVP    = p_glGetUniformLocation(progLeaf, "uMVP");
   GLint locLCam    = p_glGetUniformLocation(progLeaf, "uCamPos");
@@ -1507,6 +1508,7 @@ int main(int argc, char **argv) {
   GLint locLTime   = p_glGetUniformLocation(progLeaf, "uTime");
   GLint locLMask   = p_glGetUniformLocation(progLeaf, "uLeafMask");
   GLint locLFade   = p_glGetUniformLocation(progLeaf, "uTreeFade");
+  GLint locLOld    = p_glGetUniformLocation(progLeaf, "uTreeOld");
   // uAlbedoOnly steht in der Atlas-Kapture auf 1 und wird pro Programm NICHT
   // zurueckgesetzt — ohne dieses 0 hier lief die komplette Blatt-Rendrierung mit
   // roher Albedo (unbeleuchtet), waehrend die Kronen-Karten beleuchtet wurden.
@@ -2434,8 +2436,10 @@ int main(int argc, char **argv) {
       p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nCrownVertsCur);
       if(treeFadeNew < 1.0f && treeOldSet >= 0 && nCrownVertsOld > 0){
         if(locCFade >= 0) p_glUniform1f(locCFade, 1.0f - treeFadeNew);
+        if(locCOld >= 0) p_glUniform1f(locCOld, 1.0f);
         p_glBindVertexArray(vaoCrown[treeOldSet]);
         p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nCrownVertsOld);
+        if(locCOld >= 0) p_glUniform1f(locCOld, 0.0f);
       }
       if(locCFade >= 0) p_glUniform1f(locCFade, 1.0f);
       p_glDisable(GL_BLEND);
@@ -2458,8 +2462,10 @@ int main(int argc, char **argv) {
       p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInstCur);
       if(treeFadeNew < 1.0f && treeOldSet >= 0 && nLeafInstOld > 0){
         if(locLFade >= 0) p_glUniform1f(locLFade, 1.0f - treeFadeNew);
+        if(locLOld >= 0) p_glUniform1f(locLOld, 1.0f);
         p_glBindVertexArray(vaoLeaf[treeOldSet]);
         p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInstOld);
+        if(locLOld >= 0) p_glUniform1f(locLOld, 0.0f);
       }
       if(locLFade >= 0) p_glUniform1f(locLFade, 1.0f);
     }

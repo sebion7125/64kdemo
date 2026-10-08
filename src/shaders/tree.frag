@@ -111,8 +111,13 @@ float shadowAt(vec3 wp, vec3 n){
 void main(){
   if(uTreeMask > 0.5){ O = vec4(1.0, 0.0, 0.0, 1.0); return; }
   // Ueberblendung beim LOD-Wechsel: der alte Satz loest sich pro Weltwuerfel auf
-  // (uTreeFade 1 -> nichts wird verworfen, identisch zu vorher).
-  if(uTreeFade < 1.0 &&
+  // (uTreeFade 1 -> nichts wird verworfen, identisch zu vorher). Nah am Betrachter
+  // bleibt das Geruest hart — ein loesender Stamm sieht aus wie ein kaputter
+  // Stamm, und ferne Gerueste sind subpixelig, dort faellt der Wuerfelentscheid
+  // nicht auf. Grenzwert 30 m: unterhalb davon wechselt in der Praxis nie die
+  // Detailstufe (tier 3 reicht bis 10x Wuchshoehe ~ 60..90 m, der Sprung 3->2
+  // aendert nur die Segmentzahl, also ohnehin fast nichts am Bild).
+  if(uTreeFade < 1.0 && length(vPos - uCamPos) > 30.0 &&
      hash12(floor(vPos.xz * 3.0) + vec2(floor(vPos.y * 3.0) * 17.0)) > uTreeFade) discard;
   vec3 n = normalize(vNrm);
   vec3 rd = normalize(uCamPos - vPos);

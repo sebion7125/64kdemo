@@ -7,7 +7,8 @@ layout(location=4) in float iLodR;   // Radius, ab dem Karten dieses Baumes die
                                      // Einzelblaetter eretzen (CPU: 10x Wuchshoehe)
 uniform mat4 uMVP;
 uniform vec3 uCamPos;
-uniform float uTreeFade = 1.0;   // 0 = dieser Satz verschwindet (Ueberblendung)
+uniform float uTreeFade = 1.0;   // 0 = dieser Satz verschwindet (Ueberblendung)uniform float uTreeFade = 1.0;   // 0 = dieser Satz verschwindet (Ueberblendung)
+uniform float uTreeOld = 0.0;      // 1 = dieser Satz blendet AUS (der alte)
 uniform vec3 uLodCam;   // Referenzpunkt fuer den Entfernungs-LOD (IMMER die
                         // echte Kamera — auch im Schatten-Wurf, sonst cullt der
                         // Wurf sich selbst die Blaetter weg)
@@ -42,6 +43,8 @@ void main(){
   // Blatt aus — gleiche Technik wie der Bande um iLodR, also ohne Alpha-Blend
   // und ohne Abhaengigkeit von der Draw-Reihenfolge.
   keep *= uTreeFade;
+  // alter Satz nahe am Betrachter: identische Blatter liegen schon im neuen Satz
+  if(uTreeOld > 0.5 && uTreeFade < 1.0 && d < 30.0){ gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   if(hash12(vec2(iPos.x * 31.7, iPos.z * 17.3)) > keep) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   // Groessen-Kompensation wie bei EZ-Tree: die uebrigbleibenden Blaetter werden
   // leicht groesser (deren leafScale 1,25 in LOD1), NICHT kleiner. Der alte

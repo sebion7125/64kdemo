@@ -12,7 +12,9 @@ uniform float uTime;   // Wind (gleiches Boen-Feld wie Gras/Aeste/Blaetter)
 uniform float uLightFace; // 1 = Quad steht senkrecht auf der Blickrichtung des
                           // Wurf-Betrachters (Sonne) — nur im Schatten-Pass.
 uniform float uTreeFade = 1.0; // Ueberblendung beim LOD-Wechsel (Runde 27):
+                               // 0 = dieser Satz verschwindet, 1 = voll sichtbaruniform float uTreeFade = 1.0; // Ueberblendung beim LOD-Wechsel (Runde 27):
                                // 0 = dieser Satz verschwindet, 1 = voll sichtbar
+uniform float uTreeOld = 0.0;    // 1 = dieser Satz blendet AUS (der alte)
 out vec2 vUV;
 out vec3 vPos;
 out float vSeed;
@@ -72,6 +74,11 @@ void main(){
   // die Staemme gingen aber bis ~255 m -> kahle Stummel in der Ferne.
   float far = 1.0 - smoothstep(190.0, 250.0, d);
   vFade = near * far * uTreeFade;
+  // Beim Ueberblenden den alten Satz NAHE am Betrachter weglassen: dort steht
+  // dieselbe Karte schon im neuen Satz (gleicher Baum, gleicher Seed), das
+  // Doppel-Zeichnen kostet nur Full-Rate. Ferne Baeume, die neu in den
+  // Build-Radius gekommen sind, bleiben zum Einblenden erhalten.
+  if(uTreeOld > 0.5 && uTreeFade < 1.0 && d < 30.0){ gl_Position = vec4(2.0,2.0,2.0,1.0); return; }
   if(uLightFace < 0.5 && vFade < 0.002){ gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vUV = aOff * 2.0;
   vPos = p;
