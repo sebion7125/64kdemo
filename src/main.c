@@ -599,6 +599,50 @@ static void build_crown_tiles(void){
          IMP_COLS, IMP_COLS, IMP_TILEPX, IMP_COLS * IMP_TILEPX, IMP_COLS * IMP_TILEPX);
 }
 
+// Alpha-Map aus der Kachel selbst (Nutzer: "Kann man nicht eine alphamap auf
+// die quads legen, die die transparenz weicher machen?"). Beide Aufnahme-Paesse
+// (Blatt-Atlas und Impostor) zeichnen OHNE MSAA in ein normales Textur-FBO, die
+// Silhouetten sind deshalb hart: gemessen am Impostor-Atlas 211 161 Texel Alpha
+// 255, 837 282 Alpha 0, nur 133 dazwischen. Das ist die AA an fernen Karten
+// (tier 2) und Billboards. Wir unschaerfen pro Kachel die Alpha (Box, nur
+// innerhalb der Kachel, kein Ueberlauf in die Nachbarkachel) und ersetzen sie
+// durch eine weiche Mischung. Duenne Zweige bleiben stehen (Untergrenze).
+static void soften_alpha(GLuint tex, int size, int tilepx, int cols){
+  unsigned char *buf = (unsigned char *)malloc((size_t)size * size * 4);
+  unsigned char *bl  = (unsigned char *)malloc((size_t)size * size);
+  if(!buf || !bl){ free(buf); free(bl); return; }
+  p_glBindTexture(GL_TEXTURE_2D, tex);
+  p_glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+  const int R = 2;
+  for(int t = 0; t < cols * cols; t++){
+    int tx0 = (t % cols) * tilepx, ty0 = (t / cols) * tilepx;
+    for(int y = 0; y < tilepx; y++){
+      int gy = ty0 + y;
+      for(int x = 0; x < tilepx; x++){
+        int gx = tx0 + x, sum = 0, n = 0;
+        for(int dy = -R; dy <= R; dy++)
+          for(int dx = -R; dx <= R; dx++){
+            int sx = tx0 + x + dx, sy = ty0 + y + dy;
+            if(sx < tx0 || sx >= tx0 + tilepx || sy < ty0 || sy >= ty0 + tilepx) continue;
+            sum += buf[((size_t)sy * size + sx) * 4 + 3]; n++;
+          }
+        bl[(size_t)gy * size + gx] = (unsigned char)(sum / (n ? n : 1));
+      }
+    }
+    for(int y = 0; y < tilepx; y++)
+      for(int x = 0; x < tilepx; x++){
+        unsigned char *q = buf + ((size_t)(ty0 + y) * size + tx0 + x) * 4;
+        float a = q[3] * (1.0f / 255.0f), b = bl[(size_t)(ty0 + y) * size + tx0 + x] * (1.0f / 255.0f);
+        float sb = b * b * (3.0f - 2.0f * b);          // smoothstep(0,1,b)
+        float na = a + (sb - a) * 0.75f;
+        if(na < a * 0.60f) na = a * 0.60f;             // duenne Zweige nicht tilgen
+        q[3] = (unsigned char)(na * 255.0f + 0.5f);
+      }
+  }
+  p_glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size, size, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+  free(buf); free(bl);
+}
+
 // Atlas nach der Aufnahme: transparente Texel tragen RGB = 0 (Schwarz). Bei
 // LINEAR-Filterung und Mips wandert dieses Schwarz in die sichtbaren Kanten der
 // Nachbartexel -> schwarzer Rand an fernen Billboards (Nutzerbefund; gemessen:
@@ -630,6 +674,7 @@ static void impostor_fix(void){
   }
   p_glBindTexture(GL_TEXTURE_2D, crnTex);
   p_glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, A, A, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+  soften_alpha(crnTex, A, IMP_TILEPX, IMP_COLS);   // weiche Silhouette statt Saegezaahn
 }
 
 // FBO fuer die Kachel-Aufnahme (Farbe = crnTex, eigene Depth-Renderbuffer)
@@ -946,6 +991,7 @@ static void build_foliage_atlas(GLuint progLeaf){
       p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)n);
     }
   }
+  soften_alpha(folTex, FOL_ATLAS, FOL_TILEPX, FOL_TILES);   // weiche Kartenkanten
   // DEBUG (DEMO_FOLDUMP=1): Atlas als PPM — verifiziert, dass die Kacheln
   // wirklich Blattwerk enthalten und nicht leer sind.
   if(getenv("DEMO_FOLDUMP")){
@@ -953,6 +999,8 @@ static void build_foliage_atlas(GLuint progLeaf){
     if(buf){
       p_glBindTexture(GL_TEXTURE_2D, folTex);
       p_glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+      { FILE *g = fopen("/tmp/64kdemo_folatlas.rgba", "wb");
+        if(g){ fwrite(buf, 1, (size_t)FOL_ATLAS * FOL_ATLAS * 4, g); fclose(g); } }
       FILE *f = fopen("/tmp/64kdemo_folatlas.ppm", "wb");
       if(f){ fprintf(f, "P6\n%d %d\n255\n", FOL_ATLAS, FOL_ATLAS);
              unsigned char *row = (unsigned char*)malloc((size_t)FOL_ATLAS * 3);
