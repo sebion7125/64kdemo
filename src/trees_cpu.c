@@ -228,6 +228,10 @@ int ezKidPct = 100;
 static int ezWantLeaves = 1;
 // Kartengroesse der aktuellen Stufe (deren leafScale) und Karten-Stride.
 static float ezCardScale = 1.25f;
+// DEMO_CARDT0="<div> <scale>": Karten pro Baum (ezNSprig/div) und Kartengroesse
+// der groebsten Stufe — Sweep-Bank, damit die ferne Kronendeckung messbar an die
+// nahe angepasst werden kann.
+int treeCardDiv0 = 3; float treeCardScale0 = 1.45f;   // gemessen: deckt wie tier 3
 // Blattfarbe des gerade gebauten Baumes. Der EZ-Generator wuerfelte sie vorher
 // pro Terminalast (0,10..0,26 / 0,26..0,52 / 0,05..0,15) — deshalb sahen die
 // Distanz-Karten nach einem ANDEREN Baum aus als das Nah-LOD. Jetzt: eine Farbe
@@ -947,7 +951,7 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
   root.d[0] = 0.0f; root.d[1] = 1.0f; root.d[2] = 0.0f;
   ring_basis(&root.rg, 0.0f, 1.0f, 0.0f);
   ezNSprig = 0;
-  ezCardScale = (tier >= 2) ? 1.25f : 1.30f;   // muss VOR ez_grow stehen
+  ezCardScale = (tier >= 2) ? 1.25f : treeCardScale0;   // muss VOR ez_grow stehen
   ezDbgName = P->name; ezDbgUnit = unit; ezDbgR0 = root.rg.r; ezDbgNSec = 0;  ezDbgS = s; ezDbgHf = hf;
   ez_grow(0, &root, P, unit, seed, tier, btone, 0, 0);
   // Karten (Distanzstufe): ab 0,9 lodR uebernehmen sie das Laub, im Band um
@@ -967,7 +971,7 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
   // 34 % weniger Pixel ab als die nahe (gemessen 1060 vs 1618 Kronenpixel).
   // Gleiche Kartenanzahl wie tier 2 gleicht das aus; die eingesparten
   // Zweigroehren (meshBranch) finanzieren das.
-  int wantCards = ezNSprig / (tier >= 2 ? 2 : 3);   // tier 0: /3 deckt wie tier 3 (gemessen)
+  int wantCards = ezNSprig / (tier >= 2 ? 2 : treeCardDiv0);
   emit_sprig_quads(seed, wantCards);
 }
 
@@ -1204,7 +1208,7 @@ int trees_build_step(int maxTrees){
       printf("  Baum (%.1f,%.1f) H %.1f m  d %.1f m  R1 %.0f R2 %.0f  tier %d  "
              "Blaetter %d  Karten %d  Geruest %d  Farbe (%.2f,%.2f,%.2f)\n",
              cand[i].p[0], cand[i].p[2], H, d, R1, R2, tier,
-             nLeafInst - leafBefore, (nCrownVerts - quadBefore) / 6, nTreeVerts - vertBefore,
+             nLeafInst - leafBefore, nCrownVerts - quadBefore, nTreeVerts - vertBefore,
              ezLeafR, ezLeafG, ezLeafB);
     nTrees++;
   }
