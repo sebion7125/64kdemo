@@ -672,6 +672,11 @@ wenn es dort scharf genug wirkt (eine Zeile in `main.c`: `SHADOW_SZ`).
 
 Knöpfe dafür (alle Umgebungsvariablen, kein Neubauen nötig):
 
+**Tasten im laufenden Programm** (kein Neustart nötig zum Vergleichen):
+`1` = Ganzbaum-Billboard der gröbsten Stufe aus/an (stößt einen Baum-Neubau an),
+`2` = eigener Schilf-Pass aus/an. Verifiziert mit `xdotool key 1`: 3,59 % des
+Bildes ändern sich, im Log steht der Zustand.
+
 | Knopf | Wirkung |
 |---|---|
 | `DEMO_TREEFADE=<s>` | Dauer der LOD-Überblendung (Default 0,9 s; 0 = hartes Umschalten) |

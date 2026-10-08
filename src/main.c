@@ -516,6 +516,7 @@ static int drawSet = 0;
 static GLuint vboGrass = 0, vaoGrass = 0, vboGrassBase = 0;
 // Schilf-Pass (TODO 26): eigene Geometrie-Vorlage (Streifen) + Instanz-Puffer
 static GLuint vboReed = 0, vaoReed = 0, vboReedBase = 0;
+static int   treeForceRebuild = 0;   // Baum-Neubau von aussen anstossen (Taste 1)
 static float reedBaseTpl[REED_TEMPLATE_VERTS * 3];
 static int   reedTplVerts = 0;
 static float reedCX = 1e30f, reedCZ = 1e30f;
@@ -1552,7 +1553,7 @@ int main(int argc, char **argv) {
   GLuint progWire  = make_program(TREELINES_VS_SRC, TREELINES_FS_SRC, "wire");
   GLuint progTMesh = make_program(TREE_VS_SRC, TREE_FS_SRC, "tmesh");
   GLuint progGrass = make_program(GRASS_VS_SRC, GRASS_FS_SRC, "grass");
-  GLuint progReed = reedPassOn ? make_program(REED_VS_SRC, REED_FS_SRC, "reed") : 0;
+  GLuint progReed = make_program(REED_VS_SRC, REED_FS_SRC, "reed");  // laeuft auch, wenn der Pass aus ist (Taste 2)
   GLint locRMVP = -1, locRCam = -1, locRTime = -1, locRReedH = -1, locRReedD = -1,
       locRReedW = -1, locRMaxDist = -1, locRLFace = -1, locRAlb = -1, locRDbg = -1;
   if(progReed){
@@ -1884,6 +1885,11 @@ int main(int argc, char **argv) {
             grassSetSortOrder(dbgSortOrder);
             printf("DEBUG Zeichenreihenfolge: %s (neuer Build noetig: G aus/ein oder 1m bewegen)\n",
                    dbgSortOrder ? "hinten->vorn sortiert" : "Diamond-Order"); }
+          if (ks == XK_1){ treeBillboard0 = !treeBillboard0; treeForceRebuild = 1;
+            printf("Ganzbaum-Billboard groebste Stufe: %s (Baum-Neubau angestossen)\n",
+                   treeBillboard0 ? "AN" : "AUS"); }
+          if (ks == XK_2){ reedPassOn = !reedPassOn; reedCX = 1e30f;
+            printf("Eigener Schilf-Pass: %s\n", reedPassOn ? "AN" : "AUS"); }
           if (ks == XK_y) { dbgAlpha2Cov = !dbgAlpha2Cov;
             printf("DEBUG Alpha-to-Coverage: %s (wirkt nur mit MSAA an)\n",
                    dbgAlpha2Cov ? "AN" : "AUS"); }
@@ -2143,6 +2149,7 @@ int main(int argc, char **argv) {
     {
       static int builtT = 0, builtG = 0;
       static float tCX = 0, tCZ = 0;
+      if(treeForceRebuild){ tCX = 1e30f; treeForceRebuild = 0; }   // Taste 1
       // DEMO_TIERSWITCH=<sek>: nach n Sekunden hart auf tier 0 umstellen und einen
       // Build ausloesen — Messbank fuer die Ueberblendung (alter Satz tier 3,
       // neuer Satz tier 0, Kameraposition identisch).
