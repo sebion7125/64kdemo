@@ -1846,6 +1846,25 @@ int main(int argc, char **argv) {
             }
           printf("  BBox: Breite %.2f m  Hoehe %.2f m  Tiefe %.2f m  (Boden y=%.2f, Scheitel y=%.2f)\n",
                  mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2], mn[1], mx[1]);
+          // Laub-/Karten-Hoehenverteilung relativ zur Wuchshoehe — Vergleich mit
+          // der EZ-Tree-Referenz (node /tmp/ezcmp: Laub beginnt dort bei 24% der
+          // Baumhoehe, Stammanteil 55%).
+          { float lmn = 1e9f, lmx = -1e9f, cmn = 1e9f, cmx = -1e9f;
+            for(int i = 0; i < nLeafInst; i++){
+              float v = leafInst[i * LEAF_FLOATS + 1];
+              if(v < lmn) lmn = v;
+              if(v > lmx) lmx = v;
+            }
+            for(int i = 0; i < nCrownVerts; i++){
+              float v = crownVerts[i * CROWN_FLOATS + 1];
+              if(v < cmn) cmn = v;
+              if(v > cmx) cmx = v;
+            }
+            float H = mx[1] - mn[1];
+            printf("  Laub  y %.2f..%.2f m  = %.0f%%..%.0f%% der Baumhoehe  (%d Karten y %.2f..%.2f)\n",
+                   lmn, lmx, 100*(lmn - mn[1])/H, 100*(lmx - mn[1])/H,
+                   nCrownVerts, cmn, cmx);
+          }
           printf("  Preset %s  unit %.4f  Stammradius %.3f m  Spread %.2f  s=%.2f hf=%.2f\n",
                  ezDbgName, ezDbgUnit, ezDbgR0, treeEzSpread, ezDbgS, ezDbgHf);
           { printf("  Stammradien (m):");

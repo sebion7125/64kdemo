@@ -56,10 +56,12 @@ float c_terrainH(float px, float py);
 // werden zuerst gebaut, bei Cap-Uberlauf fehlt Geometrie also ganz hinten —
 // nicht vor der Kamera.
 #ifndef TREE_VERT_CAP
-#define TREE_VERT_CAP 3600000   // gemessen 2,40-2,70 Mio pro Wald (3 Kamerapositionen), Reserve
+#define TREE_VERT_CAP 5200000   // gemessen 3,60 Mio nach dem Terminalast-Fix
+                                // (EZ-Tree-Regel fehlte: 183 statt 103 Aeste pro
+                                // Eiche); 5,2 Mio = Reserve, 0 uebersprungene Baeume
 #endif
 #ifndef CROWN_CAP
-#define CROWN_CAP     2600000   // gemessen 295-300k Karten a 6 Vertices; Reserve auf 433k
+#define CROWN_CAP     3600000   // gemessen 2,49 Mio Karten nach dem Terminalast-Fix
 #endif
 #define WIRE_CAP      90000
 

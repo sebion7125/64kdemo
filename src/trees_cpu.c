@@ -659,9 +659,12 @@ static void ez_norm3(float *x, float *y, float *z){
 }
 
 // rekursiver Ast: Abschnitte bauen, Roehre senden, Kinder/Laub ansetzen
+// secOv/segOv: deren Terminalast-Regel ueberschreibt Section- und Segmentzahl des
+// Fortsetzungszweigs mit der des Elternastes (0 = Preset-Wert benutzen).
 static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
-                    float seed, int tier, float btone){
-  int S = P->sections[lvl], G = P->segments[lvl];
+                    float seed, int tier, float btone, int secOv, int segOv){
+  int S = (secOv > 0) ? secOv : P->sections[lvl];
+  int G = (segOv > 0) ? segOv : P->segments[lvl];
   // Detail wie bei EZ-Tree: NUR die Vernetzung aendert sich, nie die Struktur.
   // sectionStride = jeden N-ten Ring vernetzen (erster/letzter bleibt),
   // segmentFactor = radiale Segmente. Ganzz Leveln wegzuwerfen (unser altes
@@ -826,6 +829,19 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
     emit_cap(&sec[S].rg, sides, sw, cr, cg, cb2, 0.9f, (float)S * sl);
   }
 
+  // DER FEHLENDE MECHANISMUS (Runde 25): deren #growBranch schiebt fuer jeden
+  // Nicht-Terminalast einen Fortsetzungszweig an die Spitze — gleiche Richtung,
+  // Radius = Spitzenradius, Laenge length[lvl+1], Section-/Segmentzahl wie der
+  // Elternast. Referenz oak_medium (node /tmp/ezcmp): 183 Aeste, Stamm 37,2 von
+  // 65,6 Einheiten Baumhoehe. Ohne diesen Zweig endet bei uns der Stamm bei 55 %
+  // und die Krone wachst nur 18 statt 30 Einheiten ueber die Stamm spitze — das
+  // ist der "abgeschnittene Stamm" und das "zu wenig Begruente".
+  if(lvl < maxKid){
+    Sec cont = sec[S];
+    ez_grow(lvl + 1, &cont, P, unit, seed + 91.7f + (float)lvl * 5.1f,
+            tier, btone, S, G);
+  }
+
   if(lvl >= maxKid){
     // Terminalast: Laub geschichtet entlang des Astes (deren Laub-Schema).
     // Laubpositionen werden in ALLEN Stufen gesammelt — die Atlas-Karten sind
@@ -870,10 +886,19 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
   if(lvl == 0){                       // Messbank: Stammradien pro Abschnitt
     ezDbgNSec = S;
     for(int i = 0; i <= S && i < 13; i++) ezDbgR[i] = sec[i].rg.r;
+    if(treeTierLog)
+      printf("    Stamm: %d Abschnitte, Spitze (%.2f, %.2f, %.2f) Radius %.3f m, "
+             "Basisradius %.3f m\n", S,
+             sec[S].rg.p[0], sec[S].rg.p[1], sec[S].rg.p[2], sec[S].rg.r, base->rg.r);
   }
-  for(int i = 0; i < nkid; i++)
+  for(int i = 0; i < nkid; i++){
+    if(treeTierLog && lvl == 0)
+      printf("    Ast-Ansatz lvl1 %d: t %.2f  Ansatz (%.2f, %.2f, %.2f)\n", i,
+             (float)i / (float)(nkid > 1 ? nkid - 1 : 1),
+             kids[i].rg.p[0], kids[i].rg.p[1], kids[i].rg.p[2]);
     ez_grow(lvl + 1, &kids[i], P, unit,
-            seed + (float)lvl * 17.0f + (float)i * 3.13f, tier, btone);
+            seed + (float)lvl * 17.0f + (float)i * 3.13f, tier, btone, 0, 0);
+  }
 }
 
 static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int tier,
@@ -902,7 +927,7 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
   ezNSprig = 0;
   ezCardScale = (tier >= 2) ? 1.25f : 1.30f;   // muss VOR ez_grow stehen
   ezDbgName = P->name; ezDbgUnit = unit; ezDbgR0 = root.rg.r; ezDbgNSec = 0;  ezDbgS = s; ezDbgHf = hf;
-  ez_grow(0, &root, P, unit, seed, tier, btone);
+  ez_grow(0, &root, P, unit, seed, tier, btone, 0, 0);
   // Karten (Distanzstufe): ab 0,9 lodR uebernehmen sie das Laub, im Band um
   // lodR existieren beide und der Shader blendet sie um lodR +/-10 % um.
   // Dichte/Groesse wie deren LOD1/LOD2: jeder zweite / vierte Laubansatz.

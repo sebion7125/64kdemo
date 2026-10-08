@@ -568,6 +568,52 @@ der alten Add-on-Datei sind tot (404), das Add-on ist seit Blender 4.2 eine Exte
 Alpha-Test im Shader, Blatt-Laenge/Breite-Verhaeltnis ~2:1, Blattgroessen-Abstufung
 zum Zweigende hin, Kronenform ueber das Astlaengen-Profil.
 
+## Session 2026-10-08, Runde 25d (EZ-Tree headless ausgeführt — Terminalast gefehlt)
+
+**Nutzer:** „ich sehe 1 und zwar bei dem Stamm. der hört irgendwann weiter zu
+wachsen auf … Das original EZ Tree würde hier noch nicht abbrechen, oder? bei
+5 5 16 ist die kamera direkt in einem baum der abgeschnitten ist.“
+
+**Methode:** `npm install three` + `esbuild` → deren Generator läuft headless in
+node (`/tmp/ezcmp.mjs`, `/tmp/ezlvl.mjs`). Damit sind die Referenzwerte gemessen,
+nicht geraten.
+
+**Referenz oak_medium (5 Seeds):** 183 Äste, 2660 Laubkarten, Stamm 37,24 von
+65,6–67,7 Einheiten Baumhöhe (Stammanteil 55–57 %), Krone 41–46 Einheiten breit,
+Laub beginnt bei 22–29 % der Baumhöhe.
+
+**Fund:** deren `#growBranch` schiebt für **jeden** Nicht-Terminalast einen
+*Fortsetzungszweig* an die Spitze (`tree.js:424-438`): gleiche Richtung, Radius =
+Spitzenradius, Länge `length[level+1]`, **Section-/Segmentzahl wie der Elternast**.
+Deshalb hat die Referenz 4 „Stämme“ mit 9 Ringen: Stamm 0→37,2, dann 37,2→48,1,
+48,1→59,0, 59,0→65,6. Unser Port hatte das nicht → der Stamm endete bei 55 %
+Höhe mit Kappe, die Krone wuchs nur 18 statt 30 Einheiten über die Stamm spitze.
+Nebenbefund: deren `sectionLength`-Division durch `(levels-1)` ist toter Code
+(String-Vergleich `'Deciduous'` gegen den Typwert `'deciduous'`) — unser Port
+skaliert bereits korrekt ohne diese Division (gemessen: Abschnitt 4,655 = 37,24/8).
+
+**Fix:** `ez_grow()` bekommt `secOv/segOv` und schiebt den Terminalast selbst.
+
+**Messung danach (Baum bei 5,2/16, preset oak, unit 0,152):**
+
+| Größe | Referenz | wir vorher | wir jetzt |
+|---|---|---|---|
+| Baumhöhe | 9,97–10,29 m | 8,39 m | **10,19 m** |
+| Kronenbreite | 6,23–6,99 m | 6,43 m | **6,43 m** |
+| Laub beginnt bei | 22–29 % Höhe | 23 % | **18 %** |
+| Gerüst Vertices | — | 4 335 | 9 993 |
+
+**Kosten im Wald (Kamera 5/16, 960×540):** 648 Bäume, 4,08 Mio Gerüst-Vertices,
+2,91 Mio Karten, 1,05 Mio Einzelblätter, 393 MB Puffer, Rebuild 507 ms.
+Caps erhöht: `TREE_VERT_CAP 3,6 M → 5,2 M`, `CROWN_CAP 2,6 M → 3,6 M`
+→ **0 übersprungene Bäume** (vorher 140). Fern-LODs dominieren weiter
+(tier 0: 224 Bäume / 0,78 Mio Vertices) — das Billboard (Plan S5) ist der
+nächste Schritt, um diese Kosten zu halbieren.
+
+**Makefile-Falle:** `$(BIN)` hing nur an `$(SRC)`, nicht an den Headern — eine
+`scene.h`-Änderung wurde nicht gebaut (Cap blieb scheinbar wirkungslos).
+`HDRS = $(wildcard src/*.h)` ergänzt.
+
 ## Session 2026-10-08, Runde 25c (Budget erhoeht — Nutzer: „keine Loesung, Budget erhoehen, auch pro Baum")
 
 Pro Baum **gemessen** (DEMO_TREELOG, drei Kamerapositionen):

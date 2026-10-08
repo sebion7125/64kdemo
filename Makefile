@@ -6,6 +6,7 @@ CFLAGS  = -Os -Wall -Wextra -std=c11 -Ithird_party/include -no-pie -fno-asynchro
 LDFLAGS = -s -no-pie -Wl,-z,noseparate-code
 LDLIBS  = -ldl -lm -lpthread
 SRC     = src/main.c src/shaders_gen.c src/terrain_cpu.c src/trees_cpu.c src/grass_cpu.c
+HDRS    = $(wildcard src/*.h)   # ohne Header-Deps baut make bei scene.h-Aenderungen nicht
 BIN     = bin/64kdemo
 SHARE   = /media/sf_Quarantine/64kDemo
 
@@ -14,7 +15,7 @@ all: $(BIN)
 	@cp $(BIN) $(SHARE)/64kdemo
 	@echo "Kopiert nach $(SHARE)/64kdemo"
 
-$(BIN): $(SRC)
+$(BIN): $(SRC) $(HDRS)
 	@mkdir -p bin
 	$(CC) $(CFLAGS) -o $@ $(SRC) $(LDFLAGS) $(LDLIBS)
 	@sz=$$(stat -c%s $@); if [ $$sz -gt 65536 ]; then echo "WARNUNG: Binary $$sz Byte > 65536 (64k-Budget)"; else echo "Binary: $$sz Byte (64k-Budget ok)"; fi
