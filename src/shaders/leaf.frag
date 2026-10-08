@@ -93,9 +93,6 @@ void main(){
   // Ueberblendung als echtes Alpha (nicht gedithert): die Silhouette bleibt
   // harte Kante (MSAA), die Ueberblendung multipliziert das Alpha.
   // Depth-only-Nachpass: siehe crown.frag
-  // wie crown.frag: wer blendet, schreibt keine nutzbare Tiefe, sonst cullt ein
-  // halbtransparentes Blatt die opake Darstellung dahinter.
-  if(vAlpha < 0.999 && uDepthOnly < 0.5) gl_FragDepth = 1.0;
   if(uDepthOnly > 0.5){ if(vAlpha < 0.5) discard; }
   else if(vAlpha < 0.02) discard;
   if(uLeafMask > 0.5 && uLeafMask < 1.5){ O = vec4(1.0, 0.0, 0.0, 1.0); return; }

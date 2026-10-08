@@ -154,14 +154,6 @@ void main(){
   // Die Texturalpha selbst ist die weiche Kante, gemischt wird mit echtem Alpha.
   // Depth-only-Nachpass: Schwelle am SCHICHTGEWICHT vFade, nicht am pro-Pixel
   // cov — sonst kippt die Tiefenwrite mitten in der Blende hart um (Sprung).
-  // ZEICHENREIHENFOLGE / TIEFE (Nutzerbefund "zwei halb transparente Folien"):
-  // Eine Karte MITTE der Blende (vFade < 1) schrieb bisher Tiefe und cullte damit
-  // die opake Darstellung dahinter (Einzelblaetter). Im Bild: 0,5 Karte + 0,5
-  // Hintergrund statt 0,5 Karte + 0,5 Blatt. Gemessen als Delle mitten im Band
-  // (31,9 m: 1396 px, 31,1 m: 1177 px, 30,7 m: 1397 px).
-  // Loesung: wer gerade blendet, schreibt KEINE nutzbare Tiefe (FragDepth = fern).
-  // Die opake Schicht dahinter bleibt sichtbar; die blendende legt sich darueber.
-  if(vFade < 0.999 && uDepthOnly < 0.5) gl_FragDepth = 1.0;
   if(uDepthOnly > 0.5){ if(vFade < 0.5 || a < 0.5) discard; }
   // Schwelle schichtabhaengig: die Karten sind duenn gesäte Buschel und
   // brauchen eine niedrige Schwelle; die Ganzbaum-Kachel hat eine grosse

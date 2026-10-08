@@ -1133,6 +1133,39 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
   }
 }
 
+
+// ---- Sortierung von HINTEN nach VORNE (alpha-blendende Instanzen) ----
+// Karten und Einzelblaetter werden alpha-gemischt. In ungeordneter Reihenfolge
+// verdeckt ein ferner Baum einen nahen oder eine hintere Karte die vordere
+// (Nutzerbefund "fehlerhafte Verdeckung der Baeume"). Sortiert wird beim Bauen
+// — pro Frame waere es zu teuer. Der Baum selbst ist schon in der
+// Kandidatenreihenfolge (unten, absteigende Entfernung).
+typedef struct { float k; int i; } InstSortRec;
+#define SORT_MAX 16384
+static InstSortRec sortRec[SORT_MAX];
+static float *sortTmp = 0;
+static int cmp_far_first(const void *A, const void *B){
+  float ka = ((const InstSortRec*)A)->k, kb = ((const InstSortRec*)B)->k;
+  return ka > kb ? -1 : (ka < kb ? 1 : 0);
+}
+static void sort_inst_far_near(float *buf, int from, int n, int stride, const float *ref){
+  if(n < 2 || n > SORT_MAX || !ref) return;
+  if(!sortTmp) sortTmp = (float*)malloc((size_t)SORT_MAX * stride * sizeof(float));
+  if(!sortTmp) return;
+  for(int q = 0; q < n; q++){
+    const float *c = &buf[(size_t)(from + q) * stride];
+    float dx = c[0] - ref[0], dy = c[1] - ref[1], dz = c[2] - ref[2];
+    sortRec[q].k = dx * dx + dy * dy + dz * dz; sortRec[q].i = q;
+  }
+  qsort(sortRec, (size_t)n, sizeof(InstSortRec), cmp_far_first);
+  for(int q = 0; q < n; q++)
+    memcpy(&sortTmp[(size_t)q * stride], &buf[(size_t)(from + sortRec[q].i) * stride],
+           (size_t)stride * sizeof(float));
+  for(int q = 0; q < n; q++)
+    memcpy(&buf[(size_t)(from + q) * stride], &sortTmp[(size_t)q * stride],
+           (size_t)stride * sizeof(float));
+}
+
 static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int tier,
                         float d, float R1){
   (void)d; (void)R1;   // frueher steuerte die Distanz noch, ob Karten gebaut werden
@@ -1382,6 +1415,18 @@ void trees_build_begin(float tx, float tz){
       }
     }
     TreeCand t = cand[0]; cand[0] = cand[best]; cand[best] = t;
+    // ZEICHENREIHENFOLGE: Baeume von HINTEN nach VORNE (absteigende Entfernung
+    // zum Kamerabezugspunkt). Karten und Einzelblaetter werden alpha-gemischt;
+    // in ungeordneter Pufferreihenfolge verdeckt ein ferner Baum einen nahen
+    // (Nutzerbefund "fehlerhafte Verdeckung der Baeume"). Die Instanzreihenfolge
+    // entsteht beim Bauen, Sortieren pro Frame waere zu teuer. Der Fokusbaum
+    // (Index 0, Ein-Baum-Test) bleibt vorn.
+    {
+      TreeCand *cs = cand + 1; int cn = nc - 1;
+      for(int a = 1; a < cn; a++)
+        for(int b = 0; b < cn - a; b++)
+          if(cs[b].d2 < cs[b+1].d2){ TreeCand q = cs[b]; cs[b] = cs[b+1]; cs[b+1] = q; }
+    }
     nc = 1;
   }
   treeNCand = nc;
@@ -1469,6 +1514,16 @@ int trees_build_step(int maxTrees){
     treeCapTree = treeCapCrown = treeCapLeaf = treeCapSprig = 0;
     if(treeGenMode) gen_tree_ez(cand[i].p[0], cand[i].p[1], cand[i].p[2], cand[i].s, tseed, tier, d, R1);
     else            gen_tree (cand[i].p[0], cand[i].p[1], cand[i].p[2], cand[i].s, tseed, tier);
+    // Karten und Einzelblaetter DIESES Baums von hinten nach vorne (siehe oben).
+    {
+      // Bezugspunkt: die Kamera des Build-Wunsches; ohne sie das Bau-Zentrum
+      // (sonst wurde nach Abstand zum Weltursprung sortiert -> falsche Reihenfolge).
+      float sref[3] = { treeReqLodValid ? treeReqLod[0] : treeReqTX,
+                        treeReqLodValid ? treeReqLod[1] : 0.0f,
+                        treeReqLodValid ? treeReqLod[2] : treeReqTZ };
+      sort_inst_far_near(crownVerts, quadBefore, nCrownVerts - quadBefore, CROWN_FLOATS, sref);
+      sort_inst_far_near(leafInst,  leafBefore, nLeafInst  - leafBefore,  LEAF_FLOATS,  sref);
+    }
     // Sicherheitsnetz: die Budget-Schaetzung oben ist pro Baum nur geschaetzt.
     // Hat der Baum trotzdem ein Cap gerissen, wird er KOMPLETT zurueckgerollt —
     // ein Baum, der mitten im Ast endet, zeigt eine offene Ringkante (eine

@@ -2958,3 +2958,27 @@ Ganzer Anflug 140->3 m (1370 Frames, 11 Bauten) nach dieser Runde: groesste
 Deckungs-Delle -3,65 % bei 13,2 m (vorher -8,16 % bei 31,1 m), Abdeckungsfehler
 der Gewichte 0,77 %, Abdeckungssteigung 0,046/m (Schranke 0,223), 0 Pump-Frames,
 LT-ERGBNIS OK. Selbsttest: ALLE PRUEFUNGEN OK.
+
+## Verdeckung: Sortierung von hinten nach vorne, FragDepth-Hack zurueck (2026-10-08, 4. Runde)
+
+Der `gl_FragDepth = 1.0`-Hack (blendende Fragmente schreiben keine nutzbare
+Tiefe) war falsch: danach verdeckt die blendende Schicht gar nichts mehr —
+fehlerhafte Verdeckung der Baeume (Nutzerbefund). Zurueckgenommen.
+
+Stattdessen Sortierung beim Bauen (billig, pro Frame waere sie zu teuer):
+* Kandidaten absteigend nach Entfernung zum Kamerabezugspunkt (Index 0 =
+  Fokusbaum bleibt vorn) -> Baeume hinten vor vorn, alle drei Puffer.
+* Karten und Einzelblaetter INNERHALB jedes Baums ebenfalls hinten vor vorn
+  (sort_inst_far_near, qsort auf Distanz zum Kamerabezugspunkt; ohne gueltige
+  Kamerareferenz wird das Bau-Zentrum benutzt — sonst wurde nach Abstand zum
+  Weltursprung sortiert).
+
+Bildmessung ganzer Anflug 140->3 m: groesste Deckungs-Delle -4,99 % bei 30,9 m
+(mit dem Hack -3,65 %, aber zu dem Preis der kaputten Verdeckung; vor der
+Sortierung -8,16 %). Geometrie unveraendert (1 543 533 Geruest, 446 047 Karten,
+642 330 Blaetter, 0 uebersprungene Baeume).
+
+Karten-Parameter sind NICHT die Loesung der Restdelle (Sweep 45->20 m,
+div/scale): 3/2,0 -> -5,95 %, 2/2,0 -> -5,92 %, 3/2,6 -> -11,03 %,
+2/3,2 -> -14,34 %. Groessere Karten machen es schlechter, die Ursache liegt also
+nicht in der Kartenflaeche.
