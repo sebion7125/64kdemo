@@ -1696,7 +1696,10 @@ int main(int argc, char **argv) {
   // Wald = schneller Build, damit die Ueberblendung messbar wird.
   { const char *br = getenv("DEMO_TREEBUILDRANGE"); if (br) treeBuildRange = atoi(br); }
   { const char *td = getenv("DEMO_TREEDEBUG"); if (td) treeDbg = atoi(td); }
-  { const char *nb = getenv("DEMO_NOBB0"); if (nb) treeBillboard0 = atoi(nb); }
+  // DEMO_NOBB0=1 -> tier 0 wieder mit Einzelkarten. (Verdreht gefunden:
+  // treeBillboard0 = atoi(nb) liess den Billboard AN, gemessen an identischen
+  // Karten-Zahlen: Stufe 0 364 Karten mit und ohne den Knopf.)
+  { const char *nb = getenv("DEMO_NOBB0"); if (nb) treeBillboard0 = atoi(nb) ? 0 : 1; }
   { const char *bc = getenv("DEMO_BB0CARDS"); if (bc) treeBB0Cards = atoi(bc) < 0 ? 0 : atoi(bc); }
   { const char *t2 = getenv("DEMO_T2");
     if(t2){ int a = 3, b = 3, c = 4;

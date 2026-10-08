@@ -1,0 +1,173 @@
+<!-- Vorschau ohne Modellaufruf: Züge, die noch nicht im Stand stehen, erscheinen als Einzeilen. -->
+# Session protocol
+Older turns of this session were condensed. The state of work covers the oldest part; the most recent condensed turns follow in detail with the user message verbatim. Tools: protocol_search finds earlier turns by keywords; protocol_turn returns the original text of a turn by number. Look things up instead of guessing details that are not stated here.
+
+## State of work
+(nothing condensed yet)
+
+## Active rules from the user
+- understand status quo and discuss plans before changing code; verify with measurements and cite sources
+- for test runs 10 s runtime is enough, a screenshot exists by then (also in the VM)
+- Budgets erhoehen, nicht Geometrie ueberspringen; auch pro Baum
+- raise budgets (global and per-tree) instead of skipping geometry; compare against original EZ-Tree code when behaviour differs
+- verify with landscape switched off (DEMO_NOTERRAIN) when measuring tree colour
+- verify leaf colour with landscape switched off or by same-camera forced-tier diff, not with full-scene green masks
+- test runs need only 10 s runtime, a screenshot exists by then (also in the VM)
+- verify colour/LOD measurements with terrain off or with an identical-camera difference mask (green image masks in the full view include grass and invalidate means)
+
+## Open items
+- user should run the demo on their GPU host and walk through the trees to judge the stutter (VM frame time dominated by llvmpipe)
+- crown cards still 6 corner instances per card (312 B) — instancing not yet done
+- TODO 23 whole-tree billboard for far trees
+- leaf palette choice — user has DEMO_LEAFPAL=aktuell|saftig|wald|frisch|tief and DEMO_LEAFHSV="hmin hmax smin smax vmin vmax"; default currently "wald" (rendered 70,128,47)
+- far crown still covers ~20% fewer crown pixels than near (tier 0 wantCards ezNSprig/3)
+- tube seams in branch meshes (parallel transport frames), bark texture improvement
+
+## Files touched (most recent first)
+src/scene.h [T23], src/trees_cpu.c [T23], src/main.c [T23], STATUS.md [T23], src/shaders/crown.vert [T16], src/shaders/leaf.vert [T16], src/shaders/crown.frag [T16], src/shaders/leaf.frag [T16], STATUS.md (commits 7e44efc, 1a897c5, 8b89396) [T16], Makefile [T13], src/main.c (all committed as 5c0aa56 and 24389dc) [T13], src/trees_cpu.c (Stamm-/Ast-Ansatz-Debug-Prints, uncommitted) [T10], /tmp/ezcmp.mjs [T10], /tmp/ez-tree (node_modules added) [T10], earlier commit 9151618 emit_cap for non-terminal branch ends [T10], /tmp/test_lod.c [T5], /tmp/test_full.c [T5], /tmp/test_lodbudget.c [T3], /tmp/test_bbox.c [T3], /tmp/test_sprig.c [T3], /tmp/test_budget2.c [T3], /tmp/ez-tree (clone) [T3], /tmp/ez-tree (Clone) [T2], /tmp/tier{3,2,0}.ppm [T2], /tmp/64kdemo_folatlas.ppm [T2]
+
+## Recent turns in detail
+### Turn 1
+User: Wir arbeiten an dem EZ-Tree Clone weiter: lies STATUS.md
+Result: STATUS.md read and summarized; current state is EZ-Tree port done (TODO 27), next open item is TODO 22 (cluster texture per leaf colour). Build verified clean, binary 129888 B.
+Decision: next step proposed = TODO 22: atlas tile content = one real leaf cluster (our leaf silhouette) instead of synthetic foliage_patch(); per-tree leaf colour applied as tint in crown.frag (CROWN_FLOATS 9->12) instead of baking colour variants
+Decision: awaiting user go-ahead on tint-vs-baked-colour-variant before implementing
+Files: none
+
+### Turn 2
+User: leider sind wir noch nicht so weit. Das LOD ist noch eine totale katastrophe. Der baum verliert alle blätter, wenn man sich entfernt und die quads, die er stattdessen in die krone legt passen überhauptnicht. bisher sehen die bäume nur aus der nähe recht okay aus. wir müssen also nochmal genau gucken was wir in welcher Form von EZ-Tree übernehmen können und was nicht. Außerdem sollte die entfernung für das best aufgelöste LOD mindestens doppelt so hoch sein. außerdem ist auch der LOD algo offenbar mit einer sehr seltsamen hysterese logik ausgestattet. Bevor du weiter pfuscht müssen wir den status quo verstehen und pläne diskutieren.
+Result: Status quo des Baum-LODs gemessen und erklärt, ohne Repo-Änderung. Laub existiert nur in tier 3 (trees_cpu.c:817), tier 2/0 = 0 Blätter; Kronen-Quads sind unter 20 m aus; pro fernem Baum nur 22 Quads à ~1 m. Region: tier3=0, tier2=4, tier0=670. ez-tree geklont (/tmp/ez-tree) und LOD-Semantik belegt.
+Decision: Plan A (Laubkarten in allen Stufen, Buschel-Textur, Dichte per Hash-Cull im Shader, Schaltweiten 2,7×/6,7× Wuchshöhe, camPos statt camTgt) vorgeschlagen; 5 offene Entscheidungsfragen an Nutzer
+Files: /tmp/test_lod.c, /tmp/test_lodbudget.c, /tmp/test_bbox.c, /tmp/test_sprig.c, /tmp/ez-tree (Clone), /tmp/tier{3,2,0}.ppm, /tmp/64kdemo_folatlas.ppm
+
+### Turn 3
+User: die frage ist ob büschel-/Rebenkarte uns nicht die fähigkeit zur detaillierten windanimation einschränkt. Tier 3 mit den individuellen blättern wäre schon schön ine der nähe zu haben. Wie gesagt die konkreten entfernungen für den tier wechsel sollten angepasst werden. volle dichte bis 10x wuchshöre fände ich schön als testwert. stride 2 wäre dann bis 20 wuchshöhe ca. 100m und dahinter das billboard. Damit würde ich mit meinen ergänzungen für Plan A votieren.
+Result: Analysed the LOD status quo with measurements (no repo changes): leaves exist only in tier 3 (trees_cpu.c:817), crown quads are invisible below ~20 m, tier uses camTgt (+10 m) and is frozen per build; 670/674 trees render as 22 atlas quads. Answered the wind question (cards can bend/flutter; single leaves are ~5 px at 10×H) and costed 10×/20× Wuchshöhe.
+Decision: Plan A accepted with user's radii: full density to 10×H, stride 2 to 20×H, then whole-tree billboard; tier 3 keeps individual leaves
+Decision: proposed order S0 fix measurement bank, S1 caps/camPos/kidPct/tier bands, S2 cluster atlas + per-tree colour, S3 card bending, S4 continuous blend + hysteresis 0.05, S5 billboard
+Files: /tmp/test_lod.c, /tmp/test_lodbudget.c, /tmp/test_bbox.c, /tmp/test_sprig.c, /tmp/test_budget2.c, /tmp/ez-tree (clone)
+
+### Turn 4
+User: Mach mal wie du meinst. klingt alles vernünftig.
+Result: Adjusted tree LOD/foliage generation in /home/xvm/Projekte/64kDemo: global kidPct, camera LOD reference, focus tree, leaf/card rules.
+Decision: User approved assistant's plan.
+Decision: Branch structure stays identical across tiers; child count uses global DEMO_KIDPCT.
+Decision: LOD reference uses real camera; DEMO_ONETREE uses treeFocus.
+Decision: Leaves in all tiers; single leaves until 1.1 lodR, cards from 0.9 lodR.
+Files: /home/xvm/Projekte/64kDemo/src/scene.h, /home/xvm/Projekte/64kDemo/src/trees_cpu.c, /home/xvm/Projekte/64kDemo/src/main.c
+
+### Turn 5
+User: mach weiter.
+Result: Implemented CPU-side LOD logic for trees (skeleton, leaves, cards) with distance-based switching. Updated shaders to accept per-instance LOD radii. Fixed build errors and adjusted buffer caps in scene.h based on test measurements.
+Decision: LOD thresholds set to 10x and 20x tree height.
+Decision: Card scale varies by tier (1.25/1.30).
+Decision: TREE_VERT_CAP raised to 2700000; CROWN_CAP to 300000.
+Files: src/shaders/crown.vert, src/shaders/leaf.vert, src/trees_cpu.c, src/scene.h, /tmp/test_lod.c, /tmp/test_full.c
+
+### Turn 6
+User: da ist ein bisschen was schief gegangen. beim lesten bild warst du hinter einem berg und der baum war nicht mehr sichtbar. ich weiß nicht ob dein LOD in der nicht debug fassung schon laufen sollte, aber die LODS haben sich verbessert. nur sind die blätterquads immer noch mit falsch gefärbten blättern gezeichnet. das muss ja wirklich ein LOD von dem speziellen individuellen baum sein. und in großer entfernung ist der stamm weg, aber die blätter noch da. sollte das nicht ein quad von dem ganzen baum sein?
+[while the assistant worked] außerdem, wenn du solche tests machst. reichen 10 s laufzeit dicke. bis dahin hast du einen screenshot. auch hier in der vm...
+[while the assistant worked] was genau machst du gerade? warum sind die blätter rot?
+[while the assistant worked] achtung da war ein hindernis.
+[while the assistant worked] kannst du mal kurz pause machen?
+Result: S2 implemented — atlas tile is now one neutral leaf cluster, per-tree leaf colour travels in the crown instance (CROWN_FLOATS 10->13) and is multiplied in crown.frag; card lighting matches leaf.frag. Clean image-diff measurement at 16 m: leaves (119,145,117) vs cards (131,157,123).
+Decision: earlier "cards 2x brighter" numbers were measurement errors — mask debug painted discarded texels too; mask returns moved after discard in leaf.frag/crown.frag
+Decision: user asked for a pause; last main.c edit (obstacle-free view direction in tree_jump for DEMO_TREEDIST) is unbuilt and unverified
+Files: src/main.c, src/scene.h, src/trees_cpu.c, src/shaders/crown.frag, src/shaders/crown.vert, src/shaders/leaf.frag, src/shaders/leaf.vert
+
+### Turn 7
+User: dann erklär mir mal bittem, wie du jetzt sicher stellst, dass die blattfarbe bei allen LODs gleich bleibt?
+Result: Explained the leaf-colour chain across LODs (single per-tree source ezLeafR/G/B in trees_cpu.c:888 → leaf instances and card instances d[10..12] → vCol in both shaders; atlas baked neutral via foliage_patch:986 + uAlbedoOnly) and how it is verified. S2 code changes are built and measured; one main.c edit (blind-free DEMO_TREEDIST view direction in tree_jump) is still unbuilt.
+Decision: leaf colour lives only in the instance, atlas stays colour-neutral
+Decision: crown.frag lights cards like leaves (two-sided diffuse + translucency), no sphere shading
+Decision: mask diagnostics (DEMO_LEAFMASK/DEMO_CROWNMASK) must return after discard; earlier colour numbers were measurement artifacts
+Decision: colour comparison measured by image diff of two runs, not by masks
+Files: src/trees_cpu.c, src/main.c, src/scene.h, src/shaders/crown.frag, src/shaders/crown.vert, src/shaders/leaf.frag, src/shaders/leaf.vert
+
+### Turn 8
+User: also das verifizieren solltest du machen indem du die landschaft noch abschaltest. nicht mehr als 8 sekunden pro lauf timeout setzt . ich sehe in der fertigen version immer noch starke abweichungen zwischen den LODs.
+[while the assistant worked] interessant. in deiner 1 baum test situation funktioniert es und die farbe sieht gut aus.
+[while the assistant worked] aber in der normalen version leider nicht.
+[while the assistant worked] Versuch weiter deine todo list abzuarbeite. Alles relevatne hast du ja in der STATUS.md ...
+[while the assistant worked] (also wenn du mit dieser aufgabe fertig bist meinte ich natürlich)
+Result: Root cause of the LOD colour mismatch found and fixed — uAlbedoOnly stayed at 1 after the atlas capture, so the whole leaf pass rendered unlit raw albedo. Leaf vs card at 16 m went from (39,82,11)/(74,104,42) to (94,130,48)/(74,104,42); sweep 16/40/60/100 m now (94,130,48)→(87,121,60).
+Decision: cards are now emitted in every tier (tier-3 trees 0 -> 51096 cards, total 300000), because the tier is only rebuilt every 12 m of camera movement
+Decision: atlas tile = colour-neutral leaf cluster (9..13 leaves, 27% coverage), per-tree leaf colour carried in the card instance (CROWN_FLOATS 10 -> 13) and multiplied in crown.frag
+Decision: measurements require DEMO_FREEZE (wind shifts geometry) and fresh-screenshot checks; mask diagnostics must run after discard
+Decision: next TODO 23 = two crossed trunk billboards (base to crown start) emitted in the skeleton pass
+Files: src/main.c, src/scene.h, src/trees_cpu.c, src/shaders/crown.frag, src/shaders/crown.vert, src/shaders/leaf.frag, src/shaders/leaf.vert, STATUS.md (commits 7e44efc, 1a897c5, 8b89396)
+
+### Turn 9
+User: mir erschließt sich noch nicht warum dieser albedofehler zunächst nur bei mir zu sehen war, wenn die ganze landschaft voller bäume war. kannst du das erklären? Dann sind jetzt die blätter alle ziemlich herbslich und ziemlich blass. ich vermisse schönes sattes grün. UND: das navigieren in der welt stockt jetzt wegen der LOD wechsel der Bäume. muss man das ähnlich wie beim gras kontinuierlich verteilen? evtl auch ein eigener thread?
+[while the assistant worked] und ich sehe lauter bäume mit abgeschnittenem stamm oben in der krone. außerdem sind mit die bäume insgesamt zu wenig begrünt. Das könnte aber auch an den parametern, die du bei den bäumen würfelst liegen.
+[while the assistant worked] vergleich mit dem code von EZ Tree wäre angebracht.
+[while the assistant worked] ein bisschen sieht das ja so aus, als ob die baum generierung vorzeitig abgebrochen wird
+[while the assistant worked] ich sehe weniger, aber immer noch abgebrochene bäume
+[while the assistant worked] das ist keine lösung. du musst das budget erhöhen. auch das pro baum.
+[while the assistant worked] also ich sehe immer noch geskippte äste
+Result: Budgets auf gemessene Maxima erhoeht (0 Cap-Treffer, 0 uebersprungene Baeume an 3 Kamerapositionen); nicht-terminale Astenden im EZ-Generator verschlossen (emit_cap, +6,9 % Geruest); Rueckfrage an Nutzer gestellt, welche Art "geskippter Ast" gemeint ist.
+Decision: Budget erhoehen statt Baeume ueberspringen (Nutzer); pro Baum gemessen tier3 30 096 Vertices / 12 300 Blatt-Instanzen; EZ_SPRIGCAP 4096->16 384; toter Code ezTip*/EZ_TIPCAP entfernt; Commits c826b81, 9151618
+Files: src/scene.h, src/trees_cpu.c, src/main.c, STATUS.md
+
+### Turn 10
+User: ich sehe 1 undzwar bei dem stamm. der hört irgendwann weiter zu wachsen auf. Ich sehe du hast das loch jetzt geschlossen, aber der baum ist trotzdem noch unfertig. Das original EZ Tree würde hier noch nicht abbrechen, oder? bei 5 5 16 ist die kamera direkt in einem baum der abgeschnitten ist.
+Result: Ran the EZ-Tree reference generator headlessly (npm install three + esbuild bundle) and dumped oak/aspen/ash medium geometry: trunk share of total height 55 %/75 %/54 %, leaf-card counts 2660/528/2720. Our oak at (5.2,16) matches their oak exactly (unit 0.1518, trunk 5.65 vs 5.87 m, tip radius 0.0577 vs 0.058 m) — so the trunk proportions are faithful, not truncated.
+Decision: cut-trunk complaint at camera (5,5,16) still unexplained; reference comparison shows oak trunk = 55 % of tree height
+Files: src/trees_cpu.c (Stamm-/Ast-Ansatz-Debug-Prints, uncommitted), /tmp/ezcmp.mjs, /tmp/ez-tree (node_modules added); earlier commit 9151618 emit_cap for non-terminal branch ends
+
+### Turn 11
+User: mach weiter
+No protocol was written for this turn; condensed transcript (start and end kept):
+(no further content)
+
+### Turn 12
+User: mach weiter
+Result: EZ-Tree headless lauffähig gemacht (npm+esbuild) und die Referenz gemessen; unser Port ließ den Terminalast/Fortsetzungszweig fehlen — deshalb der "abgeschnittene" Stamm. Fix eingebaut, Baumhöhe jetzt 10,19 m (Referenz 9,97–10,29 m), 0 übersprungene Bäume.
+Decision: Referenzwerte werden aus deren Code gemessen (node/esbuild), nicht geschätzt
+Decision: TREE_VERT_CAP 5,2 Mio, CROWN_CAP 3,6 Mio (Nutzer: Budget erhöhen, auch pro Baum)
+Decision: nächste Schritte = tier-0-Billboard (S5) und inkrementeller Rebuild gegen 495-ms-Stocken
+Files: src/trees_cpu.c, src/main.c, src/scene.h, Makefile, STATUS.md
+
+### Turn 13
+User: hast du die blattfarbe noch auf dem schirm?
+Result: Leaf-colour consistency re-measured across tree LODs. Crown colour is identical in all tiers (tier3 (72,110,29) sat 0.73, tier2 (72,110,29), tier0 (73,110,30)) at 40 m with DEMO_TIER forced and terrain off. The visible far-LOD difference is coverage, not tint: tier 0 paints 1060 crown px vs 1618 (−34 %), explained by wantCards = ezNSprig/4 with CARDSCALE 1.30 (coverage 0.42 vs 0.78). Earlier "cards brighter/bluer" numbers were contaminated by grass in the pixel mask.
+Decision: leaf colour chain confirmed correct (single source ezLeafR/G/B, neutral atlas, same lighting in leaf.frag/crown.frag)
+Decision: remaining LOD difference is crown coverage; proposed fix wantCards = ezNSprig/2 for tier 0 (+~19k cards) or ezNSprig/3 with CARDSCALE 1.45 — awaiting user choice
+Decision: two residual shader-term differences (thru view-dir vs normal; leaf midrib/vein/edge modulation) measured <1 channel, not chased
+Files: STATUS.md, Makefile, src/scene.h, src/trees_cpu.c, src/main.c (all committed as 5c0aa56 and 24389dc)
+
+### Turn 14
+User: ja das angleichen der farbe hatten wir in diesem chat schon. aber die farbwahl gefällt mir noch nicht so...
+Result: Leaf-colour chain re-verified as consistent across LODs (tier3/2/0 crown colour Δ ≤ 1 per channel); the remaining far-crown difference is coverage (tier 0 paints 34% fewer crown pixels), not colour. Leaf palette was made tunable and a new default palette "wald" was chosen and committed (d399558).
+Decision: Colour matching across LODs is considered done; remaining user complaint is palette choice only
+Decision: Palette is now HSV ranges ezHueMin/Max, ezSatMin/Max, ezValMin/Max in src/trees_cpu.c, tunable via DEMO_LEAFPAL=aktuell|saftig|frisch|tief|wald or DEMO_LEAFHSV="hmin hmax smin smax vmin vmax"
+Decision: Compiled default palette = "wald" (hue 0.28-0.36, sat 0.65-0.88, val 0.38-0.58) -> rendered (70,128,47), sat 0.63, G/R 1.82; old default rendered (72,110,29)
+Decision: Old hue lower bound 72 deg (olive/yellow-green) identified as cause of "herbstlich/blass"; raised to 101 deg
+Decision: Colour verification must isolate the tree (terrain off or same-camera DEMO_TIER diff mask) — green-pixel masks over the full scene include grass and invalidate numbers
+Decision: Measured palette menu reported to user; user still to pick which palette becomes default
+Files: src/trees_cpu.c, src/main.c, src/scene.h, STATUS.md
+
+### Turn 15
+User: dann sollten wir uns als nächstes mal um das stocken kümmern.
+No protocol was written for this turn; condensed transcript (start and end kept):
+(no further content)
+
+### Turn 16
+User: mach weiter
+Result: Built a stutter measurement bank (frame-time median/p95/max every 2 s, DEMO_WALK="vx vz" auto camera path) and measured: tree rebuild = 350 ms generate + 140 ms upload = 490 ms, synchronous, triggered by |camTgt − buildCenter| > 12 m; frame time scales with geometry volume (LODRSCALE 0.3/1.0/2.0 → 1179/1735/2605 ms in VM, 640x360). First measure implemented: tier 0 keeps only the trunk (meshBranch = !(tier==0 && lvl>0)) and gets more cards (wantCards ezNSprig/3) → skeleton 4.08M → 2.83M verts (−31 %), far-vs-near crown coverage −34 % → −20 % (1298 vs 1618 px at 40 m), colour identical (69/127/46 vs 70/128/47), 0 skipped trees. Committed 78ece61.
+Decision: leaf palette default now "wald" (hue 101–130°, sat 0.65–0.88, val 0.38–0.58 → rendered 70/128/47); DEMO_LEAFPAL=aktuell|saftig|frisch|tief|wald and DEMO_LEAFHSV="hmin hmax smin smax vmin vmax" tune it at runtime (commit d399558)
+Decision: leaf colour is identical across LODs (Δ ≤ 1/channel); remaining far-LOD difference is coverage, not tint
+Decision: next step = split the tree rebuild; user must choose A (spread over frames in main thread) or B (worker thread like grass, grass_build_begin/step/finish pattern); both need a second buffer set (~700 MB); assistant recommends B
+Files: src/main.c, src/trees_cpu.c, src/scene.h, STATUS.md
+
+### Turn 17
+User: ich nehme B
+Result: Implemented plan B against the tree-rebuild stutter: tree generation moved to a worker thread with CPU double buffers, two VBO/VAO sets, and sliced upload with a time budget. Measured: frame-blocking at LOD rebuild dropped from 490 ms (350 generate + 140 upload) to 0 ms, upload slices 3–20 ms/frame; image after 32 m camera walk identical to static run (2386 tree-green px, Y 0..333), 648 trees, 0 cap hits, 0 skipped trees. Committed b73bee5.
+Decision: Worker-thread build (variant B) chosen by user, mirroring grass_build_begin/step/finish + request/busy/finished_snapshot pattern
+Decision: Double CPU buffers swapped in trees_build_finish() under mutex ("finish then latest", no restart mid-build)
+Decision: Two VBO/VAO sets (vboTree[2]/vaoTree[2], crown, leaf) with drawSet; drawSet flips only after the last upload slice so the GPU never sees half-uploaded geometry
+Decision: Upload budget = 25% of last frame time clamped to 3..20 ms, UP_BYTES 6 MB per slice (fixed 24 MB/frame was wrong: new set took over only after ~15 frames, near trees missing — 262 vs 2386 green px)
+Decision: Only one build in flight: rebuild trigger additionally requires !upActive && !trees_build_busy()
+Decision: Caps lowered for double buffering: TREE_VERT_CAP 5.2M->3.8M, CROWN_CAP 4.2M->4.0M (~876 MB CPU total, same in VBOs)
+Decision: Next step proposed: crown cards as real instances (currently 6 corner instances x 13 floats = 312 B/card; instanced = 52 B, ~6x less upload/build/memory), then TODO 23 whole-tree billboard
+Files: src/trees_cpu.c, src/main.c, src/scene.h, STATUS.md
