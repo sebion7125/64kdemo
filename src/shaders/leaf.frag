@@ -3,6 +3,7 @@ precision highp float;
 in vec3 vNrm;
 in vec3 vPos;
 in vec3 vCol;
+in float vAlpha;
 in float vT;
 in float vW;
 in float vAsp;
@@ -88,6 +89,9 @@ void main(){
   hw = max(hw, 1e-4);                                   // bei tt->0 wird hw klein
   float e = abs(vW) / hw;
   if(e > 1.0) discard;
+  // Ueberblendung als echtes Alpha (nicht gedithert): die Silhouette bleibt
+  // harte Kante (MSAA), die Ueberblendung multipliziert das Alpha.
+  if(vAlpha < 0.02) discard;
   if(uLeafMask > 0.5 && uLeafMask < 1.5){ O = vec4(1.0, 0.0, 0.0, 1.0); return; }
   float midrib = 1.0 - smoothstep(0.0, 0.055, abs(vW)); // Mittelrippe
   float vein   = 1.0 - smoothstep(0.0, 0.05,
@@ -127,5 +131,7 @@ void main(){
   // 2268: Blaetter (39,82,11) gegen Karten (74,104,42) bei gleicher Albedo).
   col = 1.0 - exp(-col * 1.25);
   col = pow(col, vec3(0.4545));
-  O = vec4(col, 1.0);
+  // opak bei vAlpha = 1 (sonst wirkt das Laubdach duenn), echtes Alpha nur
+  // waehrend der Ueberblendung — und die ist nicht gedithert
+  O = vec4(col, vAlpha >= 0.999 ? 1.0 : vAlpha);
 }

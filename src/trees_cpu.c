@@ -173,6 +173,9 @@ static void emit_tube(const Ring *a, const Ring *b, int sides,
       d[9] = ring[m] ? sway1 : sway0;
       d[10] = (float)kk / (float)sides;          // u: einmal rund um das Rohr
       d[11] = ring[m] ? v1 : v0;                 // v: Bogenlaenge entlang des Rohrs
+      d[12] = gLodR2;      // Schaltweite des Billboards: das Geruest blendet im
+                           // selben Band aus, damit Stamm und Ganzbaumbild nicht
+                           // gleichzeitig zu sehen sind (Nutzer)
       nTreeVerts++;
     }
   }
@@ -210,6 +213,7 @@ static void emit_cap(const Ring *a, int sides, float sway,
       d[9] = sway;
       d[10] = angs[m] / 6.2831853f;
       d[11] = v0;
+      d[12] = gLodR2;      // Schaltweite Billboard (siehe emit_tube)
       nTreeVerts++;
     }
   }
@@ -1074,7 +1078,11 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
   int wantCards = ezNSprig / cardDiv;
   // BBox wird fuer JEDEN Baum bestimmt (die Aufnahme-Rahmung braucht sie auch
   // fuer tier-3-Repraesentanten, die selbst kein Billboard bekommen)
-  gBbWant = (treeBillboard0 && tier <= 2) ? 1 : 0;
+  // Billboard fuer ALLE Stufen emittieren (auch tier 3 = nah): der Shader
+  // blendet es ohnehin erst ab 0,85 R2 ein. War es nur bis tier 2 im Puffer,
+  // tauchte es beim Schaufen-Bau genau dann auf, wenn ein Baum von tier 3 nach
+  // tier 2 rutschte — ein Sprung, kein Uebergang.
+  gBbWant = treeBillboard0 ? 1 : 0;
   {
     // Das Billboard liegt auch in Stufe 2 im Puffer: der Shader blendet es ab
     // 0,7 R2 ein und die Karten bis 1,1 R2 aus — der Uebergang laeuft mit der

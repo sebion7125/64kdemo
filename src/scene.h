@@ -31,7 +31,8 @@ float c_terrainH(float px, float py);
 //   treeVerts:  pos(3) nrm(3) col(3) sway(1)             = 10 floats
 //   crownVerts: center(3) off(2) size rotY seed variant lodR col(3) = 13 floats
 //   wireVerts:  pos(3)
-#define TREE_FLOATS  12   // pos3, nrm3, col3, sway, u (um den Ring), v (Bogenlaenge)
+#define TREE_FLOATS  13   // pos3, nrm3, col3, sway, u (um den Ring), v (Bogenlaenge),
+                            // R2 (Schaltweite Ganzbaum-Billboard dieses Baums)
 // Kronen-Karte: center(3) off(2) size rotY seed variant lodR col(3) = 13 floats.
 // lodR = Radius, ab dem diese Karte die Einzelblaetter dieses Baumes eretzt
 // (blendet um lodR +/- 10 % ein). col = Blattfarbe DIESES Baumes: der Atlas ist

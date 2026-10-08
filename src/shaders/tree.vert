@@ -3,6 +3,9 @@ layout(location=0) in vec3 aPos;
 layout(location=1) in vec3 aNrm;
 layout(location=2) in vec3 aCol;
 layout(location=3) in vec3 aSW;   // sway, u (um das Rohr), v (Bogenlaenge)
+layout(location=4) in float aR2;  // Schaltweite Ganzbaum-Billboard dieses Baums
+uniform float uMeshFade = 1.0;    // 0 = gar nicht ausblenden (Schattenwurf-Pass)
+out float vMeshFade;
 uniform mat4 uMVP;
 uniform vec3 uCamPos;
 uniform float uTime;
@@ -38,5 +41,15 @@ void main(){
   vPos = p;
   vCol = vec4(aCol, aSW.x);
   vUV  = aSW.yz;
+  // Stamm/Geruest blendet in demselben Band aus, in dem das Ganzbaum-Billboard
+  // einblendet (0,85..1,00 R2): beide zeigen denselben Baum, gleichzeitig
+  // gezeichnet waere doppelt (Nutzer: "Stamm und Ganzbaumbild nicht gleichzeitig").
+  // Uebergabe in einem SEHR kurzen Band: ein weich ausblendendes Zweigwerk
+  // gegen den Himmel sieht nach Rauschen aus (gemessen: graue Punkte ueber dem
+  // halben Hintergrund). Das Billboard ist bei R2 schon voll, das Geruest geht
+  // bei R2 — beide gleichzeitig sieht man damit nicht (Nutzer).
+  float md = length(p - uCamPos);
+  vMeshFade = uMeshFade * (1.0 - smoothstep(aR2 * 0.97, aR2 * 1.00, md));
+  if(vMeshFade <= 0.002){ gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   gl_Position = uMVP * vec4(p, 1.0);
 }

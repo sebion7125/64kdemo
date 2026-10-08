@@ -16,6 +16,7 @@ uniform float uTime;
 out vec3 vNrm;
 out vec3 vPos;
 out vec3 vCol;
+out float vAlpha;
 out float vT;
 out float vW;      // quer ueber das Blatt (-0.5..0.5) -> Silhouette im Fragment-Shader
 out float vAsp;    // Seitenverhaeltnis Breite/Laenge (Sapling: niemals 1)
@@ -46,8 +47,12 @@ void main(){
   // Blatt aus — gleiche Technik wie der Bande um iLodR, also ohne Alpha-Blend
   // und ohne Abhaengigkeit von der Draw-Reihenfolge.
   keep *= uTreeFade;
-  // alter Satz nahe am Betrachter: identische Blatter liegen schon im neuen Satz
-  if(hash12(vec2(iPos.x * 31.7, iPos.z * 17.3)) > keep) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  // KEIN Hash-Cull pro Blatt mehr (Nutzer: "die Animation nimmt Blaetter
+  // einzeln weg und baut sie neu auf ... alle Blaetter gleichzeitig alpha-
+  // einblenden, und das Blending soll nicht gedithert sein"). Der Wert geht als
+  // vAlpha ins Fragment und wird dort als echtes Alpha gemischt.
+  if(keep <= 0.002) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  vAlpha = keep;
   // Groessen-Kompensation wie bei EZ-Tree: die uebrigbleibenden Blaetter werden
   // leicht groesser (deren leafScale 1,25 in LOD1), NICHT kleiner. Der alte
   // Faktor (1 - smoothstep(24,30,d)) schrumpfte jedes Blatt bis auf 0 — das war

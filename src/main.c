@@ -1059,6 +1059,7 @@ static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: t
   p_glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, TREE_FLOATS * 4, (const void *)24);
   p_glEnableVertexAttribArray(3);
   p_glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, TREE_FLOATS * 4, (const void *)36);  // sway,u,v
+  p_glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, TREE_FLOATS * 4, (const void *)48);  // R2
 
   // Kronen-Billboards: aCenter(3) aOff(2) aData(4)
   // Kronen-Karten: 6 Eckpunkte aus vboCrownQuad (divisor 0) + 1 Instanz pro
@@ -1708,6 +1709,7 @@ int main(int argc, char **argv) {
   GLint locTTime   = p_glGetUniformLocation(progTMesh, "uTime");
   GLint locTMask   = p_glGetUniformLocation(progTMesh, "uTreeMask");
   GLint locTFade   = p_glGetUniformLocation(progTMesh, "uTreeFade");
+  GLint locTMeshF  = p_glGetUniformLocation(progTMesh, "uMeshFade");
   GLint locGMVP    = p_glGetUniformLocation(progGrass, "uMVP");
   GLint locGCam    = p_glGetUniformLocation(progGrass, "uCamPos");
   GLint locGTime   = p_glGetUniformLocation(progGrass, "uTime");
@@ -2613,6 +2615,9 @@ int main(int argc, char **argv) {
       p_glUniform3f(locTCam, eye[0], eye[1], eye[2]);
       p_glUniform1f(locTTime, tSh);
       p_glUniform1f(locTMask, 0.0f);
+      // Schattenwurf unveraendert: das Geruest wirft auch dann, wenn es im Bild
+      // schon vom Ganzbaum-Billboard verdeckt ist (Schatten-Thema zurueckgestellt)
+      if(locTMeshF >= 0) p_glUniform1f(locTMeshF, 0.0f);
       applyShadow(&slTree, 0);
       if(locTFade >= 0) p_glUniform1f(locTFade, 1.0f);
       p_glBindVertexArray(vaoTree[drawSet]);
@@ -2746,11 +2751,14 @@ int main(int argc, char **argv) {
 
     // Baum-Mesh (Stamm/Aeste)
     if (!grassOnly) {
+      p_glEnable(GL_BLEND);
+      p_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
       p_glUseProgram(progTMesh);
       p_glUniformMatrix4fv(locTMVP, 1, GL_FALSE, mvp);
       p_glUniform3f(locTCam, camPos[0], camPos[1], camPos[2]);
       p_glUniform1f(locTTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
       p_glUniform1f(locTMask, (float)dbgTreeMask);
+      if(locTMeshF >= 0) p_glUniform1f(locTMeshF, 1.0f);
       applyShadow(&slTree, (shadowThis && shadowSampleOn) ? (shadowForce ? 2 : 1) : 0);
       if(locTFade >= 0) p_glUniform1f(locTFade, 1.0f);
       p_glBindVertexArray(vaoTree[drawSet]);
@@ -2859,11 +2867,16 @@ int main(int argc, char **argv) {
       p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
     }
 
-    // Blattdach-Billboards: Alpha-Test (discard) -> entweder opak oder unsichtbar,
-    // deshalb Depth SCHREIBEN (damit naechste Mesh-Objekte dagegen testen koennen)
+    // Kronen-Karten und Ganzbaum-Billboards: jetzt echtes Alpha (kein
+    // Dither-Discard), also Depth NICHT schreiben — sonst verdeckt eine halb
+    // durchsichtige Karte die dahinterliegende und die Krone wird loechrig.
     if (!grassOnly) {
       p_glEnable(GL_BLEND);
       p_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+      // Depth schreiben: aus. Ergebnis im Testlauf = durchscheinende Kronen
+      // (Karten mischen sich gegen den Hintergrund, den sie verdecken sollten).
+      // An lassen: die Blenden sind kurz und schmal, der Artefakt-Preis ist
+      // kleiner als der Fehler.
       p_glDepthMask(GL_TRUE);
       p_glUseProgram(progCrown);
       p_glUniformMatrix4fv(locCMVP, 1, GL_FALSE, mvp);
@@ -2899,7 +2912,13 @@ int main(int argc, char **argv) {
     // das Baum-Mesh -> Depth schreiben, kein Blend. Vor dem Gras zeichnen, damit
     // der Tiefentest Gras hinter den Blaettern verwirft.
     if(!grassOnly && layLeaf && (nLeafInstCur > 0 || (treeFadeNew < 1.0f && nLeafInstOld > 0)) && !envNoLeaf){
-      p_glDepthMask(GL_TRUE);
+      // Ueberblendung jetzt als echtes Alpha (Nutzer: kein Dither, alle Blaetter
+      // gleichzeitig). Beim Mischen kein Depth schreiben — sonst verdeckt ein
+      // halb durchsichtiges Blatt den Hintergrund, der erst danach gezeichnet
+      // wird (Gras). Ohne laufende Ueberblendung bleibt alles wie vorher.
+      p_glEnable(GL_BLEND);
+      p_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+      p_glDepthMask(treeFadeNew < 1.0f ? GL_FALSE : GL_TRUE);
       p_glUseProgram(progLeaf);
       p_glUniformMatrix4fv(locLMVP, 1, GL_FALSE, mvp);
       p_glUniform3f(locLCam, camPos[0], camPos[1], camPos[2]);

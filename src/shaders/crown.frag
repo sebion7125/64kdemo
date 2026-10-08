@@ -115,8 +115,8 @@ void main(){
   // Discard mehr. 15,3 % aller Kronen-Quads liegen aber bei d >= 185 m und haben
   // vFade = 0 (gemessen, /tmp/crowndist.c): deren transparenten Atlas-Bereiche
   // (rgb = 0) wurden als dunkles Quadrat gemalt = der Nutzerbefund "schwarz".
-  float a = tx.a * smoothstep(0.0, band, e) * vFade;
-  // Rand des Billboards ausblenden: entkommt der Baum (Aeste, Blaetter) der
+  float a = tx.a * smoothstep(0.0, band, e);
+  float cov = a;   // Deckung vor der Ueberblendung (die kommt als vFade dazu)  // Rand des Billboards ausblenden: entkommt der Baum (Aeste, Blaetter) der
   // BBox-Schaetzung, beruehrt der Kachelinhalt den Rand — im Wald sieht man dann
   // ein hartes gruenes Rechteck gegen den Himmel (gemessen: 15 von 64 Kacheln
   // randberuehrend; mit DEMO_NOBB0=1 verschwindet der Block).
@@ -124,8 +124,15 @@ void main(){
     float em = max(abs(cell.x * 2.0 - 1.0), abs(cell.y * 2.0 - 1.0));
     a *= 1.0 - smoothstep(0.88, 1.0, em);
   }
+  cov = a * vFade;
+  // Die raeumliche Kante des Blattbuschels bleibt wie sie war (Schwelle, per
+  // MSAA weich) — sie macht die Krone fest. GEDITHERT wird nicht mehr die
+  // UEBERBLENDUNG (Nutzer: "das Blending soll nicht gedithert sein"): vFade
+  // geht als echtes Alpha ins Ergebnis statt in die Schwelle.
   float thr = 0.5 + (hash12(gl_FragCoord.xy + vTile * 37.0) - 0.5) * 0.75;
   if(a < thr) discard;
+  cov = a * vFade;
+  if(cov < 0.02) discard;
   // Masken-Diagnose erst nach dem Discard: sonst zaehlt sie auch die leeren
   // areas der Kachel und die Farbmessung mittelt den Hintergrund mit.
   if(uCrownMask > 0.5 && uCrownMask < 1.5){ O = vec4(1.0, 0.0, 0.0, 1.0); return; }
@@ -155,5 +162,7 @@ void main(){
   // Tonemapping + Gamma (identisch zu fragment.glsl)
   col = 1.0 - exp(-col * 1.25);
   col = pow(col, vec3(0.4545));
-  O = vec4(col, 1.0);
+  // opak, solange keine Ueberblendung laeuft (sonst wirkt die Krone hohl:
+  // jede Karte haette Alpha < 1). Echtes Alpha nur waehrend der Blende.
+  O = vec4(col, vFade >= 0.999 ? 1.0 : cov);
 }

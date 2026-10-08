@@ -59,6 +59,10 @@ void main(){
   float cr = cos(aData.y), sr = sin(aData.y);
   vec2 ro = vec2(aOff.x * cr - aOff.y * sr, aOff.x * sr + aOff.y * cr);
   vec3 p = aCenter + right * (ro.x * aData.x) + up * (ro.y * aData.x);
+  // Ganzbaum-Billboard minimal Richtung Kamera schieben: das Geruest desselben
+  // Baums blendet im selben Band aus, schreibt aber Tiefe — ohne diesen Offset
+  // faede das Billboard hinter dem halb durchsichtigen Stamm weg.
+  if(aData.w >= 4.0) p += normalize(uCamPos - aCenter) * 0.25f;
   // Aufnahme-Pass: dieselben Karten mehrmals versetzt gezeichnet fuellen die
   // Luecken von Arten mit wenigen grossen Karten (Kiefer: 162 Karten an einem
   // 7-m-Baum = einzelne Blatt-Lappen in der 128-px-Kachel).

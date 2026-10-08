@@ -13,6 +13,7 @@ uniform float uTreeFade = 1.0;
 uniform vec3 uCamPos;
 uniform float uTreeMask;   // DEBUG (F3): Baum-Mesh reines Rot -> exakte Maske,
                            // um Rinden-Kennzahlen nur auf Baum-Pixel zu messen
+in float vMeshFade;   // Geruest blendet mit dem Billboard ein/aus
 out vec4 O;
 const vec3 SUN = normalize(vec3(0.55, 0.38, -0.62));
 float hash12(vec2 p){
@@ -163,5 +164,5 @@ void main(){
   // ueber die schon tonemapte Szene geblendet/geschrieben wird)
   col = 1.0 - exp(-col * 1.25);
   col = pow(col, vec3(0.4545));
-  O = vec4(col, 1.0);
+  O = vec4(col, vMeshFade >= 0.999 ? 1.0 : vMeshFade);
 }
