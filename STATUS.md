@@ -568,6 +568,52 @@ der alten Add-on-Datei sind tot (404), das Add-on ist seit Blender 4.2 eine Exte
 Alpha-Test im Shader, Blatt-Laenge/Breite-Verhaeltnis ~2:1, Blattgroessen-Abstufung
 zum Zweigende hin, Kronenform ueber das Astlaengen-Profil.
 
+## Session 2026-10-08, Runde 26 (Baum-Build im Worker-Thread, Upload in Scheiben)
+
+**Nutzer:** „dann sollten wir uns als naechstes mal um das stocken kuessmern.“ / „ich nehme B“
+(Thread wie beim Gras).
+
+**Umgesetzt** (Muster von grass_cpu.c: request → Worker baut zu Ende → Main-Thread
+holt ab → Upload im Main-Thread):
+
+- `trees_build_begin / trees_build_step(maxTrees) / trees_build_finish` statt eines
+  Aufrufs; `trees_build_request(tx,tz,lodRef)`, `trees_build_busy()`,
+  `trees_build_finished_snapshot()`, `trees_thread_start()`.
+- **Doppel-Puffer** CPU-seitig: der Worker schreibt in `treeVerts/crownVerts/leafInst`,
+  gezeichnet wird aus `treeVertsD/crownVertsD/leafInstD`; getauscht wird in
+  `trees_build_finish()` unter Mutex (Mutex/Cond wie beim Gras, „finish then latest“).
+- **Zwei VBO/VAO-Saetze** (`vboTree[2]`, `vaoTree[2]`, …, `drawSet`): der Upload
+  laeuft in den Hintergrund-Satz, `drawSet` wechselt erst nach dem letzten Slice —
+  die GPU sieht nie halbhochgeladene Geometrie.
+- **Upload in Scheiben** mit Zeitbudget: 25 % der letzten Framezeit, geklemmt auf
+  3..20 ms (`UP_BYTES` 6 MB pro Slice). `glBufferSubData` neu geladen (LOADGL2).
+- Nur **ein Build gleichzeitig** in Arbeit (Trigger prueft `!upActive &&
+  !trees_build_busy()`), sonst laeuft die Kamera dem Build davon.
+
+**Gemessen (VM, llvmpipe, 640x360, `DEMO_WALK="13 0"`):**
+
+| | vorher | jetzt |
+|---|---|---|
+| Blockierung im Frame beim Stufenwechsel | 490 ms (350 Generieren + 140 Upload) | 0 ms — Generieren im Thread |
+| Kosten pro Frame waehrend des Uploads | — | 3..20 ms (Zeitbudget) |
+| Frame-Median waehrend Walk | ~1700 ms | ~1384 ms |
+
+**Richtigkeit:** nach 32 m Kameraweg ist das Bild an der Zielkamera identisch zum
+Stillstand-Test an derselben Kamera (je 2386 Baum-Gruen-Pixel, Y-Bereich 0..333,
+Terrain aus). 648 Baeume, 0 Cap-Treffer, 0 uebersprungene Baeume.
+
+**Zwischenfall beim Einbau:** zuerst festes Kontingent 24 MB/Frame — das neue Set
+war in der VM erst nach ~15 Frames (20 s) dran, die naechsten Baeume fehlten
+sichtbar (Bildvergleich: nur 262 statt 2386 Gruen-Pixel). Deshalb Zeitbudget +
+„nur ein Build in Arbeit“.
+
+**Preis:** Doppel-Puffer. Caps gesenkt auf gemessen + Reserve
+(`TREE_VERT_CAP 5,2 M -> 3,8 M`, `CROWN_CAP 4,2 M -> 4,0 M`), pro Satz ~438 MB,
+in Summe ~876 MB CPU und dieselbe Groesse in VBOs. Das muss runter — TODO 23
+(Ganzbaum-Billboard) und vor allem **Karten als echte Instanzen** (heute 6
+Eckpunkt-Instanzen a 13 Float = 312 Byte pro Karte, eine instanzierte Karte waeren
+52 Byte) senken die Datenmenge um ~6x und damit auch Upload und Build-Zeit.
+
 ## Session 2026-10-08, Runde 25f (Stocken: Messbank eingebaut, Fernstufe entlastet)
 
 **Nutzer:** „dann sollten wir uns als naechstes mal um das stocken kuessmern.“
@@ -2275,9 +2321,9 @@ Funktioniert auch auf NVIDIA (dort wird `gl_FragDepth` immer geschrieben).
 ### 2. Bäume
 - [x] **Ferne Krone duenner als nahe** — war −34 % Kronendeckung, jetzt −20 %
   (tier 0: `wantCards ezNSprig/3`, Zweigroehren weg; Farbe war schon vorher gleich)
-- [ ] **Rebuild-Stottern**: 490 ms pro Wald-Rebuild (Generieren 350 + Upload 140),
-  Ausloeser >12 m Kameraweg — aufteilen (Baum fuer Baum in Zweitpuffer, Upload
-  in Scheiben) oder Worker-Thread wie beim Gras
+- [ ] **Rebuild-Stottern**: Builder im Worker-Thread + Upload in Scheiben erledigt
+  (Runde 26). Offen: Datenmenge — Karten sind 6 Eckpunkt-Instanzen a 13 Float
+  (312 Byte/Karte); instanzierung waeren 52 Byte -> Upload und Build ~6x billiger
 - [ ] **Nähte in den Röhren** (Tube-Segmente) → parallel transport frames
 - [ ] Stamm-Textur (Rinde) verbessern
 

@@ -56,24 +56,34 @@ float c_terrainH(float px, float py);
 // werden zuerst gebaut, bei Cap-Uberlauf fehlt Geometrie also ganz hinten —
 // nicht vor der Kamera.
 #ifndef TREE_VERT_CAP
-#define TREE_VERT_CAP 5200000   // gemessen 3,60 Mio nach dem Terminalast-Fix
-                                // (EZ-Tree-Regel fehlte: 183 statt 103 Aeste pro
-                                // Eiche); 5,2 Mio = Reserve, 0 uebersprungene Baeume
+#define TREE_VERT_CAP 3800000   // gemessen 2,83 Mio nach tier-0-Entlastung.
+                                // Doppel-Puffer (Build-Thread) = 2x diese Groesse.
 #endif
 #ifndef CROWN_CAP
-#define CROWN_CAP     4200000   // gemessen 3,0 Mio Eckpunkt-Instanzen (= 500k Karten)
+#define CROWN_CAP     4000000   // gemessen 3,28 Mio Eckpunkt-Instanzen (= 546k Karten)
 #endif
 #define WIRE_CAP      90000
 
-extern float treeVerts[TREE_VERT_CAP * TREE_FLOATS];
-extern float crownVerts[CROWN_CAP * CROWN_FLOATS];
-extern float leafInst[LEAF_CAP * LEAF_FLOATS];
+// Doppel-Puffer: der Build-Thread schreibt in die ohne Suffix, gezeichnet wird
+// aus den D-Puffern (Swap in trees_build_finish(), unter Mutex).
+extern float *treeVerts, *crownVerts, *leafInst;
+extern float *treeVertsD, *crownVertsD, *leafInstD;
 extern int   nLeafInst;
 extern float wireVerts[WIRE_CAP * WIRE_FLOATS];
-extern int   nTreeVerts, nCrownVerts, nWireVerts, nTrees;
+extern int   nTreeVerts, nCrownVerts, nWireVerts, nTrees;      // Schreibseite
+extern int   nTreeVertsD, nCrownVertsD, nLeafInstD, nTreesD;  // Zeichenseite
 
 // Baut die Baum-Geometrie um (tx,tz) (Zellen-Grid wie der alte SDF-Platzierer).
 void trees_build(float tx, float tz);
+// Phasen fuer den Worker-Thread (Muster wie grass_build_begin/step/finish):
+void trees_build_begin(float tx, float tz);
+int  trees_build_step(int maxTrees);      // 1 = fertig
+void trees_build_finish(void);            // Schreib-/Zeichenseite tauschen
+void trees_build_request(float tx, float tz, const float lodRef[3]);
+int  trees_build_busy(void);
+void trees_build_finished_snapshot(float **tv, float **cv, float **lv,
+                                   int *ntv, int *ncv, int *nli, int *ntrees);
+int  trees_thread_start(void);
 extern int treeOneShot;
 extern int treeGenMode;      // DEMO_TREEGEN=alt|ez: welcher Baum-Generator baut
 extern int   treeEzPreset;

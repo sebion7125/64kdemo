@@ -69,6 +69,7 @@ static void (*p_glBindVertexArray)(GLuint array);
 static void (*p_glGenBuffers)(GLsizei n, GLuint *buffers);
 static void (*p_glBindBuffer)(GLenum target, GLuint buffer);
 static void (*p_glBufferData)(GLenum target, GLsizeiptr size, const void *data, GLenum usage);
+static void (*p_glBufferSubData)(GLenum target, GLintptr offset, GLsizeiptr size, const void *data);
 static void (*p_glEnableVertexAttribArray)(GLuint index);
 static void (*p_glVertexAttribPointer)(GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const void *pointer);
 static void (*p_glUseProgram)(GLuint program);
@@ -184,6 +185,7 @@ static void load_libs(void) {
   LOADGL2(glGenBuffers);
   LOADGL2(glBindBuffer);
   LOADGL2(glBufferData);
+  LOADGL2(glBufferSubData);
   LOADGL2(glEnableVertexAttribArray);
   LOADGL2(glVertexAttribPointer);
   LOADGL2(glUseProgram);
@@ -501,9 +503,14 @@ static void ensure_fbo(int w, int h) {
 // ================= CPU-Terrain: siehe terrain_cpu.c (ueber scene.h) =================
 
 // ================= Mesh-Resources (Baeume/Gras, Geometrie aus trees_cpu/grass_cpu) =================
-static GLuint vboTree = 0, vaoTree = 0;
-static GLuint vboCrown = 0, vaoCrown = 0;
-static GLuint vboLeaf = 0, vaoLeaf = 0, vboLeafBase = 0;
+// Baum-Geometrie in ZWEI Saetzen: der Build-Thread fuellt den einen, gezeichnet
+// wird aus dem anderen (drawSet). Nur so laesst sich der 350-MB-Upload in
+// Scheiben aufteilen, ohne dass die GPU halbhochgeladene Daten sieht.
+static GLuint vboTree[2] = {0,0}, vaoTree[2] = {0,0};
+static GLuint vboCrown[2] = {0,0}, vaoCrown[2] = {0,0};
+static GLuint vboLeaf[2] = {0,0}, vaoLeaf[2] = {0,0};
+static GLuint vboLeafBase = 0;
+static int drawSet = 0;
 static GLuint vboGrass = 0, vaoGrass = 0, vboGrassBase = 0;
 static GLuint vboWire = 0, vaoWire = 0;
 
@@ -729,33 +736,91 @@ static void build_foliage_atlas(GLuint progLeaf){
          FOL_TILES, FOL_TILES, FOL_TILEPX, FOL_VAR, FOL_AZ, nLast, now_sec() - tCap0);
 }
 
-// Baum-Buffer nach trees_build() hochladen (Gras wird separat geladen)
-static void upload_mesh_buffers(void){
-  p_glBindBuffer(GL_ARRAY_BUFFER, vboTree);
-  p_glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)nTreeVerts * TREE_FLOATS * sizeof(float), treeVerts, GL_DYNAMIC_DRAW);
-  p_glBindBuffer(GL_ARRAY_BUFFER, vboCrown);
-  p_glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)nCrownVerts * CROWN_FLOATS * sizeof(float), crownVerts, GL_DYNAMIC_DRAW);
-  p_glBindBuffer(GL_ARRAY_BUFFER, vboLeaf);
-  p_glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)nLeafInst * LEAF_FLOATS * sizeof(float), leafInst, GL_DYNAMIC_DRAW);
+// Upload des fertigen Builds in Scheiben: pro Frame hoechstens UP_BYTES, damit
+// ein 350-MB-Build keinen 140-ms-Ruckler erzeugt (gemessener Anteil am frueheren
+// Rebuild von 490 ms). Erst wenn ALLES hochgeladen ist, wechselt drawSet — die
+// GPU sieht zu keinem Zeitpunkt halbfertige Geometrie.
+#define UP_BYTES (6u * 1024u * 1024u)   // feine Slices: nur so greift das Zeitbudget
+static struct { const float *src; GLuint vbo; size_t bytes, pos; } upBuf[3];
+static int upActive = 0, upNextSet = 1;
+
+static void upload_begin(const float *tv, const float *cv, const float *lv,
+                         int ntv, int ncv, int nli, int nextSet){
+  upBuf[0].src = tv; upBuf[0].vbo = vboTree[nextSet];
+  upBuf[0].bytes = (size_t)ntv * TREE_FLOATS * sizeof(float);
+  upBuf[1].src = cv; upBuf[1].vbo = vboCrown[nextSet];
+  upBuf[1].bytes = (size_t)ncv * CROWN_FLOATS * sizeof(float);
+  upBuf[2].src = lv; upBuf[2].vbo = vboLeaf[nextSet];
+  upBuf[2].bytes = (size_t)nli * LEAF_FLOATS * sizeof(float);
+  for(int i = 0; i < 3; i++){
+    upBuf[i].pos = 0;
+    if(upBuf[i].bytes == 0) upBuf[i].bytes = 0;   // leeres Puffer ist fertig (pos 0)
+    p_glBindBuffer(GL_ARRAY_BUFFER, upBuf[i].vbo);
+    p_glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(upBuf[i].bytes ? upBuf[i].bytes : 16),
+                   NULL, GL_DYNAMIC_DRAW);
+  }
   p_glBindBuffer(GL_ARRAY_BUFFER, vboWire);
-  p_glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)nWireVerts * WIRE_FLOATS * sizeof(float), wireVerts, GL_DYNAMIC_DRAW);
+  p_glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)nWireVerts * WIRE_FLOATS * sizeof(float),
+                 wireVerts, GL_DYNAMIC_DRAW);
+  upNextSet = nextSet;
+  upActive = 1;
+}
+
+// wird pro Frame aufgerufen; gibt zurueck, ob gerade ein Upload laeuft.
+// Zeitbudget statt Byte-Budget: ein festes 24-MB-Kontingent brauchte bei der
+// VM (1,4 s/Frame) 15 Frames = 20 s, bis das neue Set zeichnet — die naechsten
+// Baeume fehlten sichtbar. Mit Zeitbudget passt sich die Menge an die Framezeit an.
+#define UP_MS_MAX 20.0
+#define UP_MS_MIN 3.0
+static int upload_step(double frameMs){
+  if(!upActive) return 0;
+  // Budget aus der letzten Framezeit: 25% des Frames, geklemmt auf 3..20 ms.
+  // So saugt eine schnelle GPU mehr pro Frame als die Software-VM, ohne dass
+  // ein Frame dominiert wird.
+  double budgetMs = frameMs * 0.25;
+  if(budgetMs < UP_MS_MIN) budgetMs = UP_MS_MIN;
+  if(budgetMs > UP_MS_MAX) budgetMs = UP_MS_MAX;
+  double t0 = now_sec();
+  for(int i = 0; i < 3; i++){
+    if(upBuf[i].pos >= upBuf[i].bytes) continue;
+    for(;;){
+      size_t n = upBuf[i].bytes - upBuf[i].pos;
+      if(n > UP_BYTES) n = UP_BYTES;
+      p_glBindBuffer(GL_ARRAY_BUFFER, upBuf[i].vbo);
+      p_glBufferSubData(GL_ARRAY_BUFFER, (GLintptr)upBuf[i].pos, (GLsizeiptr)n,
+                        upBuf[i].src + upBuf[i].pos / sizeof(float));
+      upBuf[i].pos += n;
+      if(upBuf[i].pos >= upBuf[i].bytes) break;
+      if((now_sec() - t0) * 1000.0 >= budgetMs) break;   // Framezeit einhalten
+    }
+    if((now_sec() - t0) * 1000.0 >= budgetMs) break;
+  }
+  for(int i = 0; i < 3; i++) if(upBuf[i].pos < upBuf[i].bytes) return 1;
+  upActive = 0;
+  drawSet = upNextSet;      // erst JETZT zeichnet der Main-Thread den neuen Build
+  return 0;
 }
 
 static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: trees_cpu.c)
-  p_glGenBuffers(1, &vboTree);
-  p_glGenBuffers(1, &vboCrown);
-  p_glGenBuffers(1, &vboLeaf);
+  for(int k = 0; k < 2; k++){
+    p_glGenBuffers(1, &vboTree[k]);
+    p_glGenBuffers(1, &vboCrown[k]);
+    p_glGenBuffers(1, &vboLeaf[k]);
+  }
   p_glGenBuffers(1, &vboLeafBase);
   p_glGenBuffers(1, &vboGrass);
   p_glGenBuffers(1, &vboWire);
   p_glGenBuffers(1, &vboGrassBase);
   p_glBindBuffer(GL_ARRAY_BUFFER, vboGrassBase);
   p_glBufferData(GL_ARRAY_BUFFER, sizeof grassBase, grassBase, GL_STATIC_DRAW);
+  p_glBindBuffer(GL_ARRAY_BUFFER, vboLeafBase);
+  p_glBufferData(GL_ARRAY_BUFFER, sizeof leafBase, leafBase, GL_STATIC_DRAW);
 
+  for(int k = 0; k < 2; k++){
   // Baum-Mesh: aPos(3) aNrm(3) aCol(4)
-  p_glGenVertexArrays(1, &vaoTree);
-  p_glBindVertexArray(vaoTree);
-  p_glBindBuffer(GL_ARRAY_BUFFER, vboTree);
+  p_glGenVertexArrays(1, &vaoTree[k]);
+  p_glBindVertexArray(vaoTree[k]);
+  p_glBindBuffer(GL_ARRAY_BUFFER, vboTree[k]);
   p_glEnableVertexAttribArray(0);
   p_glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, TREE_FLOATS * 4, (const void *)0);
   p_glEnableVertexAttribArray(1);
@@ -766,9 +831,9 @@ static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: t
   p_glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, TREE_FLOATS * 4, (const void *)36);  // sway,u,v
 
   // Kronen-Billboards: aCenter(3) aOff(2) aData(4)
-  p_glGenVertexArrays(1, &vaoCrown);
-  p_glBindVertexArray(vaoCrown);
-  p_glBindBuffer(GL_ARRAY_BUFFER, vboCrown);
+  p_glGenVertexArrays(1, &vaoCrown[k]);
+  p_glBindVertexArray(vaoCrown[k]);
+  p_glBindBuffer(GL_ARRAY_BUFFER, vboCrown[k]);
   p_glEnableVertexAttribArray(0);
   p_glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, CROWN_FLOATS * 4, (const void *)0);
   p_glEnableVertexAttribArray(1);
@@ -781,14 +846,12 @@ static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: t
   p_glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, CROWN_FLOATS * 4, (const void *)40); // Blattfarbe
 
   // Einzelblaetter naher Baeume: aBase(2) statisch + iPos(3) iData(4) iCol(3) [instanzen]
-  p_glBindBuffer(GL_ARRAY_BUFFER, vboLeafBase);
-  p_glBufferData(GL_ARRAY_BUFFER, sizeof leafBase, leafBase, GL_STATIC_DRAW);
-  p_glGenVertexArrays(1, &vaoLeaf);
-  p_glBindVertexArray(vaoLeaf);
+  p_glGenVertexArrays(1, &vaoLeaf[k]);
+  p_glBindVertexArray(vaoLeaf[k]);
   p_glBindBuffer(GL_ARRAY_BUFFER, vboLeafBase);
   p_glEnableVertexAttribArray(0);
   p_glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8, (const void *)0);
-  p_glBindBuffer(GL_ARRAY_BUFFER, vboLeaf);
+  p_glBindBuffer(GL_ARRAY_BUFFER, vboLeaf[k]);
   p_glEnableVertexAttribArray(1);
   p_glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, LEAF_FLOATS * 4, (const void *)0);
   p_glVertexAttribDivisor(1, 1);
@@ -801,6 +864,7 @@ static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: t
   p_glEnableVertexAttribArray(4);
   p_glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, LEAF_FLOATS * 4, (const void *)40);  // iLodR
   p_glVertexAttribDivisor(4, 1);
+  }
 
   // Gras: aBase(2) + iPos(3) iData(4) [instanzen]
   p_glGenVertexArrays(1, &vaoGrass);
@@ -1857,41 +1921,51 @@ int main(int argc, char **argv) {
     }
 
     // --- Rebuild bei Kamera-Bewegung ---
-    // Baeume: Schwellwert 12m (Flaeche +/-144m, kein Pop-in).
+    // Baeume: Schwellwert 12m (Flaeche +/-144m, kein Pop-in). Der Build laeuft
+    // im Worker-Thread (Runde 26): vorher blockierten Generieren (350 ms) und
+    // Upload (140 ms) den Frame = der gemeldete Aussetzer alle ~12 m.
     // Gras: inkrementell (Zweipuffer, ~8000 Zellen/Frame), Schwellwert 12m.
     {
       static int builtT = 0, builtG = 0;
       static float tCX = 0, tCZ = 0;
-      if(!builtT || fabsf(camTgt[0] - tCX) > 12.0f || fabsf(camTgt[2] - tCZ) > 12.0f){
+      if(!builtT || ((!upActive && !trees_build_busy()) &&
+                     (fabsf(camTgt[0] - tCX) > 12.0f || fabsf(camTgt[2] - tCZ) > 12.0f))){
         tCX = camTgt[0]; tCZ = camTgt[2];
-        // Detailstufe an der echten Kamera messen, nicht am Build-Zentrum
-        treeLodRef[0] = camPos[0]; treeLodRef[1] = camPos[1]; treeLodRef[2] = camPos[2];
-        treeLodRefValid = 1;
-        double tB0 = now_sec();
-        trees_build(tCX, tCZ);
-        double tB1 = now_sec();
-        upload_mesh_buffers();
-        double tB2 = now_sec();
-        printf("  Baum-Rebuild: Generieren %.0f ms + Upload %.0f ms = %.0f ms  (%.0f MB Puffer)\n",
-               (tB1 - tB0) * 1000.0, (tB2 - tB1) * 1000.0, (tB2 - tB0) * 1000.0,
-               ((double)nTreeVerts * TREE_FLOATS + (double)nCrownVerts * CROWN_FLOATS
-                + (double)nLeafInst * LEAF_FLOATS) * 4.0 / 1e6);
-        builtT = 1;
+        if(!builtT){
+          // Erster Build synchron (Baeume ab Frame 1 sichtbar), danach Thread.
+          treeLodRef[0] = camPos[0]; treeLodRef[1] = camPos[1]; treeLodRef[2] = camPos[2];
+          treeLodRefValid = 1;
+          double tB0 = now_sec();
+          trees_build(tCX, tCZ);
+          double tB1 = now_sec();
+          upload_begin(treeVertsD, crownVertsD, leafInstD,
+                       nTreeVertsD, nCrownVertsD, nLeafInstD, 1 - drawSet);
+          while(upload_step(1e9)){ }
+          double tB2 = now_sec();
+          printf("  Baum-Erstbuild: Generieren %.0f ms + Upload %.0f ms = %.0f ms  (%.0f MB Puffer)\n",
+                 (tB1 - tB0) * 1000.0, (tB2 - tB1) * 1000.0, (tB2 - tB0) * 1000.0,
+                 ((double)nTreeVertsD * TREE_FLOATS + (double)nCrownVertsD * CROWN_FLOATS
+                  + (double)nLeafInstD * LEAF_FLOATS) * 4.0 / 1e6);
+          builtT = 1;
+          trees_thread_start();
+        } else {
+          trees_build_request(tCX, tCZ, camPos);   // Worker baut im Hintergrund
+        }
         fflush(stdout);
-        printf("Baeume um (%.0f,%.0f): %d Baeume, %d Vertices, %d Canopy-Quads, %d Einzelblaetter\n", tCX, tCZ, nTrees, nTreeVerts, nCrownVerts / 6, nLeafInst);
+        printf("Baeume um (%.0f,%.0f): %d Baeume, %d Vertices, %d Canopy-Quads, %d Einzelblaetter\n", tCX, tCZ, nTreesD, nTreeVertsD, nCrownVertsD / 6, nLeafInstD);
         printf("  Caps: Geruest %d/%d  Karten %d/%d  Blaetter %d/%d   TREffer: Geruest %d Karten %d Blaetter %d\n",
-               nTreeVerts, TREE_VERT_CAP, nCrownVerts, CROWN_CAP, nLeafInst, LEAF_CAP,
+               nTreeVertsD, TREE_VERT_CAP, nCrownVertsD, CROWN_CAP, nLeafInstD, LEAF_CAP,
                treeCapTree, treeCapCrown, treeCapLeaf);
         if(treeCapSprig) printf("  Laub-Liste pro Baum voll: %d\n", treeCapSprig);
         printf("  uebersprungen (Budget): %d Baeume\n", treeSkipped);
         treeCapTree = treeCapCrown = treeCapLeaf = treeSkipped = 0;
         // Messbank: Welt-BBox des Baumgeruests in Metern (Kronendurchmesser,
         // Wuchshoehe, Stammradius unten) — ohne Bildskala-Raten zu muessen.
-        if(treeOneShot && nTreeVerts > 0){
+        if(treeOneShot && nTreeVertsD > 0){
           float mn[3] = {1e9f,1e9f,1e9f}, mx[3] = {-1e9f,-1e9f,-1e9f};
-          for(int i = 0; i < nTreeVerts; i++)
+          for(int i = 0; i < nTreeVertsD; i++)
             for(int k = 0; k < 3; k++){
-              float v = treeVerts[i * TREE_FLOATS + k];
+              float v = treeVertsD[i * TREE_FLOATS + k];
               if(v < mn[k]) mn[k] = v;
               if(v > mx[k]) mx[k] = v;
             }
@@ -1901,20 +1975,20 @@ int main(int argc, char **argv) {
           // der EZ-Tree-Referenz (node /tmp/ezcmp: Laub beginnt dort bei 24% der
           // Baumhoehe, Stammanteil 55%).
           { float lmn = 1e9f, lmx = -1e9f, cmn = 1e9f, cmx = -1e9f;
-            for(int i = 0; i < nLeafInst; i++){
-              float v = leafInst[i * LEAF_FLOATS + 1];
+            for(int i = 0; i < nLeafInstD; i++){
+              float v = leafInstD[i * LEAF_FLOATS + 1];
               if(v < lmn) lmn = v;
               if(v > lmx) lmx = v;
             }
-            for(int i = 0; i < nCrownVerts; i++){
-              float v = crownVerts[i * CROWN_FLOATS + 1];
+            for(int i = 0; i < nCrownVertsD; i++){
+              float v = crownVertsD[i * CROWN_FLOATS + 1];
               if(v < cmn) cmn = v;
               if(v > cmx) cmx = v;
             }
             float H = mx[1] - mn[1];
             printf("  Laub  y %.2f..%.2f m  = %.0f%%..%.0f%% der Baumhoehe  (%d Karten y %.2f..%.2f)\n",
                    lmn, lmx, 100*(lmn - mn[1])/H, 100*(lmx - mn[1])/H,
-                   nCrownVerts, cmn, cmx);
+                   nCrownVertsD, cmn, cmx);
           }
           printf("  Preset %s  unit %.4f  Stammradius %.3f m  Spread %.2f  s=%.2f hf=%.2f\n",
                  ezDbgName, ezDbgUnit, ezDbgR0, treeEzSpread, ezDbgS, ezDbgHf);
@@ -1923,6 +1997,31 @@ int main(int argc, char **argv) {
             printf("\n"); }
         }
       }
+      // Fertigen Worker-Build abholen und in Scheiben hochladen. Der Wechsel der
+      // Zeichenseite (drawSet) passiert erst nach dem letzten Slice — die GPU
+      // sieht nie halbfertige Geometrie.
+      if(!upActive){
+        float *tv, *cv, *lv; int ntv, ncv, nli, ntr;
+        trees_build_finished_snapshot(&tv, &cv, &lv, &ntv, &ncv, &nli, &ntr);
+        if(tv){
+          upload_begin(tv, cv, lv, ntv, ncv, nli, 1 - drawSet);
+          printf("  Baum-Build (Thread) uebernommen: %d Baeume, %.0f MB — Upload in Scheiben (%u MB/Frame)\n",
+                 ntr,
+                 ((double)ntv * TREE_FLOATS + (double)ncv * CROWN_FLOATS
+                  + (double)nli * LEAF_FLOATS) * 4.0 / 1e6, UP_BYTES >> 20);
+          fflush(stdout);
+        }
+      }
+      { double u0 = now_sec(); upload_step(rawDt * 1000.0); double u1 = now_sec();
+        static double upMax = 0.0, upSum = 0.0; static int upN = 0;
+        double ms = (u1 - u0) * 1000.0;
+        if(ms > 0.5){ upSum += ms; upN++; if(ms > upMax) upMax = ms; }
+        if(upN){ static double lastUp = 0;
+          if(tNow - lastUp >= 2.0){
+            printf("  Baum-Upload: %d Slices, letzter %.0f ms, max %.0f ms, Mittel %.0f ms\n",
+                   upN, ms, upMax, upSum / upN);
+            fflush(stdout); lastUp = tNow; upSum = 0; upN = 0; upMax = 0;
+          } } }
       // Blickrichtung (XZ-projiziert) fuer die sortierte Walk-Ordnung setzen —
       // vor jedem Build, damit der Build die aktuelle Richtung benutzt.
       { float vx = camTgt[0] - camPos[0], vz = camTgt[2] - camPos[2];
@@ -2050,9 +2149,9 @@ int main(int argc, char **argv) {
       p_glUniform1f(locTTime, tSh);
       p_glUniform1f(locTMask, 0.0f);
       applyShadow(&slTree, 0);
-      p_glBindVertexArray(vaoTree);
-      p_glDrawArrays(GL_TRIANGLES, 0, nTreeVerts);
-      if(nCrownVerts > 0){
+      p_glBindVertexArray(vaoTree[drawSet]);
+      p_glDrawArrays(GL_TRIANGLES, 0, nTreeVertsD);
+      if(nCrownVertsD > 0){
         p_glUseProgram(progCrown);
         p_glUniformMatrix4fv(locCMVP, 1, GL_FALSE, lightMVP);
         p_glUniform3f(locCCam, eye[0], eye[1], eye[2]);
@@ -2067,10 +2166,10 @@ int main(int argc, char **argv) {
         // Kronenflaeche.
         if(locCLFace >= 0) p_glUniform1f(locCLFace, 1.0f);
         applyShadow(&slCrown, 0);
-        p_glBindVertexArray(vaoCrown);
-        p_glDrawArrays(GL_TRIANGLES, 0, nCrownVerts);
+        p_glBindVertexArray(vaoCrown[drawSet]);
+        p_glDrawArrays(GL_TRIANGLES, 0, nCrownVertsD);
       }
-      if(shadowLeafOn && nLeafInst > 0 && !envNoLeaf){
+      if(shadowLeafOn && nLeafInstD > 0 && !envNoLeaf){
         p_glUseProgram(progLeaf);
         p_glUniformMatrix4fv(locLMVP, 1, GL_FALSE, lightMVP);
         p_glUniform3f(locLCam, eye[0], eye[1], eye[2]);
@@ -2083,8 +2182,8 @@ int main(int argc, char **argv) {
         p_glUniform1f(locLMask, 0.0f);
         if(locLAlb >= 0) p_glUniform1f(locLAlb, 0.0f);
         applyShadow(&slLeaf, 0);
-        p_glBindVertexArray(vaoLeaf);
-        p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInst);
+        p_glBindVertexArray(vaoLeaf[drawSet]);
+        p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInstD);
       }
       p_glDisable(GL_POLYGON_OFFSET_FILL);
       p_glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -2147,8 +2246,8 @@ int main(int argc, char **argv) {
       p_glUniform1f(locTTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
       p_glUniform1f(locTMask, (float)dbgTreeMask);
       applyShadow(&slTree, (shadowThis && shadowSampleOn) ? (shadowForce ? 2 : 1) : 0);
-      p_glBindVertexArray(vaoTree);
-      p_glDrawArrays(GL_TRIANGLES, 0, nTreeVerts);
+      p_glBindVertexArray(vaoTree[drawSet]);
+      p_glDrawArrays(GL_TRIANGLES, 0, nTreeVertsD);
     }
 
     // Gras (instanziert) — von WEIT nach NAH zeichnen (Alpha-Blending und
@@ -2235,15 +2334,15 @@ int main(int argc, char **argv) {
       p_glUniform1f(locCMask, (float)envCrownMask);
       if(locCLFace >= 0) p_glUniform1f(locCLFace, 0.0f);
       p_glUniform1f(locCTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
-      p_glBindVertexArray(vaoCrown);
-      p_glDrawArrays(GL_TRIANGLES, 0, nCrownVerts);
+      p_glBindVertexArray(vaoCrown[drawSet]);
+      p_glDrawArrays(GL_TRIANGLES, 0, nCrownVertsD);
       p_glDisable(GL_BLEND);
     }
 
     // Einzelblaetter naher Baeume: Alpha-Test im Shader (discard), also opak wie
     // das Baum-Mesh -> Depth schreiben, kein Blend. Vor dem Gras zeichnen, damit
     // der Tiefentest Gras hinter den Blaettern verwirft.
-    if(!grassOnly && nLeafInst > 0 && !envNoLeaf){
+    if(!grassOnly && nLeafInstD > 0 && !envNoLeaf){
       p_glDepthMask(GL_TRUE);
       p_glUseProgram(progLeaf);
       p_glUniformMatrix4fv(locLMVP, 1, GL_FALSE, mvp);
@@ -2252,8 +2351,8 @@ int main(int argc, char **argv) {
       p_glUniform1f(locLTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
       p_glUniform1f(locLMask, (float)envLeafMask);
       if(locLAlb >= 0) p_glUniform1f(locLAlb, 0.0f);
-      p_glBindVertexArray(vaoLeaf);
-      p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInst);
+      p_glBindVertexArray(vaoLeaf[drawSet]);
+      p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInstD);
     }
 
     // 3) MSAA-Resolve: fboMS -> fbo (Farbe + Tiefe in einem Blit, Single-Sample)
@@ -2297,7 +2396,7 @@ int main(int argc, char **argv) {
     snprintf(hud1, sizeof hud1, "FPS %3d %dx%d RES %s CAM %s AA %s TREES %d QUADS %d GRASS %d",
              (int)(fpsEMA + 0.5), winW, winH, sc, flyMode ? "FLY" : "ORB",
              useMSAA ? (msaaSamples == 8 ? "8x" : "4x") : "OFF",
-             nTrees, nCrownVerts / 6, nGrass);
+             nTreesD, nCrownVertsD / 6, nGrass);
     snprintf(hud2, sizeof hud2, "D %.1fx H %.1fx MD %d.%dm%s%s%s%s",
              grassDensityScale, grassHeightScale, (int)grassMaxDist, (int)(grassMaxDist * 10) % 10,
              grassFrozen ? " FRZ" : "", grassOnly ? " NUR-GRAS" : "",

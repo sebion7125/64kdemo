@@ -11,6 +11,7 @@
 // Platzierung identisch zum alten SDF-System (gleiche Zellen, Hashes,
 // Terrain-Filter) -> Baeume stehen an den selben Positionen wie zuvor.
 #include "scene.h"
+#include <pthread.h>   // Baum-Build im Worker-Thread (Muster wie grass_cpu.c)
 #include <math.h>
 #include <stdio.h>   // Baum-Stufen-Log (DEMO_TREELOG)
 #include <string.h>
@@ -38,10 +39,25 @@ int   treeFocusValid = 0;
 // hier, weil add_leaf()/leaf_cluster() von beiden Generatoren aus tief unten
 // aufgerufen werden und die Kette dafuer nicht voll durchgereicht wird.
 static float gLodR = 30.0f;
-float treeVerts[TREE_VERT_CAP * TREE_FLOATS];float crownVerts[CROWN_CAP * CROWN_FLOATS];
-float leafInst[LEAF_CAP * LEAF_FLOATS];
+// Doppel-Puffer (Runde 26): der Build laeuft im Worker-Thread und schreibt in
+// die Schreibseite, gezeichnet wird ungestoert aus der Zeichenseite. Getauscht
+// wird in trees_build_finish() unter Mutex — nie mitten im Build.
+static float tvA[TREE_VERT_CAP * TREE_FLOATS], tvB[TREE_VERT_CAP * TREE_FLOATS];
+static float cvA[CROWN_CAP * CROWN_FLOATS],    cvB[CROWN_CAP * CROWN_FLOATS];
+static float lvA[LEAF_CAP * LEAF_FLOATS],      lvB[LEAF_CAP * LEAF_FLOATS];
+float *treeVerts = tvA, *crownVerts = cvA, *leafInst = lvA;      // Schreibseite (Build)
+float *treeVertsD = tvB, *crownVertsD = cvB, *leafInstD = lvB;   // Zeichenseite (Main)
 float wireVerts[WIRE_CAP * WIRE_FLOATS];
-int nTreeVerts = 0, nCrownVerts = 0, nWireVerts = 0, nTrees = 0, nLeafInst = 0;
+int nTreeVerts = 0, nCrownVerts = 0, nWireVerts = 0, nTrees = 0, nLeafInst = 0;   // Schreibseite
+int nTreeVertsD = 0, nCrownVertsD = 0, nLeafInstD = 0, nTreesD = 0;               // Zeichenseite
+
+// Thread-Zustand (Mutex wie beim Gras: der Main-Thread tauscht nur Zeiger/Counts,
+// der Worker beruehrt keine GL-Objekte)
+static pthread_mutex_t treeMu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  treeCv = PTHREAD_COND_INITIALIZER;
+static int treeReqPending = 0, treeBuildDone = 0, treeBuilding = 0;
+static float treeReqTX = 0.0f, treeReqTZ = 0.0f, treeReqLod[3];
+static int treeReqLodValid = 0;
 
 // ---------- kleine Helfer ----------
 static void add_wire(float x0, float y0, float z0, float x1, float y1, float z1){
@@ -1070,11 +1086,19 @@ static void lodSet(int ix, int iz, int tier){
   lodMem[k].ix = ix; lodMem[k].iz = iz; lodMem[k].tier = (signed char)tier;
 }
 
-void trees_build(float tx, float tz){
+// ---- Build in Phasen (Worker-Thread + Doppel-Puffer) ----
+// frueher: trees_build() erzeugte den ganzen Wald in EINEM Aufruf = 350 ms
+// Blockierung im Frame (gemessen, Nutzerbefund "stocken").
+#define TREE_CAND_CAP 4096
+static TreeCand treeCand[TREE_CAND_CAP];
+static int treeNCand = 0, treeCandPos = 0;
+
+void trees_build_begin(float tx, float tz){
   nTreeVerts = 0; nCrownVerts = 0; nWireVerts = 0; nTrees = 0; nLeafInst = 0;
-  #define CAND_CAP 4096
-  static TreeCand cand[CAND_CAP];
+  #define CAND_CAP TREE_CAND_CAP
+  TreeCand *cand = treeCand;
   int nc = 0;
+  treeCandPos = 0;
   const int RANGE = 20;   // Zellen-Radius um das Kameraziel (~180m, passt zur
                           // groesseren Sichtweite: march bis 400m)
   // Referenzpunkt fuer Detailstufe und Budget: die ECHTE Kamera. Vorher das
@@ -1104,9 +1128,8 @@ void trees_build(float tx, float tz){
   // NAHE vor FERN erzeugen: das Blatt-Budget (LEAF_CAP) ist begrenzt. In
   // Zell-Reihenfolge hatten ferne Baeume es schon aufgebraucht, bevor der
   // Baum direkt vor der Kamera dran war (gemessen: 300k Instanzen verpufft).
-  for(int i = 0; i < nc; i++)
-    for(int j = i + 1; j < nc; j++)
-      if(cand[j].d2 < cand[i].d2){ TreeCand t = cand[i]; cand[i] = cand[j]; cand[j] = t; }
+  // Sortierung steht in trees_sort_candidates() — sie laeuft zwischen begin()
+  // und dem ersten step(), damit step() in hockern weiterarbeiten kann.
   // DEMO_ONETREE: genau den Baum bauen, den die Debug-Kamera gerahmt hat
   // (tree_jump). Vorher war es der naechste am Build-Zentrum = camTgt, ab ~24 m
   // Abstand also systematisch ein ANDERER Baum -> jede Abstandsmessung wertlos.
@@ -1122,7 +1145,14 @@ void trees_build(float tx, float tz){
     TreeCand t = cand[0]; cand[0] = cand[best]; cand[best] = t;
     nc = 1;
   }
-  for(int i = 0; i < nc; i++){
+  treeNCand = nc;
+}
+
+// erzeugt hoechstens maxTrees Baeume; 1 = Build fertig
+int trees_build_step(int maxTrees){
+  TreeCand *cand = treeCand;
+  int end = treeCandPos + maxTrees; if(end > treeNCand) end = treeNCand;
+  for(int i = treeCandPos; i < end; i++){
     float d = sqrtf(cand[i].d2), H = cand[i].H;
     // Schaltweiten nach deren Verhaeltnis (LOD1 bei 2,7x, LOD2 bei 6,7x der
     // Wuchslaenge), hier auf Nutzerwunsch deutlich weiter: volle Dichte bis
@@ -1187,4 +1217,101 @@ void trees_build(float tx, float tz){
              ezLeafR, ezLeafG, ezLeafB);
     nTrees++;
   }
+  treeCandPos = end;
+  return treeCandPos >= treeNCand;
+}
+
+// Sortierung NAHE vor FERN (nach dem Sammeln, vor dem ersten Schritt):
+// das Blatt-Budget ist begrenzt — in Zell-Reihenfolge hatten ferne Baeume es
+// schon aufgebraucht, bevor der Baum vor der Kamera dran war (gemessen: 300k
+// Instanzen verpufft).
+static void trees_sort_candidates(void){
+  int nc = treeNCand;
+  for(int i = 0; i < nc; i++)
+    for(int j = i + 1; j < nc; j++)
+      if(treeCand[j].d2 < treeCand[i].d2){ TreeCand t = treeCand[i]; treeCand[i] = treeCand[j]; treeCand[j] = t; }
+}
+
+// Tausch Schreib-/Zeichenseite. Von hier an sieht der Main-Thread den fertigen
+// Build (und der Worker kann den naechsten in die jetzt freie Schreibseite bauen).
+void trees_build_finish(void){
+  pthread_mutex_lock(&treeMu);
+  float *tp;
+  tp = treeVerts;   treeVerts = treeVertsD;   treeVertsD = tp;
+  tp = crownVerts;  crownVerts = crownVertsD; crownVertsD = tp;
+  tp = leafInst;    leafInst = leafInstD;     leafInstD = tp;
+  nTreeVertsD = nTreeVerts; nCrownVertsD = nCrownVerts;
+  nLeafInstD = nLeafInst;   nTreesD = nTrees;
+  treeBuildDone = 1; treeBuilding = 0;
+  pthread_mutex_unlock(&treeMu);
+}
+
+// synchroner Komplettaufbau (erster Frame, Messlaeufe, Tests)
+void trees_build(float tx, float tz){
+  trees_build_begin(tx, tz);
+  trees_sort_candidates();
+  while(!trees_build_step(64)){ }
+  trees_build_finish();
+}
+
+// ================= Build-Thread =================
+// Muster wie beim Gras (grass_cpu.c): Main-Thread ruft trees_build_request(),
+// der Worker baut zu Ende (kein Restart mitten drin), der Main-Thread holt den
+// fertigen Build per trees_build_finished_snapshot() ab und laedt hoch — der
+// GL-Kontext laeuft ausschliesslich im Main-Thread.
+void trees_build_request(float tx, float tz, const float lodRef[3]){
+  pthread_mutex_lock(&treeMu);
+  treeReqTX = tx; treeReqTZ = tz;
+  if(lodRef){ treeReqLod[0] = lodRef[0]; treeReqLod[1] = lodRef[1]; treeReqLod[2] = lodRef[2];
+              treeReqLodValid = 1; }
+  else treeReqLodValid = 0;
+  treeReqPending = 1;
+  pthread_cond_signal(&treeCv);
+  pthread_mutex_unlock(&treeMu);
+}
+
+int trees_build_busy(void){
+  pthread_mutex_lock(&treeMu);
+  int b = treeBuilding || treeReqPending;
+  pthread_mutex_unlock(&treeMu);
+  return b;
+}
+
+// fertigen Build abholen (exakt einmalig); *tv == NULL wenn nichts fertig ist
+void trees_build_finished_snapshot(float **tv, float **cv, float **lv,
+                                   int *ntv, int *ncv, int *nli, int *ntrees){
+  pthread_mutex_lock(&treeMu);
+  if(treeBuildDone){
+    *tv = treeVertsD; *cv = crownVertsD; *lv = leafInstD;
+    *ntv = nTreeVertsD; *ncv = nCrownVertsD; *nli = nLeafInstD; *ntrees = nTreesD;
+    treeBuildDone = 0;
+  } else *tv = NULL;
+  pthread_mutex_unlock(&treeMu);
+}
+
+static void *tree_worker(void *unused){
+  (void)unused;
+  for(;;){
+    pthread_mutex_lock(&treeMu);
+    while(!treeReqPending) pthread_cond_wait(&treeCv, &treeMu);
+    treeReqPending = 0; treeBuilding = 1;
+    float tx = treeReqTX, tz = treeReqTZ;
+    if(treeReqLodValid){
+      treeLodRef[0] = treeReqLod[0]; treeLodRef[1] = treeReqLod[1];
+      treeLodRef[2] = treeReqLod[2]; treeLodRefValid = 1;
+    }
+    pthread_mutex_unlock(&treeMu);
+    trees_build_begin(tx, tz);
+    trees_sort_candidates();
+    while(!trees_build_step(32)){ }
+    trees_build_finish();
+  }
+  return 0;
+}
+
+int trees_thread_start(void){
+  pthread_t t;
+  if(pthread_create(&t, 0, tree_worker, 0) != 0) return 0;
+  pthread_detach(t);
+  return 1;
 }
