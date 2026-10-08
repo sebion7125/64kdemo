@@ -729,6 +729,9 @@ static void impostor_step(double budgetMs, int set, const struct ImpLoc *L){
 
     if(now_sec() * 1000.0 - t0 >= budgetMs) break;
   }
+  p_glUseProgram(L->pCrown);   // cImp gehoert zum Kronen-Programm; nach dem
+                               // Blatt-Block waere das Leaf-Programm aktiv ->
+                               // Uniform-Location fremden Programms = GL 0x502
   p_glUniform1f(L->cImp, 0.0f);
   p_glDisable(GL_SCISSOR_TEST);
   p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
