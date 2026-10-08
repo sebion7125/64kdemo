@@ -587,6 +587,23 @@ Gemessen: Faktoren laufen 0.00 -> 0.63 -> 1.00 mit Summe 1 (Protokoll der
 Satz-Wechsel). Visuelle Beurteilung steht auf dem GPU-Host aus — in der VM laeuft
 die Ueberblendung wegen 1,4 s/Frame innerhalb eines Frames ab.
 
+## A/B gemessen: Stand `b73bee5` (Worker-Thread) gegen Stand nach Runde 30
+
+Gleiche Szene (648 Bäume), Software-GL in der VM, 640×360, `DEMO_NOTERRAIN=1`:
+
+| | `b73bee5` | jetzt |
+|---|---|---|
+| Karten-Datensatz | 3 275 226 Eckpunkt-Instanzen | **299 904 Instanzen** |
+| Puffer pro Satz | 352 MB | **195 MB** |
+| Upload beim Erstbuild | 141 ms | **78 ms** |
+| Erstbuild gesamt | 469 ms | 380 ms |
+| Frame-Median Blick zum Wald | 1354 ms | 1347 ms |
+| Frame-Median Fernblick | 1191 ms | 1203 ms |
+
+Frame-Zeit gleich: die eingesparten Vertex-/Uploadkosten sind in die **Full-Rate**
+der jetzt vollen fernen Kronen gewandert. Sichtbar: ferne Kronen sind gefüllt statt
+dünn (Laubpixel in der Szene 2160 → 7606).
+
 ## Zu prüfen, nachdem die Bäume umgebaut sind (Runde 27–30)
 
 Knöpfe dafür (alle Umgebungsvariablen, kein Neubauen nötig):
