@@ -576,6 +576,9 @@ static GLuint crnTex = 0;
 static GLuint impFbo = 0, impDepthRb = 0;
 static int    envImpDump = 0;
 static int    impCards = 0;          // DEMO_IMPCARDS=1: Karten mit in die Aufnahme
+// Welche Laub-Schichten wirklich gezeichnet werden (Tasten 4/5/6/7) — zum
+// Identifizieren der Stufen im laufenden Bild.
+static int    layLeaf = 1, layCard = 1, layBB = 1;
 static int    impNext = 0, impOn = 1;
 static void build_crown_tiles(void){
   p_glGenTextures(1, &crnTex);
@@ -1765,6 +1768,8 @@ int main(int argc, char **argv) {
   GLint locCMask   = p_glGetUniformLocation(progCrown, "uCrownMask");
   GLint locCFade   = p_glGetUniformLocation(progCrown, "uTreeFade");
   GLint locCImp    = p_glGetUniformLocation(progCrown, "uImpostor");
+  GLint locCCards  = p_glGetUniformLocation(progCrown, "uCardsOn");
+  GLint locCBB     = p_glGetUniformLocation(progCrown, "uBillboardOn");
   GLint locCOld    = p_glGetUniformLocation(progCrown, "uTreeOld");
   GLint locCLFace  = p_glGetUniformLocation(progCrown, "uLightFace");
   struct ImpLoc impLoc;
@@ -1822,6 +1827,10 @@ int main(int argc, char **argv) {
   envExitWhenDone = getenv("DEMO_EXIT") ? 1 : 0;
   envImpDump = getenv("DEMO_IMPDUMP") ? 1 : 0;
   impCards = getenv("DEMO_IMPCARDS") ? 1 : 0;
+  { const char *ly = getenv("DEMO_LAYERS");   // z.B. "leaf", "card", "bb", "leaf,card"
+    if(ly){ layLeaf = strstr(ly,"leaf") ? 1 : 0;
+            layCard = strstr(ly,"card") ? 1 : 0;
+            layBB   = strstr(ly,"bb")   ? 1 : 0; } }
   { const char *ef = getenv("DEMO_FREEZE"); if (ef) envFreeze = (float)atof(ef); }
   // DEMO_TREEFADE=<sek>: Ueberblendzeit beim LOD-Satzwechsel (0 = hart schneiden)
   { const char *tf = getenv("DEMO_TREEFADE"); if (tf) treeFadeDur = (double)atof(tf); }
@@ -1999,9 +2008,13 @@ int main(int argc, char **argv) {
         case KeyPress: {
           KeySym ks = p_XLookupKeysym(&e.xkey, 0);
           if (ks == XK_Escape || ks == XK_q) running = 0;
-          if (ks == XK_1) scaleIdx = 0;
-          if (ks == XK_2) scaleIdx = 1;
-          if (ks == XK_3) scaleIdx = 2;
+          // Aufloesung: F1/F2/F3. Vorher waren das die Ziffern 1/2/3 — aber 1
+          // und 2 schalten auch Billboard bzw. Schilf. Taste 1 hat dadurch
+          // ZUGLEICH die Aufloesung von 1/2 auf 1x gesetzt (4x Pixel): das war
+          // der "massive FPS-Einbruch", den der Nutzer meldete.
+          if (ks == XK_F1) scaleIdx = 0;
+          if (ks == XK_F2) scaleIdx = 1;
+          if (ks == XK_F3) scaleIdx = 2;
           if (ks == XK_p) { save_screenshot_ppm("/tmp/64kdemo_shot.ppm", winW, winH);
                             save_grass_tex_ppm("/tmp/64kdemo_grasstex.ppm"); }
           if (ks == XK_t) showTreeWire = !showTreeWire;
@@ -2035,6 +2048,14 @@ int main(int argc, char **argv) {
           if (ks == XK_1){ treeBillboard0 = !treeBillboard0; treeForceRebuild = 1;
             printf("Ganzbaum-Billboard groebste Stufe: %s (Baum-Neubau angestossen)\n",
                    treeBillboard0 ? "AN" : "AUS"); }
+          if (ks == XK_4 || ks == XK_5 || ks == XK_6 || ks == XK_7){
+            const char *what;
+            if(ks == XK_4){ layLeaf = 1; layCard = 0; layBB = 0; what = "NUR EINZELBLAETTER"; }
+            else if(ks == XK_5){ layLeaf = 0; layCard = 1; layBB = 0; what = "NUR KARTEN"; }
+            else if(ks == XK_6){ layLeaf = 0; layCard = 0; layBB = 1; what = "NUR GANZBAUM-BILLBOARD"; }
+            else { layLeaf = 1; layCard = 1; layBB = 1; what = "alle Schichten"; }
+            printf("Laub-Schichten: %s (4=Blaetter 5=Karten 6=Billboard 7=alle)\n", what);
+          }
           if (ks == XK_2){ reedPassOn = !reedPassOn; reedCX = 1e30f;
             printf("Eigener Schilf-Pass: %s\n", reedPassOn ? "AN" : "AUS"); }
           if (ks == XK_y) { dbgAlpha2Cov = !dbgAlpha2Cov;
@@ -2618,7 +2639,7 @@ int main(int argc, char **argv) {
         p_glBindVertexArray(vaoCrown[drawSet]);
         p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nCrownVertsCur);
       }
-      if(shadowLeafOn && nLeafInstCur > 0 && !envNoLeaf){
+      if(shadowLeafOn && nLeafInstCur > 0 && !envNoLeaf && layLeaf){
         p_glUseProgram(progLeaf);
         p_glUniformMatrix4fv(locLMVP, 1, GL_FALSE, lightMVP);
         p_glUniform3f(locLCam, eye[0], eye[1], eye[2]);
@@ -2859,6 +2880,8 @@ int main(int argc, char **argv) {
       if(locCLFace >= 0) p_glUniform1f(locCLFace, 0.0f);
       p_glUniform1f(locCTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
       if(locCFade >= 0) p_glUniform1f(locCFade, treeFadeNew);
+      if(locCCards >= 0) p_glUniform1f(locCCards, (float)layCard);
+      if(locCBB >= 0) p_glUniform1f(locCBB, (float)layBB);
       p_glBindVertexArray(vaoCrown[drawSet]);
       p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nCrownVertsCur);
       if(treeFadeNew < 1.0f && treeOldSet >= 0 && nCrownVertsOld > 0){
@@ -2875,7 +2898,7 @@ int main(int argc, char **argv) {
     // Einzelblaetter naher Baeume: Alpha-Test im Shader (discard), also opak wie
     // das Baum-Mesh -> Depth schreiben, kein Blend. Vor dem Gras zeichnen, damit
     // der Tiefentest Gras hinter den Blaettern verwirft.
-    if(!grassOnly && (nLeafInstCur > 0 || (treeFadeNew < 1.0f && nLeafInstOld > 0)) && !envNoLeaf){
+    if(!grassOnly && layLeaf && (nLeafInstCur > 0 || (treeFadeNew < 1.0f && nLeafInstOld > 0)) && !envNoLeaf){
       p_glDepthMask(GL_TRUE);
       p_glUseProgram(progLeaf);
       p_glUniformMatrix4fv(locLMVP, 1, GL_FALSE, mvp);

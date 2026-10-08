@@ -16,6 +16,8 @@ uniform float uTreeFade = 1.0; // Ueberblendung beim LOD-Wechsel (Runde 27):
                                // 0 = dieser Satz verschwindet, 1 = voll sichtbaruniform float uTreeFade = 1.0; // Ueberblendung beim LOD-Wechsel (Runde 27):
                                // 0 = dieser Satz verschwindet, 1 = voll sichtbar
 uniform float uTreeOld = 0.0;    // 1 = dieser Satz blendet AUS (der alte)
+uniform float uCardsOn = 1.0;      // Schicht-Schalter (Tasten 4/5/6/7)
+uniform float uBillboardOn = 1.0;
 uniform vec3 uImpJit = vec3(0.0);   // Aufnahme: versetztes Wiederholen der Karten
 uniform float uImpostor = 0.0;   // 1 = Aufnahme in die Impostor-Textur (keine
                                  // Entfernungsblenden, kein Wind, feste Kamera)
@@ -85,14 +87,18 @@ void main(){
   // Karten bei R1 vorher rissen, kommt nicht wieder: R1 liegt jetzt bei 5x
   // Wuchshoehe, genau an der Stelle, an der die Einzelblaetter aufhoeren zu
   // decken (gemessen), und die Karten sind dichter (div 3 / scale 2,0).
-  float near = (uLightFace > 0.5) ? 1.0 : smoothstep(iLodR * 0.90, iLodR * 1.10, d);
+  float near = (uLightFace > 0.5) ? 1.0 : smoothstep(iLodR * 0.85, iLodR * 1.00, d);
   // Uebergang Karten -> Ganzbaum-Billboard (Runde 29): in Stufe 2 liegen beide im
   // Puffer, das Billboard faellt ab 0,7 R2 ein, die Karten duennen bis 1,1 R2 aus.
   // Laeuft ueber die Entfernung, also kontinuierlich und unabhaengig davon, wann
   // der letzte Build passiert ist. (iLodR2 == 0: alter Generator -> ausblenden aus)
   if(uLightFace < 0.5 && iLodR2 > 0.0){
-    if(aData.w >= 4.0) near *= smoothstep(iLodR2 * 0.70, iLodR2 * 0.95, d);
-    else               near *= 1.0 - smoothstep(iLodR2 * 0.85, iLodR2 * 1.10, d);
+    // Karten aus 1.00..1.15 R2, Billboard ein 0.85..1.00 R2 — dasselbe
+    // Ueberlappungsprinzip wie bei Blaettern/Karten: nie zwei halbe Schichten
+    if(aData.w >= 4.0) near *= smoothstep(iLodR2 * 0.85, iLodR2 * 1.00, d);
+    else               near *= 1.0 - smoothstep(iLodR2 * 1.00, iLodR2 * 1.15, d);
+    // Schicht einzeln abschaltbar: near = 0 -> vFade = 0 -> Alpha 0 -> discard
+    near *= (aData.w >= 4.0) ? uBillboardOn : uCardsOn;
   }
   // Aufnahme-Pass: keine Entfernungsschwelle, sonst verschwindet genau das,
   // was in die Kachel gehoert.

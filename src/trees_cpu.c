@@ -41,7 +41,8 @@ int   treeFocusValid = 0;
 static float gLodR = 30.0f;
 static float gLodR2 = 0.0f;
 static float gBbSize = 0.0f, gBbCen[3] = {0,0,0};   // BBox des letzten Baums
-static int   gBbWant = 0;      // Billboard fuer diesen Baum wirklich zeichnen   // Schaltweite der groebsten Stufe (20x Wuchshoehe).
+static float ezLszMax = 0.0f;  // groesster Blattgrundradius dieses Baums
+static int   gBbWant = 0;      // Billboard fuer diesen Baum wirklich zeichnen
                         // sitzt pro Karte in der Instanz, damit der Uebergang
                         // Karten -> Ganzbaum-Billboard im Shader kontinuierlich
                         // ueber die Entfernung laufen kann (kein Stufensprung).
@@ -321,8 +322,14 @@ static void emit_crown_billboard(float seed, float bx, float by, float bz, float
   gBbSize = 0.0f;              // pro Baum neu — sonst gilt die BBox des letzten
   if(ezNSprig <= 0) return;
   float mn[3] = { 1e30f, 1e30f, 1e30f}, mx[3] = {-1e30f,-1e30f,-1e30f};
+  // Reichweite pro Laubposition: Karte ODER Blattbuschel, je nachdem was weiter
+  // reicht. Nur die Kartenausdehnung zu nehmen schneidet oben Blaetter ab —
+  // der Blattbuschel reicht bis ~2x Blattgrundgroesse ueber die Position
+  // (Nutzerbefund: "viele Quads nach oben abgeschnitten").
+  float lr = ezLszMax * 2.0f;
   for(int i = 0; i < ezNSprig; i++){
     float r = ezSsize[i] * 0.5f;
+    if(lr > r) r = lr;
     if(ezSx[i] - r < mn[0]) mn[0] = ezSx[i] - r;
     if(ezSx[i] + r > mx[0]) mx[0] = ezSx[i] + r;
     if(ezSy[i] - r < mn[1]) mn[1] = ezSy[i] - r;
@@ -344,17 +351,19 @@ static void emit_crown_billboard(float seed, float bx, float by, float bz, float
   // beruehrt die Krone den Quad-Rand und man sieht gegen den Himmel eine gerade
   // Kante (gemessen: 14 von 64 Kacheln randberuehrend).
   size *= 1.15f;
+  // BBox UNABHAENGIG davon setzen, ob dieser Baum ein Billboard bekommt: die
+  // Aufnahme-Rahmung braucht sie fuer jeden Repraesentanten. Tier-3-Baeume
+  // zeichnen selbst kein Billboard — ohne das fiel die Rahmung auf 0,75*H
+  // zurueck und schnitt die Krone ab (Nutzer: "viele Quads nach oben abgeschnitten").
+  gBbSize = size;
+  gBbCen[0] = (mn[0] + mx[0]) * 0.5f; gBbCen[1] = (mn[1] + mx[1]) * 0.5f;
+  gBbCen[2] = (mn[2] + mx[2]) * 0.5f;
   if(!gBbWant) return;         // Rahmung ist gesetzt, Quad aber nicht gewollt
   if(nCrownVerts + 1 > CROWN_CAP){ treeCapCrown++; return; }
   float *d = &crownVerts[nCrownVerts * CROWN_FLOATS];
   d[0] = (mn[0] + mx[0]) * 0.5f; d[1] = (mn[1] + mx[1]) * 0.5f; d[2] = (mn[2] + mx[2]) * 0.5f;
   d[3] = size; d[4] = 0.0f; d[5] = seed;
-  d[6] = 4.0f + (float)ezBucket;
-  // dieselbe BBox wie der Billboard-Quad auch fuer die Aufnahme: passt
-  // Quadratroesse und Aufnahmefenster nicht zusammen, beruehrt der Kachelinhalt
-  // den Rand und man sieht im Wald ein hartes gruenes Rechteck (gemessen;
-  // DEMO_NOBB0=1 lasst den Block verschwinden)
-  gBbSize = size; gBbCen[0] = d[0]; gBbCen[1] = d[1]; gBbCen[2] = d[2];   // 4..67 = Impostor-Kachel (8x8-Atlas)
+  d[6] = 4.0f + (float)ezBucket;   // 4..67 = Impostor-Kachel (8x8-Atlas)
   d[7] = gLodR; d[8] = ezLeafR; d[9] = ezLeafG; d[10] = ezLeafB; d[11] = gLodR2;
   nCrownVerts++;
 }
@@ -954,6 +963,7 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
     const float CARDSCALE = ezCardScale;   // deren leafScale: 1,25 (LOD1) / 1,3 (LOD2)
     if(lc < 1) return;
     float lsz = P->leafSize * unit;
+    if(lsz > ezLszMax) ezLszMax = lsz;
     float lcr = ezLeafR * (0.85f + 0.30f * TH(700)),
           lcgg = ezLeafG * (0.85f + 0.30f * TH(701)),
           lcb  = ezLeafB * (0.85f + 0.30f * TH(702));
@@ -1028,6 +1038,7 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
   root.d[0] = 0.0f; root.d[1] = 1.0f; root.d[2] = 0.0f;
   ring_basis(&root.rg, 0.0f, 1.0f, 0.0f);
   ezNSprig = 0;
+  ezLszMax = 0.0f;
   // Karten-Groesse gleicht die Ausduennung aus (div 2 -> 1,25, div 8 -> 2,20);
   // muss VOR ez_grow stehen, die Groesse sitzt in der Sprig-Liste.
   ezCardScale = (tier >= 2) ? treeCardScaleN : (tier == 1 ? treeCardScale0 : 2.20f);
