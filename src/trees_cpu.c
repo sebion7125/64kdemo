@@ -15,6 +15,7 @@
 #include <pthread.h>   // Baum-Build im Worker-Thread (Muster wie grass_cpu.c)
 #include <math.h>
 #include <stdio.h>   // Baum-Stufen-Log (DEMO_TREELOG)
+#include <stdlib.h>    // calloc/exit fuer die Baum-Puffer
 #include <string.h>
 
 int   treeOneShot = 0;
@@ -66,11 +67,34 @@ static int   gBbWant = 0;      // Billboard fuer diesen Baum wirklich zeichnen
 // Doppel-Puffer (Runde 26): der Build laeuft im Worker-Thread und schreibt in
 // die Schreibseite, gezeichnet wird ungestoert aus der Zeichenseite. Getauscht
 // wird in trees_build_finish() unter Mutex — nie mitten im Build.
-static float tvA[TREE_VERT_CAP * TREE_FLOATS], tvB[TREE_VERT_CAP * TREE_FLOATS];
-static float cvA[CROWN_CAP * CROWN_FLOATS],    cvB[CROWN_CAP * CROWN_FLOATS];
-static float lvA[LEAF_CAP * LEAF_FLOATS],      lvB[LEAF_CAP * LEAF_FLOATS];
-float *treeVerts = tvA, *crownVerts = cvA, *leafInst = lvA;      // Schreibseite (Build)
-float *treeVertsD = tvB, *crownVertsD = cvB, *leafInstD = lvB;   // Zeichenseite (Main)
+// Die Baum-Puffer liegen NICHT in BSS. Mit vollem Geruest bis zur Bau-Grenze
+// (kein Schnitt, siehe tree_lod.c) braucht die Szene ueber 9,4 Mio Geruest-
+// Vertices; zwei Saetze davon sprengen die 2-GB-Grenze der PC-relativen
+// Adressierung und der Linker bricht ab ("relocation truncated to fit:
+// R_X86_64_PC32 against symbol ... in .bss"). Dynamische Allocation macht das
+// Budget zu einer Speicherfrage.
+static float *tvA, *tvB, *cvA, *cvB, *lvA, *lvB;
+float *treeVerts, *crownVerts, *leafInst;      // Schreibseite (Build)
+float *treeVertsD, *crownVertsD, *leafInstD;   // Zeichenseite (Main)
+static void tree_bufs_init(void){
+  static int done = 0;
+  if(done) return;
+  done = 1;
+  tvA = (float*)calloc((size_t)TREE_VERT_CAP * TREE_FLOATS, sizeof(float));
+  tvB = (float*)calloc((size_t)TREE_VERT_CAP * TREE_FLOATS, sizeof(float));
+  cvA = (float*)calloc((size_t)CROWN_CAP * CROWN_FLOATS, sizeof(float));
+  cvB = (float*)calloc((size_t)CROWN_CAP * CROWN_FLOATS, sizeof(float));
+  lvA = (float*)calloc((size_t)LEAF_CAP * LEAF_FLOATS, sizeof(float));
+  lvB = (float*)calloc((size_t)LEAF_CAP * LEAF_FLOATS, sizeof(float));
+  if(!tvA || !tvB || !cvA || !cvB || !lvA || !lvB){
+    fprintf(stderr, "Fehler: Baum-Puffer passen nicht in den Speicher (%.0f MB noetig)\n",
+            (2.0 * TREE_VERT_CAP * TREE_FLOATS + 2.0 * CROWN_CAP * CROWN_FLOATS +
+             2.0 * LEAF_CAP * LEAF_FLOATS) * 4.0 / 1e6);
+    exit(1);
+  }
+  treeVerts = tvA; crownVerts = cvA; leafInst = lvA;
+  treeVertsD = tvB; crownVertsD = cvB; leafInstD = lvB;
+}
 float wireVerts[WIRE_CAP * WIRE_FLOATS];
 int treeBuildRange = 20;   // DEMO_TREEBUILDRANGE: Zellen-Radius des Wald-Baus
 int nTreeVerts = 0, nCrownVerts = 0, nWireVerts = 0, nTrees = 0, nLeafInst = 0;   // Schreibseite
@@ -1266,6 +1290,7 @@ static TreeCand treeCand[TREE_CAND_CAP];
 static int treeNCand = 0, treeCandPos = 0;
 
 void trees_build_begin(float tx, float tz){
+  tree_bufs_init();
   nTreeVerts = 0; nCrownVerts = 0; nWireVerts = 0; nTrees = 0; nLeafInst = 0;
   for(int q = 0; q < IMP_TILES; q++){ impRepD[q].valid = 0; impRepD[q].nTree = 0; }
   for(int q = 0; q < IMP_TILES; q++) impNTree[q] = 0;

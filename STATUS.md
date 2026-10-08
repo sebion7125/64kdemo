@@ -2839,3 +2839,25 @@ Rest ~1-2 Pixel bei ~150 px Deckung = Messraster.
 
 Test schneller: `DEMO_LODTEST="140 3 0.1" ./bin/64kdemo 320 180` (1370 Frames,
 ~2,5 min). Die Laufzeit steckt in der Fuellrate, nicht in der Logik.
+
+## Vollstaendiges Geruest bis zur Bau-Grenze: Kosten und BSS-Grenze (2026-10-08)
+
+Nach dem Wegfall des Geruest-Schnitts (Gewicht 1 bis zur Bau-Grenze) braucht die
+Standardszene **9 863 016 Geruest-Vertices**. Bei 9,5 Mio riss das Cap (399
+Treffer, 26 Baeume uebersprungen). Hochsetzen auf 24 Mio liess den Linker
+abarbeiten: `relocation truncated to fit: R_X86_64_PC32 against symbol ... in
+.bss` — die Puffer lagen als statische Arrays in BSS, und zusammen mit Gras/
+Schilf/Terrain wird die 2-GB-Grenze PC-relativer Adressierung ueberschritten.
+
+Loesung: tvA/tvB, cvA/cvB, lvA/lvB auf `calloc` umgestellt (tree_bufs_init()).
+Budget ist damit eine Speicherfrage, keine Link-Grenze. TREE_VERT_CAP 9,5 ->
+12 Mio. Gemessen: 0 Cap-Treffer, 0 uebersprungene Baeume (Standard und Stress
+LODRSCALE 2.0), RSS 2,40 GB (CPU-Doppelpuffer + VAOs).
+
+Offen/abzuwaegen: 2,4 GB und ~9,9 Mio Vertices pro Frame sind der Preis fuer
+"jeder Baum hat bis zur Bau-Grenze volles Geruest". Alternative, die die
+Invariante einhaelt: Baum-Gewicht am Bau-Rand auf 0 ausblenden (dann ist ein
+Schnitt dort erlaubt) und/oder den Bau-Radius verkleinern. crown.vert blendet
+Karten bei 190-250 m aus, die Bau-Grenze liegt aber bei 180 m — der Fade wirkt
+also nie, und das Geruest hat am Bau-Rand gar keinen Fade (Baum verschwindet
+hart). Das haengt mit dem Cache-Thema zusammen.

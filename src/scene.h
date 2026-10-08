@@ -68,7 +68,7 @@ float c_terrainH(float px, float py);
 // werden zuerst gebaut, bei Cap-Uberlauf fehlt Geometrie also ganz hinten —
 // nicht vor der Kamera.
 #ifndef TREE_VERT_CAP
-#define TREE_VERT_CAP 9500000   // Netz-Dichte ist jetzt entfernungsabhaengig bis
+#define TREE_VERT_CAP 12000000   // Puffer sind dynamisch (calloc), kein BSS-Limit mehr   // Netz-Dichte ist jetzt entfernungsabhaengig bis
                                 // 1,15 R2 (kein Sprung bei der Blende) — Stress
                                 // (DEMO_LODRSCALE=2) braucht 7,8 Mio; bei 5,2 Mio
                                 // fehlten 217 Baeume. CPU-Puffer stehen im BSS,
