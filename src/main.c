@@ -551,6 +551,70 @@ static const float leafBase[6][2] = {
 #define FOL_AZ    16
 #define FOL_VAR   4
 static GLuint folTex = 0, folFbo = 0, folDepth = 0, vboFol = 0, vaoFol = 0;
+
+// ---------- Ganzbaum-Kronen-Kacheln (TODO 23, Runde 29) ----------
+// Die groebste Detailstufe (tier 0, ab 20x Wuchshoehe ~ 135 m) zeichnet statt
+// hunderter Einzelkarten EIN Quad pro Baum, beklebt mit einer Kronen-Kachel.
+// Gemessen (Runde 28): tier 0 hielt 246 535 von 545 871 Karten — der groesste
+// Full-Rate-Posten. Eine Kachel pro Baum = 364 Quads.
+// Die Kachel ist prozedural: Silhouette einer Laubkrone (breiter als hoch,
+// ausgefranster Rand aus Buscheln), innen Buschel-Sprenkel statt flacher
+// Scheibe. Farbneutral — die Blattfarbe des Baumes kommt als Tint.
+#define CRN_N   2                 // 2x2 Kacheln
+#define CRN_PX  128               // Pixel pro Kachel
+static GLuint crnTex = 0;
+static float crnHash2(float x, float y){
+  float r = sinf(x * 12.9898f + y * 78.233f) * 43758.5453f;
+  return r - floorf(r);
+}
+static float crnNoise(float x, float y){
+  float ix = floorf(x), iy = floorf(y), fx = x - ix, fy = y - iy;
+  float a = crnHash2(ix, iy), b = crnHash2(ix + 1, iy);
+  float c = crnHash2(ix, iy + 1), d = crnHash2(ix + 1, iy + 1);
+  float ux = fx * fx * (3.0f - 2.0f * fx), uy = fy * fy * (3.0f - 2.0f * fy);
+  return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
+}
+static float crnSstep(float e0, float e1, float x){
+  float t = (x - e0) / (e1 - e0); if(t < 0.0f) t = 0.0f; if(t > 1.0f) t = 1.0f;
+  return t * t * (3.0f - 2.0f * t);
+}
+static void build_crown_tiles(void){
+  static unsigned char img[CRN_N * CRN_PX * CRN_N * CRN_PX * 4];
+  for(int ty = 0; ty < CRN_N; ty++)
+  for(int tx = 0; tx < CRN_N; tx++)
+  for(int py = 0; py < CRN_PX; py++)
+  for(int px = 0; px < CRN_PX; px++){
+    float u = (px + 0.5f) / CRN_PX * 2.0f - 1.0f;
+    float v = (py + 0.5f) / CRN_PX * 2.0f - 1.0f;
+    float ang = atan2f(v, u);
+    float r0 = 0.80f + 0.07f * sinf(3.0f * ang + tx * 1.7f + ty * 2.3f)
+                    + 0.05f * cosf(5.0f * ang - tx * 0.9f + ty * 1.1f);
+    if(v < 0.0f) r0 *= 1.0f - 0.18f * (-v);          // Unterseite flacher
+    float rr = sqrtf(u * u * 0.92f + v * v * 1.12f);
+    float edge = crnNoise(px * 0.11f + tx * 7.0f, py * 0.11f + ty * 5.0f);
+    float a = r0 + (edge - 0.5f) * 0.30f;            // Buschel ragen ueber die Silhouette
+    float cov = 1.0f - crnSstep(a - 0.14f, a + 0.06f, rr);
+    float n2 = crnNoise(px * 0.22f + tx * 3.0f, py * 0.22f + ty * 9.0f);
+    float n3 = crnNoise(px * 0.55f + tx * 11.0f, py * 0.55f + ty * 13.0f);
+    cov *= 0.88f + 0.12f * n2;                       // innen fast dicht, leicht gefleckt
+    float lum = 0.76f + 0.24f * (0.6f * n2 + 0.4f * n3);
+    lum *= 0.86f + 0.14f * crnSstep(-0.9f, 0.9f, v); // unten dunkler
+    int o = ((ty * CRN_PX + py) * (CRN_N * CRN_PX) + tx * CRN_PX + px) * 4;
+    unsigned char cc = (unsigned char)(lum * 255.0f);
+    img[o] = cc; img[o+1] = cc; img[o+2] = cc;
+    img[o+3] = (unsigned char)(cov * 255.0f);
+  }
+  p_glGenTextures(1, &crnTex);
+  p_glBindTexture(GL_TEXTURE_2D, crnTex);
+  p_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, CRN_N * CRN_PX, CRN_N * CRN_PX, 0,
+                 GL_RGBA, GL_UNSIGNED_BYTE, img);
+  p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  printf("Kronen-Kacheln: %dx%d Kacheln a %d px, prozedural (%.2f s)\n",
+         CRN_N, CRN_N, CRN_PX, now_sec() - 0.0);
+}
 // Shadow-Map: eine orthogliche Licht-Kaskade um die Kamera. Geworfen werden
 // Baum-Mesh, Kronen-Quads und Einzelblaetter — die Kronen sind der
 // Schattenwerfer, den man auf dem Boden sieht.
@@ -1497,6 +1561,7 @@ int main(int argc, char **argv) {
   GLint locCCam    = p_glGetUniformLocation(progCrown, "uCamPos");
   GLint locCTgt    = p_glGetUniformLocation(progCrown, "uCamTgt");
   GLint locCFol    = p_glGetUniformLocation(progCrown, "uFoliage");
+  GLint locCFol2   = p_glGetUniformLocation(progCrown, "uCrownTex");
   GLint locCTime   = p_glGetUniformLocation(progCrown, "uTime");
   GLint locCMask   = p_glGetUniformLocation(progCrown, "uCrownMask");
   GLint locCFade   = p_glGetUniformLocation(progCrown, "uTreeFade");
@@ -1550,6 +1615,7 @@ int main(int argc, char **argv) {
   // Wald = schneller Build, damit die Ueberblendung messbar wird.
   { const char *br = getenv("DEMO_TREEBUILDRANGE"); if (br) treeBuildRange = atoi(br); }
   { const char *td = getenv("DEMO_TREEDEBUG"); if (td) treeDbg = atoi(td); }
+  { const char *nb = getenv("DEMO_NOBB0"); if (nb) treeBillboard0 = atoi(nb); }
   { const char *cp = getenv("DEMO_CARDT0");
     if(cp) { int d = 3; float sc = 1.30f;
       if(sscanf(cp, "%d %f", &d, &sc) == 2){ treeCardDiv0 = d < 1 ? 1 : d; treeCardScale0 = sc; } } }
@@ -1615,6 +1681,7 @@ int main(int argc, char **argv) {
   envLeafMask = getenv("DEMO_LEAFMASK") ? atoi(getenv("DEMO_LEAFMASK")) : 0;  // 1=rot, 2=nur Albedo
   if (envTreeJump) tree_jump();
   build_foliage_atlas(progLeaf);   // Atlas braucht vboLeafBase (build_tree_lines) + progLeaf
+  build_crown_tiles();             // Ganzbaum-Kacheln fuer die groebste Detailstufe
   init_shadow();
   ShadowLoc slScene, slTree, slGrass, slLeaf, slCrown;
   fillShadowLoc(progScene, &slScene); fillShadowLoc(progTMesh, &slTree);
@@ -2227,6 +2294,9 @@ int main(int argc, char **argv) {
         p_glUniform3f(locCTgt, ctr[0], ctr[1], ctr[2]);
         p_glActiveTexture(GL_TEXTURE0); p_glBindTexture(GL_TEXTURE_2D, folTex);
         p_glUniform1i(locCFol, 0);
+        p_glActiveTexture(GL_TEXTURE1); p_glBindTexture(GL_TEXTURE_2D, crnTex);
+        if(locCFol2 >= 0) p_glUniform1i(locCFol2, 1);
+        p_glActiveTexture(GL_TEXTURE0);
         p_glUniform1f(locCTime, tSh);
         p_glUniform1f(locCMask, 0.0f);
         // Im Schatten-Wurf muessen die Kronen-Quads SENKRECHT zur Sonnenrichtung
@@ -2428,6 +2498,10 @@ int main(int argc, char **argv) {
       p_glActiveTexture(GL_TEXTURE0);
       p_glBindTexture(GL_TEXTURE_2D, folTex);
       p_glUniform1i(locCFol, 0);
+      p_glActiveTexture(GL_TEXTURE1);
+      p_glBindTexture(GL_TEXTURE_2D, crnTex);
+      if(locCFol2 >= 0) p_glUniform1i(locCFol2, 1);
+      p_glActiveTexture(GL_TEXTURE0);
       p_glUniform1f(locCMask, (float)envCrownMask);
       if(locCLFace >= 0) p_glUniform1f(locCLFace, 0.0f);
       p_glUniform1f(locCTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);

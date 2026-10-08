@@ -5,11 +5,13 @@ in vec3 vPos;
 in float vSeed;
 in float vFade;
 in vec2 vTile;      // Atlas-Kachel (Spalte, Zeile)
+in float vCrown;      // 1 = Ganzbaum-Kachel statt Buschel-Kachel
 in vec3 vNrm;       // Billboard-Normale
 in vec3 vRight, vUp;
 in vec3 vCol;       // Blattfarbe des Baumes (Atlas-Kachel ist farbneutral)
 uniform vec3 uCamPos;
-uniform sampler2D uFoliage;   // Atlas: 8x8 Kacheln echter Blattwerk-Aufnahmen
+uniform sampler2D uFoliage;
+uniform sampler2D uCrownTex;   // 2x2 Ganzbaum-Kronen-Kacheln (tier 0)   // Atlas: 8x8 Kacheln echter Blattwerk-Aufnahmen
 uniform float uCrownMask;   // DEBUG: Kronen-Quads als reines Rot -> exakte Maske
 out vec4 O;
 const vec3 SUN = normalize(vec3(0.55, 0.38, -0.62));
@@ -85,6 +87,12 @@ void main(){
   float inset = exp2(lod) * 0.5 / 256.0;
   cell = clamp(cell, inset, 1.0 - inset);
   vec4 tx = textureLod(uFoliage, (vTile + cell) * (1.0 / 8.0), lod);
+  // Ganzbaum-Kachel (groebste Detailstufe): andere Textur, 2x2 Kacheln a 128 px
+  if(vCrown > 0.5){
+    float cinset = exp2(lod) * 0.5 / 128.0;
+    vec2 cc = clamp(cell, cinset, 1.0 - cinset);
+    tx = textureLod(uCrownTex, (vTile + cc) * 0.5, lod);
+  }
   // Harte Polygonkanten an fernen Kronen (alter Nutzerbefund): mit steigender
   // Distanz wird die UV in die Kachelmitte zurueckgezogen, dadurch fuellt die
   // Blattmasse das ganze Quad und seine gerade Begrenzung wird sichtbar.

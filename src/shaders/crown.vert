@@ -20,6 +20,7 @@ out vec3 vPos;
 out float vSeed;
 out float vFade;
 out vec2 vTile;      // Atlas-Kachel (Spalte, Zeile)
+out float vCrown;    // 1 = Ganzbaum-Kachel (tier 0) statt Buschel-Kachel
 out vec3 vNrm;      // Billboard-Normale (zeigt zur Kamera)
 out vec3 vRight, vUp;
 out vec3 vCol;      // Blattfarbe des Baumes (Atlas ist farbneutral)
@@ -85,10 +86,18 @@ void main(){
   vSeed = aData.z;
   // Kachel nach Blickrichtung: aData.w = Kronen-Variante (0..3), azIdx = eine von
   // 16 Aufnahmerichtungen. Die Krone parallaxiert also, wenn man sie umlaeuft.
-  float az = atan(aCenter.x - uCamPos.x, aCenter.z - uCamPos.z);
-  float azIdx = floor(mod(az * (16.0 / 6.283185) + 8.0, 16.0));
-  float t = aData.w * 16.0 + azIdx;
-  vTile = vec2(mod(t, 8.0), floor(t / 8.0));
+  if(aData.w >= 4.0){
+    // Ganzbaum-Kachel (tier 0): 4 Kacheln in 2x2, keine Aufnahmerichtung
+    float ci = aData.w - 4.0;
+    vTile = vec2(mod(ci, 2.0), floor(ci * 0.5));
+    vCrown = 1.0;
+  } else {
+    float az = atan(aCenter.x - uCamPos.x, aCenter.z - uCamPos.z);
+    float azIdx = floor(mod(az * (16.0 / 6.283185) + 8.0, 16.0));
+    float t = aData.w * 16.0 + azIdx;
+    vTile = vec2(mod(t, 8.0), floor(t / 8.0));
+    vCrown = 0.0;
+  }
   vNrm = normalize(uCamPos - aCenter);
   vRight = right; vUp = up;
   vCol = iCol;

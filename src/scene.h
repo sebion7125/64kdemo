@@ -86,6 +86,7 @@ void trees_build_finished_snapshot(float **tv, float **cv, float **lv,
 int  trees_thread_start(void);
 extern int treeBuildRange;   // Zellen-Radius, in dem Baeume gebaut werden
 extern int treeCardDiv0; extern float treeCardScale0;   // DEMO_CARDT0 (Sweep-Bank)
+extern int treeBillboard0;   // tier 0 als Ganzbaum-Billboard (TODO 23)
 extern int treeOneShot;
 extern int treeGenMode;      // DEMO_TREEGEN=alt|ez: welcher Baum-Generator baut
 extern int   treeEzPreset;

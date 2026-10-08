@@ -232,6 +232,7 @@ static float ezCardScale = 1.25f;
 // der groebsten Stufe — Sweep-Bank, damit die ferne Kronendeckung messbar an die
 // nahe angepasst werden kann.
 int treeCardDiv0 = 3; float treeCardScale0 = 1.45f;   // gemessen: deckt wie tier 3
+int treeBillboard0 = 1;      // DEMO_NOBB0=1: tier 0 wieder mit Einzelkarten
 // Blattfarbe des gerade gebauten Baumes. Der EZ-Generator wuerfelte sie vorher
 // pro Terminalast (0,10..0,26 / 0,26..0,52 / 0,05..0,15) — deshalb sahen die
 // Distanz-Karten nach einem ANDEREN Baum aus als das Nah-LOD. Jetzt: eine Farbe
@@ -285,6 +286,35 @@ static void emit_crown_quads(float bx, float bz, float s, float hf,
       d[7] = gLodR; d[8] = ezLeafR; d[9] = ezLeafG; d[10] = ezLeafB;
       nCrownVerts++; }
   }
+}
+
+// Ganzbaum-Billboard fuer die groebste Detailstufe (TODO 23): ein Quad pro Baum
+// statt hunderter Karten. Groesse/Mitte werden aus den echten Laubpositionen
+// abgeleitet, damit die Kachel die Krone dieses Baumes abdeckt. Die Kachel ist
+// Variante 4..7 (crown.frag nimmt dafuer eine andere Textur mit 2x2 Kacheln).
+static void emit_crown_billboard(float seed){
+  if(ezNSprig <= 0) return;
+  float mn[3] = { 1e30f, 1e30f, 1e30f}, mx[3] = {-1e30f,-1e30f,-1e30f};
+  for(int i = 0; i < ezNSprig; i++){
+    float r = ezSsize[i] * 0.5f;
+    if(ezSx[i] - r < mn[0]) mn[0] = ezSx[i] - r;
+    if(ezSx[i] + r > mx[0]) mx[0] = ezSx[i] + r;
+    if(ezSy[i] - r < mn[1]) mn[1] = ezSy[i] - r;
+    if(ezSy[i] + r > mx[1]) mx[1] = ezSy[i] + r;
+    if(ezSz[i] - r < mn[2]) mn[2] = ezSz[i] - r;
+    if(ezSz[i] + r > mx[2]) mx[2] = ezSz[i] + r;
+  }
+  float size = mx[0] - mn[0];
+  if(mx[2] - mn[2] > size) size = mx[2] - mn[2];
+  if(mx[1] - mn[1] > size) size = mx[1] - mn[1];
+  if(size < 0.5f) return;
+  if(nCrownVerts + 1 > CROWN_CAP){ treeCapCrown++; return; }
+  float *d = &crownVerts[nCrownVerts * CROWN_FLOATS];
+  d[0] = (mn[0] + mx[0]) * 0.5f; d[1] = (mn[1] + mx[1]) * 0.5f; d[2] = (mn[2] + mx[2]) * 0.5f;
+  d[3] = size; d[4] = 0.0f; d[5] = seed;
+  d[6] = (float)(4 + ((int)(fabsf(seed) * 7.31f) & 3));   // 4..7 = Ganzbaum-Kachel
+  d[7] = gLodR; d[8] = ezLeafR; d[9] = ezLeafG; d[10] = ezLeafB;
+  nCrownVerts++;
 }
 
 // Kronen-Quads auf den echten Laubpositionen (EZ-Generator). Pro Quad wird im
@@ -972,7 +1002,8 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
   // Gleiche Kartenanzahl wie tier 2 gleicht das aus; die eingesparten
   // Zweigroehren (meshBranch) finanzieren das.
   int wantCards = ezNSprig / (tier >= 2 ? 2 : treeCardDiv0);
-  emit_sprig_quads(seed, wantCards);
+  if(tier == 0 && treeBillboard0) emit_crown_billboard(seed);
+  else                            emit_sprig_quads(seed, wantCards);
 }
 
 // ---------- Platzierung (identisch zum alten SDF-System) ----------
