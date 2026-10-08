@@ -12,6 +12,7 @@ in vec3 vCol;       // Blattfarbe des Baumes (Atlas-Kachel ist farbneutral)
 uniform vec3 uCamPos;
 uniform sampler2D uFoliage;
 uniform float uDepthOnly = 0.0;
+uniform float uImpostor = 0.0;   // 1 = Aufnahme-Pass
 uniform sampler2D uCrownTex;   // 2x2 Ganzbaum-Kronen-Kacheln (tier 0)   // Atlas: 8x8 Kacheln echter Blattwerk-Aufnahmen
 uniform float uCrownMask;   // DEBUG: Kronen-Quads als reines Rot -> exakte Maske
 out vec4 O;
@@ -99,7 +100,11 @@ void main(){
     // gruenue Rechtecke aus der Nachbarkrone. Deshalb hier bei lod 0/1 bleiben.
     // Rand des Billboards: siehe unten bei der Alpha-Berechnung (emEdge).
     float clod = min(lod, 1.0);
-    float cinset = exp2(clod) * 0.5 / 1024.0;   // Atlas 8x8 a 128 px = 1024
+    // Einzug um eine HALBE TEXEL DER KACHEL (128 px), nicht des ganzen Atlas:
+    // der alte Wert (0.5/1024) war 8x zu klein -> LINEAR mischt an der Kachel-
+    // kante die Nachbarkachel rein, und die ist am Rand schwarz (gemessen: 64
+    // von 64 Kacheln mit komplett schwarzem Rand) -> schwarzer Rand.
+    float cinset = exp2(clod) * 0.5 / 128.0;
     vec2 cc = clamp(cell, cinset, 1.0 - cinset);
     tx = textureLod(uCrownTex, (vTile + cc) * (1.0 / 8.0), clod);
   }
@@ -169,5 +174,10 @@ void main(){
   col = pow(col, vec3(0.4545));
   // opak, solange keine Ueberblendung laeuft (sonst wirkt die Krone hohl:
   // jede Karte haette Alpha < 1). Echtes Alpha nur waehrend der Blende.
+  // Aufnahme-Pass: die Kachel braucht ECHTES Alpha. Mit vFade = 1 (im
+  // Aufnahme-Pass erzwungen) stand hier Alpha 1 fuer jedes gezeichnete Fragment
+  // -> die Kachel hatte harte Kanten (gemessen: 211 161 Texel Alpha 255, 837 282
+  // Alpha 0, nur 133 dazwischen). Ferne Billboards aliasen damit.
+  if(uImpostor > 0.5){ O = vec4(col, cov); return; }
   O = vec4(col, vFade >= 0.999 ? 1.0 : cov);
 }

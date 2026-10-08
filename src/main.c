@@ -101,6 +101,7 @@ static void (*p_glGenTextures)(GLsizei n, GLuint *textures);
 static void (*p_glGenerateMipmap)(GLenum target);
 static void (*p_glBindTexture)(GLenum target, GLuint texture);
 static void (*p_glTexImage2D)(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const void *pixels);
+static void (*p_glTexSubImage2D)(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const void *pixels);
 static void (*p_glGetTexImage)(GLenum target, GLint level, GLenum format, GLenum type, void *pixels);
 static void (*p_glScissor)(GLint x, GLint y, GLsizei width, GLsizei height);
 static void (*p_glColorMask)(GLboolean r, GLboolean g, GLboolean b, GLboolean a);
@@ -211,6 +212,7 @@ static void load_libs(void) {
   LOADGL2(glGenerateMipmap);
   LOADGL2(glBindTexture);
   LOADGL2(glTexImage2D);
+  LOADGL2(glTexSubImage2D);
   LOADGL2(glGetTexImage);
   LOADGL2(glScissor);
   LOADGL2(glColorMask);
@@ -597,6 +599,39 @@ static void build_crown_tiles(void){
          IMP_COLS, IMP_COLS, IMP_TILEPX, IMP_COLS * IMP_TILEPX, IMP_COLS * IMP_TILEPX);
 }
 
+// Atlas nach der Aufnahme: transparente Texel tragen RGB = 0 (Schwarz). Bei
+// LINEAR-Filterung und Mips wandert dieses Schwarz in die sichtbaren Kanten der
+// Nachbartexel -> schwarzer Rand an fernen Billboards (Nutzerbefund; gemessen:
+// Rand jeder der 64 Kacheln komplett schwarz). Abhilfe: pro Kachel den mittleren
+// Laub-Farbton in alle transparenten Texel fuellen. Alpha bleibt unveraendert.
+static void impostor_fix(void){
+  const int A = IMP_COLS * IMP_TILEPX;
+  static unsigned char *buf = 0;
+  if(!buf) buf = (unsigned char *)malloc((size_t)A * A * 4);
+  if(!buf) return;
+  p_glBindFramebuffer(GL_FRAMEBUFFER, impFbo);
+  p_glReadPixels(0, 0, A, A, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+  p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  for(int t = 0; t < IMP_TILES; t++){
+    int tx = (t % IMP_COLS) * IMP_TILEPX, ty = (t / IMP_COLS) * IMP_TILEPX;
+    int sr = 0, sg = 0, sb = 0, n = 0;
+    for(int y = 0; y < IMP_TILEPX; y++)
+      for(int x = 0; x < IMP_TILEPX; x++){
+        unsigned char *p = buf + ((size_t)(ty + y) * A + tx + x) * 4;
+        if(p[3] > 128){ sr += p[0]; sg += p[1]; sb += p[2]; n++; }
+      }
+    if(!n) continue;
+    for(int y = 0; y < IMP_TILEPX; y++)
+      for(int x = 0; x < IMP_TILEPX; x++){
+        unsigned char *p = buf + ((size_t)(ty + y) * A + tx + x) * 4;
+        if(p[3] <= 128){ p[0] = (unsigned char)(sr / n); p[1] = (unsigned char)(sg / n);
+                         p[2] = (unsigned char)(sb / n); }
+      }
+  }
+  p_glBindTexture(GL_TEXTURE_2D, crnTex);
+  p_glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, A, A, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+}
+
 // FBO fuer die Kachel-Aufnahme (Farbe = crnTex, eigene Depth-Renderbuffer)
 static void impostor_init(void){
   if(impFbo || !crnTex) return;
@@ -734,6 +769,7 @@ static void impostor_step(double budgetMs, int set, const struct ImpLoc *L){
 
     if(now_sec() * 1000.0 - t0 >= budgetMs) break;
   }
+  if(impNext >= IMP_TILES) impostor_fix();   // Atlas nachbearbeiten, siehe dort
   p_glUseProgram(L->pCrown);   // cImp gehoert zum Kronen-Programm; nach dem
                                // Blatt-Block waere das Leaf-Programm aktiv ->
                                // Uniform-Location fremden Programms = GL 0x502
@@ -2442,6 +2478,9 @@ int main(int argc, char **argv) {
                            GL_RGBA, GL_UNSIGNED_BYTE, ab);
             p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
             int A = IMP_COLS * IMP_TILEPX;
+            { FILE *g = fopen("/tmp/64kdemo_impostor.rgba", "wb");
+              if(g){ fwrite(ab, 1, (size_t)A * A * 4, g); fclose(g);
+                     printf("Atlas-Rohdump: %dx%d RGBA -> /tmp/64kdemo_impostor.rgba\n", A, A); } }
             FILE *f = fopen("/tmp/64kdemo_impostor.ppm", "wb");
             if(f){
               fprintf(f, "P6\n%d %d\n255\n", A, A);
