@@ -80,7 +80,12 @@ void reed_build(float cx, float cz, float dens){
         float *d = &reedInst[n * REED_FLOATS];
         d[0] = x; d[1] = y - 0.03f; d[2] = z;                   // leicht eingegraben
         d[3] = 0.22f + 0.30f * rhash2(x * 3.71f, z * 5.13f);    // Hoeshe-Faktor
-        d[4] = 0.026f + 0.022f * rhash2(x * 1.13f, z * 7.31f);  // Breiten-Faktor [m]
+        // Halbe Halm-Breite [m]. Echtes Schilf: Halmdurchmesser 5-10 mm.
+        // Vorher 26-48 mm (= Halbdurchmesser!) -> der Halm war 7-12 cm dick,
+        // fuer den Nutzer "Porree-Stange". 7-13 mm gewaehlt: der Bandzug ist
+        // kamera-zugewandt, unter ~7 mm verschwindet er jenseits von 8 m im
+        // Aliasen (38 px/m auf 10 m bei 360 px Höhe).
+        d[4] = 0.007f + 0.006f * rhash2(x * 1.13f, z * 7.31f);  // Breiten-Faktor [m]
         d[5] = 6.283185f * rhash2(x * 2.71f, z * 1.37f);        // yaw
         d[6] = 6.283185f * rhash2(x * 5.77f, z * 2.11f);        // Phase (Wind)
         d[7] = rhash2(x * 8.31f, z * 3.19f);                    // Variante

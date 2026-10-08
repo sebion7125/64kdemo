@@ -75,10 +75,14 @@ void main(){
   float culmH = hfac * 3.20 * uReedH * reedHMul;  // 0,7-2,1 m (echt 1,5-4 m)
 
   float h, w, lean, bendPow, bendK, yw, baseY;
+  const float HT0 = 0.55;   // Kolben beginnt bei 55 % Culm-Hoehe
   vRole = 1.0;
   if(part < 0.5){
     // Culm: duenn (echt 5-10 mm), fast senkrecht, Zylinder statt Trichter
-    h = culmH; w = wfac * 1.30 * uReedWide;
+    // 1.30 war die 3-fache Ueberhoehung aus dem Gras-Pass (dort musste ein
+    // einzelnes Quad einen ganzen Halm spielen). Der Culm ist hier eine eigene
+    // Flaeche, also echtes Mass: w = Halb-Breite, Band = 2w = 14-26 mm.
+    h = culmH; w = wfac * uReedWide;
     lean = 0.02 + 0.20 * th; bendPow = 2.20; bendK = 1.00;
     yw = iData.z; baseY = 0.0;
   } else {
@@ -86,7 +90,7 @@ void main(){
     float ti = floor(part - 0.5);
     float fl = 0.34 + 0.17 * ti;                  // 0,34/0,51/0,68/0,85 Culm-Hoehe
     h = hfac * (0.50 + 0.22 * th) * uReedH * reedHMul;
-    w = wfac * (1.90 + 0.70 * th) * uReedWide;
+    w = wfac * (0.95 + 0.45 * th) * uReedWide;   // Blatt echt 8-25 mm breit
     lean = 0.90 + 0.45 * th; bendPow = 0.80; bendK = 1.55;
     yw = iData.z + ti * 1.9 + iVar * 2.4;
     baseY = fl * culmH;
@@ -94,6 +98,9 @@ void main(){
   }
 
   // Eigener Cull (KEIN Gras-sizeScale: Schilf behaelt echten Massstab).
+  // Entfernungs-Uebergabe: frueher wurde die Pflanze mit lod auf Haehe 0
+  // *geschrumpft* ("maeht" die Pflanzen weg, Nutzer). Jetzt bleibt die Geometrie
+  // unveraendert stehen und lod steuert im Fragment eine Wuerfel-Ausduennung.
   float lod = 1.0 - smoothstep(uMaxDist - 12.0, uMaxDist, d);
   if(lod < 0.004){ gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
 
@@ -101,10 +108,12 @@ void main(){
   vec3 p = iPos;
   p.y += baseY;
   // Neigung/Kruemmung: Spitze weicht in yaw-Richtung ab
-  float lo = lean * pow(t, bendPow) * h * bendK;
+  // Nickende Rispe: der obere Culm-Drittel weicht zusaetzlich zur Seite aus.
+  float nod = (vRole < 1.5) ? 0.16 * h * pow(max(0.0, (t - HT0) / (1.0 - HT0)), 2.0) : 0.0;
+  float lo = lean * pow(t, bendPow) * h * bendK + nod;
   p.x += cy * lo;
   p.z += sy * lo;
-  p.y += t * h * lod * (1.0 - 0.3 * lean);
+  p.y += t * h * (1.0 - 0.3 * lean);
 
   // Wind: Basis-Brise + wandernde Boen (Formeln wie grass.vert, damit sich
   // Schilf und Wiese gleich bewegen).
@@ -114,8 +123,8 @@ void main(){
   float gust = vnoise(gp * 2.3 + 7.7) * smoothstep(0.55, 0.85, vnoise(gp));
   float wx = wnd * 0.11 + gust * 0.30;
   float wz = wnd2 * 0.08 + gust * 0.18;
-  p.x += wx * t * t * lod;
-  p.z += wz * t * t * lod;
+  p.x += wx * t * t;
+  p.z += wz * t * t;
 
   // Breite: Culm als Zylinder (Auslaufen erst oben), Blatt mit schmaler Basis,
   // Maximum bei ~1/3, dann spitz.
@@ -124,10 +133,12 @@ void main(){
   else            taper = sin(3.14159 * pow(t, 0.62)) * 1.45;
   // Kolben: oberstes Culm-Drittel wird breiter (echt 15-50 cm buschiger Stand)
   float headOn = 0.0, headW = 0.0;
-  const float HT0 = 0.55;
   if(vRole < 1.5){
     float ht = clamp((t - HT0) / (1.0 - HT0), 0.0, 1.0);
-    headW  = 7.00 * sin(3.14159 * ht);
+    // Rispe: unten schmal, breit erst in den oberen zwei Dritteln, dann zur
+    // Spitze auslaufend (echt 15-30 cm lang, 20-40 cm buschig). Die symmetrische
+    // Keule (7.00 * sin) sah aus wie ein Mordinstrument.
+    headW  = (2.20 + 4.60 * ht) * sin(3.14159 * ht);
     headOn = smoothstep(HT0, HT0 + 0.12, t);
     taper = max(taper, headW);
   }

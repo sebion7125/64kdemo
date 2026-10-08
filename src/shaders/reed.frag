@@ -89,10 +89,23 @@ void main(){
   }
   // Kolben: buschiger Stand — ueber eine quer-modulierte Maske loechrig, damit
   // er nicht als geschlossene Keule steht.
+  // Kolben: weiche, fiedrige Rispe. Vorher eine harte Sinus-Zacke mit 7 mm
+  // Periode ("zackig ausgefranst", fuer den Nutzer "eher Mordinstrument").
+  // Jetzt: Achsenabfall x duenne senkrechte Fiedern, Rand per Wuerfel-
+  // Ausduennung statt harter Schwelle.
   if(vHead > 0.5){
-    float u = vSide / 0.34;
-    float e = abs(u) * (1.0 + 0.35 * sin(vPos.y * 90.0 + vVar * 20.0));
-    if(e > 0.85) discard;
+    float u  = vSide / 0.34;
+    float ax = 1.0 - abs(u);
+    float feather = 0.45 + 0.55 * vnoise(vec2(u * 3.5 + vVar * 17.0,
+                                              vPos.y * 4.0 - vVar * 5.0));
+    float cov = smoothstep(0.0, 0.35, ax) * feather;
+    if(hash12(vec2(vPos.x * 7.1 + vVar * 31.0, vPos.y * 23.7)) > cov) discard;
+  }
+  // Entfernungs-Uebergabe ohne "wegmaehen": die Pflanze bleibt stehen (der
+  // Vertex-Shader kuerzt nicht mehr), hier duennt sie wuerfelig aus.
+  if(vFade < 0.999){
+    if(hash12(vec2(vPos.x * 3.7 - vPos.z * 5.3, vPos.y * 9.1 + vVar * 12.0)) > vFade)
+      discard;
   }
   if(uDbgCat > 1.5){ base = vec3(0.95, 0.45, 0.05); tip = base; }   // = Schilffarbe in grass.frag
   vec3 albedo = mix(base, tip, vT * vT) * (0.75 + 0.5 * vCol.x);
