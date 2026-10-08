@@ -19,6 +19,7 @@
 #include <GL/glext.h>
 #include <GL/glx.h>
 #include "scene.h"
+#include "tree_lod.h"
 
 // ================= X11-Funktionszeiger (dlsym aus libX11.so.6) =================
 static Display *(*p_XOpenDisplay)(const char *);
@@ -1279,6 +1280,8 @@ static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: t
   // keine Staemme/Aeste im Bild (Nutzerbefund)
   p_glEnableVertexAttribArray(4);
   p_glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, TREE_FLOATS * 4, (const void *)48);  // R2
+  p_glEnableVertexAttribArray(5);
+  p_glVertexAttribPointer(5, 2, GL_FLOAT, GL_FALSE, TREE_FLOATS * 4, (const void *)52);  // Anker
 
   // Kronen-Billboards: aCenter(3) aOff(2) aData(4)
   // Kronen-Karten: 6 Eckpunkte aus vboCrownQuad (divisor 0) + 1 Instanz pro
@@ -1305,6 +1308,9 @@ static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: t
   p_glEnableVertexAttribArray(5);
   p_glVertexAttribPointer(5, 1, GL_FLOAT, GL_FALSE, CROWN_FLOATS * 4, (const void *)44); // lodR2
   p_glVertexAttribDivisor(5, 1);
+  p_glEnableVertexAttribArray(6);
+  p_glVertexAttribPointer(6, 2, GL_FLOAT, GL_FALSE, CROWN_FLOATS * 4, (const void *)48); // Anker
+  p_glVertexAttribDivisor(6, 1);
 
   // Einzelblaetter naher Baeume: aBase(2) statisch + iPos(3) iData(4) iCol(3) [instanzen]
   p_glGenVertexArrays(1, &vaoLeaf[k]);
@@ -1325,6 +1331,9 @@ static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: t
   p_glEnableVertexAttribArray(4);
   p_glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, LEAF_FLOATS * 4, (const void *)40);  // iLodR
   p_glVertexAttribDivisor(4, 1);
+  p_glEnableVertexAttribArray(5);
+  p_glVertexAttribPointer(5, 2, GL_FLOAT, GL_FALSE, LEAF_FLOATS * 4, (const void *)44);  // Anker
+  p_glVertexAttribDivisor(5, 1);
   }
 
   // Gras: aBase(2) + iPos(3) iData(4) [instanzen]
@@ -2226,9 +2235,27 @@ int main(int argc, char **argv) {
     // Rebuild-Stottern reproduzierbar messbar, ohne Tastatur. Nur camTgt verschieben,
     // camPos wird pro Frame daraus abgeleitet (Orbit-Modus).
     { static float wx = 0, wz = 0; static int wread = 0;
+      static float appr = 0;
       if(!wread){ wread = 1;
         const char *ew = getenv("DEMO_WALK");
         if(ew) { if(sscanf(ew, "%f %f", &wx, &wz) != 2){ wx = wz = 0; } }
+        // DEMO_APPROACH=<m/s>: Kameraweg RADIAL auf den Baum zu, den DEMO_ONE
+        // gerahmt hat (negativ = naeher). DEMO_WALK war ein fester Vektor — in
+        // den Messlaeufen fuhr die Kamera damit SEITLICH am Baum vorbei, die
+        // hoechste Detailstufe wurde nie angefahren (Nutzer: Tests besser planen).
+        const char *ea = getenv("DEMO_APPROACH");
+        if(ea) appr = (float)atof(ea);
+      }
+      if(appr != 0.0f && treeFocusValid){
+        float rx = flyMode ? flyPos[0] : camTgt[0], rz = flyMode ? flyPos[2] : camTgt[2];
+        float ax = rx - treeFocus[0], az = rz - treeFocus[2];
+        float al = sqrtf(ax * ax + az * az);
+        // nicht in den Stamm hinein fliegen (unter 4 m ist die Kameralinie Geometrie)
+        if(al > 4.0f && al < 1e6f){
+          float vx = ax / al * appr, vz = az / al * appr;
+          camTgt[0] += vx * dt; camTgt[2] += vz * dt;
+          if(flyMode){ flyPos[0] += vx * dt; flyPos[2] += vz * dt; }
+        }
       }
       if(wx != 0.0f || wz != 0.0f){
         camTgt[0] += wx * dt; camTgt[2] += wz * dt;
@@ -3003,13 +3030,14 @@ int main(int argc, char **argv) {
       static float ss_prevTier = -1, ss_prevVerts = -1;
       float dx = treeDbgX - camPos[0], dz = treeDbgZ - camPos[2];
       float dCam = sqrtf(dx * dx + dz * dz);
-      float ss(float a, float b, float x){ float t = (x - a) / (b - a);
-        if(t < 0) t = 0; if(t > 1) t = 1; return t * t * (3 - 2 * t); }
-      float leafW = 1.0f - ss(treeDbgR1 * 0.90f, treeDbgR1 * 1.10f, dCam);
-      float cardW = ss(treeDbgR1 * 0.90f, treeDbgR1 * 1.10f, dCam) *
-                    (1.0f - ss(treeDbgR2 * 0.90f, treeDbgR2 * 1.10f, dCam));
-      float bbW   = ss(treeDbgR2 * 0.90f, treeDbgR2 * 1.10f, dCam);
-      float meshW = 1.0f - ss(treeDbgR2 * 0.90f, treeDbgR2 * 1.10f, dCam);
+      // Gewichte aus dem KERN (src/tree_lod.c) — dieselben Funktionen, die
+      // tools/test_tree_lod.c prueft. Eigene Rechnung im Protokoll konnte vom
+      // Kern abweichen und haette einen Sprung verdeckt statt gezeigt.
+      TreeLod DL; DL.H = 0; DL.R1 = treeDbgR1; DL.R2 = treeDbgR2;
+      float leafW = treeLodWLeaf(&DL, dCam);
+      float cardW = treeLodWCard(&DL, dCam);
+      float bbW   = treeLodWBillboard(&DL, dCam);
+      float meshW = treeLodWMesh(&DL, dCam);
       if((float)treeDbgTier != ss_prevTier || (float)treeDbgVerts != ss_prevVerts){
         printf("EB-STUFENWECHSEL: tier %.0f -> %d, Geruest %.0f -> %d, Karten %d, "
                "Blaetter %d (dBuild %.1f m, dCam %.1f m, Build %d)\n",

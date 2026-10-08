@@ -2700,3 +2700,49 @@ entfernungsabhaengig (volles Netz bis 1,15 R2). Nachher: Geruest 9 993 bei
 10..110 m, erst bei 130 m (Gewicht 0) 45 Vertices.
 Kosten im Vollwald: Geruest 4 342 632 von 5 200 000, 0 Cap-Treffer,
 0 uebersprungene Baeume.
+
+## LOD-Kern und kanonischer Anker (2026-10-08, Strategie A + B)
+
+Nutzer: „die LOD-Generierung und der Fade sind immer noch nicht synchron … wir
+brauchen eine wirklich wasserdichte Debug-Strategie".
+
+**Gefundene Ursache (gemessen, nicht vermutet):** dieselbe Frage „wie fern ist
+dieser Baum" wurde an sechs Stellen mit vier verschiedenen Ankerpunkten
+beantwortet — Rebuild an camTgt (main.c), Stufe an der Kamera zum Lotpunkt
+(trees_cpu.c), Existenz am eingefrorenen Build-Abstand, Blatt-Fade an der
+Blattposition, Karten-Fade an der Kartenmitte, Geruest-Fade am einzelnen Vertex.
+Die Baelen waren formal komplementaer, bekamen aber verschiedene Argumente,
+konnten sich also nie zu 1 ergaenzen.
+
+**A — ein kanonischer Abstand pro Baum.** Der Lotpunkt des Baums liegt in jeder
+Instanz: TREE_FLOATS 13 -> 15, CROWN_FLOATS 12 -> 14, LEAF_FLOATS 11 -> 13
+(jeweils +anchorX/anchorZ). leaf.vert, crown.vert und tree.vert rechnen den
+LOD-Abstand als length(anchor - uCamPos.xz).
+
+**B — Kern als reine Funktion + Wirtstest ohne GL.** src/tree_lod.c/.h
+(Schaltweiten, Schichtgewichte, Existenz-Schnitte, Stufen-Hysterese) und
+src/shaders/lod.glsl als GLSL-Seite; die drei Baum-Shader binden lod.glsl per
+#include ein (tools/gen_shaders.sh bettet sie ein). `make test-lod` faehrt
+synthetische Kamerapfade: **7418 Pruefungen, 0 Fehler** — Komplementaeritaet
+(|Summe-1| = 0), Stetigkeit gegen die analytische smoothstep-Schranke 1,5/Bandbreite,
+Existenz ausserhalb der Baelen, Hysterese gegen Oszillieren, und dass GLSL und C
+dieselben Bandzahlen benutzen.
+
+**Radiale Messfahrt (neu: DEMO_APPROACH=<m/s>).** DEMO_WALK war ein fester Vektor
+und fuhr seitlich am Baum vorbei — die hoechste Detailstufe wurde nie angefahren.
+Ein Baum, H 6,8 m, R1 34 m, R2 101 m, Kamera 140 m -> 2,6 m:
+
+| Groesse | Messwert |
+|---|---|
+| Stufenfolge | 0 -> 2 -> 3 (monoton, tier 1 unbenutzt) |
+| groesstes Deckungsloch \|Blatt+Karte+Billboard-1\| | 0,0000 in jedem Frame |
+| max \|dw/dd\| Blatt / Karte | 0,121 pro m (Schranke 0,221) |
+| max \|dw/dd\| Billboard / Geruest | 0,072 pro m (Schranke 0,074) |
+| Geometrie-Aenderungen | Geruest 1x, Blätter 1x, Karten 0x |
+| Geruest 45 -> 7 362 bei 124,5 m | Geruest-Gewicht 0,000 (Blende 91..111 m) |
+| Blätter 0 -> 12 600 bei 62,6 m | Blatt-Gewicht 0,000 (Blende 31..37 m) |
+
+Geometrie taucht also ausschliesslich dort auf, wo sie unsichtbar ist.
+
+**Schwarze Rechtecke:** gleicher Test (Normalszene, Impostor ueber Taste 1 an):
+alter Bau 56 671 dunkle Pixel, neuer Bau 0. Ohne Impostor ebenfalls 0.

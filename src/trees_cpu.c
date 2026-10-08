@@ -11,6 +11,7 @@
 // Platzierung identisch zum alten SDF-System (gleiche Zellen, Hashes,
 // Terrain-Filter) -> Baeume stehen an den selben Positionen wie zuvor.
 #include "scene.h"
+#include "tree_lod.h"
 #include <pthread.h>   // Baum-Build im Worker-Thread (Muster wie grass_cpu.c)
 #include <math.h>
 #include <stdio.h>   // Baum-Stufen-Log (DEMO_TREELOG)
@@ -43,7 +44,11 @@ int   treeFocusValid = 0;
 // hier, weil add_leaf()/leaf_cluster() von beiden Generatoren aus tief unten
 // aufgerufen werden und die Kette dafuer nicht voll durchgereicht wird.
 static float gLodR = 30.0f;
-static float gTreeDist = 0.0f, gBranchCut = 0.0f;   // Abstand zum Baum / Ast-Cut
+static float gTreeDist = 0.0f, gBranchCut = 0.0f;
+// Lotpunkt DES BAUMS, zu dem die gerade geschriebenen Datensaetze gehoeren.
+// Alle drei Shader blenden damit gegen ein und dieselbe Entfernung ein
+// (Strategie A, siehe scene.h). Vorher: Blattposition / Kartenmitte / Vertex.
+static float gAnchorX = 0.0f, gAnchorZ = 0.0f;   // Abstand zum Baum / Ast-Cut
 static float gMeshFineCut = 0.0f;   // bis hierhin volle Netz-Dichte (Regelwerk C)
 static float gLodR2 = 0.0f;
 static float gBbSize = 0.0f, gBbAsp = 1.0f, gBbCen[3] = {0,0,0};   // BBox des letzten Baums
@@ -182,6 +187,7 @@ static void emit_tube(const Ring *a, const Ring *b, int sides,
       d[12] = gLodR2;      // Schaltweite des Billboards: das Geruest blendet im
                            // selben Band aus, damit Stamm und Ganzbaumbild nicht
                            // gleichzeitig zu sehen sind (Nutzer)
+  d[13] = gAnchorX; d[14] = gAnchorZ;   // kanonischer LOD-Anker = Lotpunkt des Baums
       nTreeVerts++;
     }
   }
@@ -220,6 +226,7 @@ static void emit_cap(const Ring *a, int sides, float sway,
       d[10] = angs[m] / 6.2831853f;
       d[11] = v0;
       d[12] = gLodR2;      // Schaltweite Billboard (siehe emit_tube)
+  d[13] = gAnchorX; d[14] = gAnchorZ;   // kanonischer LOD-Anker = Lotpunkt des Baums
       nTreeVerts++;
     }
   }
@@ -325,6 +332,7 @@ static void emit_crown_quads(float bx, float bz, float s, float hf,
       d[0] = cc; d[1] = ccy2; d[2] = ccz2;
       d[3] = qsize; d[4] = qrot; d[5] = qseed; d[6] = (float)variant;
       d[7] = gLodR; d[8] = ezLeafR; d[9] = ezLeafG; d[10] = ezLeafB; d[11] = gLodR2;
+      d[12] = gAnchorX; d[13] = gAnchorZ;   // kanonischer LOD-Anker
       nCrownVerts++; }
   }
 }
@@ -388,6 +396,7 @@ static void emit_crown_billboard(float seed, float bx, float by, float bz, float
                                            // bedeutungslos, der Slot ist frei)
   d[6] = 4.0f + (float)ezBucket;   // 4..67 = Impostor-Kachel (8x8-Atlas)
   d[7] = gLodR; d[8] = ezLeafR; d[9] = ezLeafG; d[10] = ezLeafB; d[11] = gLodR2;
+  d[12] = gAnchorX; d[13] = gAnchorZ;   // kanonischer LOD-Anker
   nCrownVerts++;
 }
 
@@ -406,6 +415,7 @@ static void emit_sprig_quads(float seed, int want){
       d[0] = ezSx[q]; d[1] = ezSy[q]; d[2] = ezSz[q];
       d[3] = ezSsize[q]; d[4] = qrot; d[5] = qseed; d[6] = (float)variant;
       d[7] = gLodR; d[8] = ezLeafR; d[9] = ezLeafG; d[10] = ezLeafB; d[11] = gLodR2;
+      d[12] = gAnchorX; d[13] = gAnchorZ;   // kanonischer LOD-Anker
       nCrownVerts++; }
   }
 }
@@ -418,6 +428,7 @@ static void add_leaf(float x, float y, float z, float size, float rotY, float ti
   d[0] = x; d[1] = y; d[2] = z;
   d[3] = size; d[4] = rotY; d[5] = tilt; d[6] = aspect;   // aspect = Breite/Laenge
   d[7] = cr; d[8] = cg; d[9] = cb; d[10] = gLodR;
+  d[11] = gAnchorX; d[12] = gAnchorZ;   // kanonischer LOD-Anker
   nLeafInst++;
 }
 // Ein Baum in "Einheitsspace" (Höhe ~3.0), nach (bx,by,bz) verschoben, * s skaliert.
@@ -1214,6 +1225,7 @@ int foliage_patch(float *out, int cap, float seed, float s){
     d[6] = 0.38f + 0.22f * h2;                     // Seitenverhaeltnis (nie 1)
     d[7] = 1.0f; d[8] = 1.0f; d[9] = 1.0f;         // farbneutral
     d[10] = 1e9f;                                  // Atlas: nie ausduennen
+  d[11] = 0.0f; d[12] = 0.0f;                        // Anker unnoetig (iLodR = 1e9)
     n++;
   }
   #undef THP
@@ -1318,20 +1330,15 @@ int trees_build_step(int maxTrees){
     // Ein 6-cm-Blatt ist ab ~50 m unter einem Pixel, die Einzelblaetter decken
     // die Krone also nur bis etwa 5x Wuchshoehe. Die Luecke dazwischen war der
     // "verschwindende Blattwald". Deshalb jetzt 5x und 15x, absolut begrenzt.
-    float R1 = 5.0f * H, R2 = 15.0f * H;
-    if(R1 < 20.0f) R1 = 20.0f; else if(R1 > 60.0f) R1 = 60.0f;
-    if(R2 < 40.0f) R2 = 40.0f; else if(R2 > 120.0f) R2 = 120.0f;
-    // DEMO_LODRSCALE: Schaltweiten skalieren — Messbank, um an EINEM Standort
-    // beide Repraesentationen (Einzelblaetter / Karten) vergleichend zu sehen.
-    if(treeLodScale > 0.0f){ R1 *= treeLodScale; R2 *= treeLodScale; }
+    // ALLE Entfernungs-Entscheidungen stammen aus src/tree_lod.c (Strategie B):
+    // dieselben Funktionen, die tools/test_tree_lod.c ohne GL prueft.
+    TreeLod TL; treeLodInit(&TL, H, treeLodScale);
+    float R1 = TL.R1, R2 = TL.R2;
     int tier;
     if(treeForceTier >= 0) tier = treeForceTier;
     else {
       int prev = lodGet(cand[i].ix, cand[i].iz);
-      if(prev == 3)      tier = (d < R1 * 1.05f) ? 3 : (d < R2 ? 2 : 0);
-      else if(prev == 2) tier = (d < R1 * 0.95f) ? 3 : (d < R2 * 1.05f ? 2 : 0);
-      else if(prev == 0) tier = (d < R2 * 0.95f) ? 2 : 0;
-      else               tier = (d < R1) ? 3 : (d < R2 ? 2 : 0);
+      tier = treeLodTier(&TL, d, prev);
       lodSet(cand[i].ix, cand[i].iz, tier);
     }
     // Laub-Entscheidung haengt an der Entfernung, nicht an der Build-Stufe.
@@ -1343,19 +1350,20 @@ int trees_build_step(int maxTrees){
     gLodR = R1;
     gLodR2 = R2;
     gTreeDist = d;
+    gAnchorX = cand[i].p[0]; gAnchorZ = cand[i].p[2];
     // Der Rand muss den Nachlauf des Builds abdecken (bis 12 m Kameraweg wird
     // nicht neu gebaut): gemessen bei DEMO_ONE + Kameraweg sprang das Geruest
     // eines Baums zwischen zwei Builds von 45 auf 7 362 Vertices, weil der Cut
     // an der Build-Zentrums-Entfernung hing, die Mesh-Blende aber an der
     // Kameraentfernung liegt und der Cut dadurch INS Blendenband fiel.
-    gBranchCut = R2 * 1.15f + 16.0f;
-    gMeshFineCut = R2 * 1.15f + 16.0f;
+    gBranchCut = treeLodBranchCut(&TL);
+    gMeshFineCut = treeLodMeshCut(&TL);
     // Der Rand muss die Nachlaufzeit des Builds abdecken: d ist der Abstand zum
     // BUILD-ZENTRUM, der Shader blendet aber gegen die KAMERA aus (bis 1,15 R1),
     // und das Build-Zentrum hinkt der Kamera bis 12 m nach. Bei 1,3 R1 (bei
     // R1 = 20 m also 6 m) fehlten Blaetter, obwohl die Kamera schon innerhalb der
     // Blende war -> Blätter verschwanden schlagartig (Nutzerbefund).
-    ezWantLeaves = (d <= R1 * 1.15f + 20.0f);
+    ezWantLeaves = (d <= treeLodLeafCut(&TL));
     // Budget: passt ein BAUM nicht mehr in die Puffer, wird er uebersprungen —
     // und nicht mitten im Ast abgebrochen. Ein abgebrochener Baum sieht aus wie
     // ein abgesaegter Stamm ohne Laub (Nutzerbefund; gemessen: 54 Cap-Abbrueche,

@@ -31,18 +31,27 @@ float c_terrainH(float px, float py);
 //   treeVerts:  pos(3) nrm(3) col(3) sway(1)             = 10 floats
 //   crownVerts: center(3) off(2) size rotY seed variant lodR col(3) = 13 floats
 //   wireVerts:  pos(3)
-#define TREE_FLOATS  13   // pos3, nrm3, col3, sway, u (um den Ring), v (Bogenlaenge),
-                            // R2 (Schaltweite Ganzbaum-Billboard dieses Baums)
+// KANONISCHER LOD-ABSTAND (Strategie A): jeder Datensatz traegt den Lotpunkt
+// (Anker) DES BAUMS, zu dem er gehoert. Alle Shader berechnen den LOD-Abstand
+// als length((anchor - uLodCam) * vec3(1,0,1)) — also fuer Blatt, Karte, Geruest
+// und Billboard desselben Baums exakt dieselbe Zahl. Vorher standen in den drei
+// Shadern drei verschiedene Anker (Blattposition, Kartenmittelpunkt, Vertex),
+// die Baelen derselben Schicht konnten dadurch nie komplementaer laufen.
+// Siehe src/tree_lod.h (reine Funktion) und tools/test_tree_lod.c (Wirtstest).
+#define TREE_FLOATS  15   // pos3, nrm3, col3, sway, u (um den Ring), v (Bogenlaenge),
+                            // R2 (Schaltweite Ganzbaum-Billboard dieses Baums),
+                            // anchorX, anchorZ (Lotpunkt des Baums)
 // Kronen-Karte: center(3) off(2) size rotY seed variant lodR col(3) = 13 floats.
 // lodR = Radius, ab dem diese Karte die Einzelblaetter dieses Baumes eretzt
 // (blendet um lodR +/- 10 % ein). col = Blattfarbe DIESES Baumes: der Atlas ist
 // farbneutral aufgenommen, die Farbe kommt pro Instanz dazu.
-#define CROWN_FLOATS 12   // pro KARTE: center(3) size rot seed variant lodR col(3) lodR2
+#define CROWN_FLOATS 14   // pro KARTE: center(3) size rot seed variant lodR col(3) lodR2
+                            // anchorX anchorZ
 // Einzelblaetter an nahen Baeumen (leaf.vert): iPos(3), iData(4: size, rotY,
 // tilt, aspect), iCol(3), iLodR(1). Grundblatt ist ein statisches Quad.
 // iLodR = Radius, ab dem die Karten dieses Baumes die Blaetter uebernehmen
 // (keep = 1 - smoothstep(0,9*lodR, 1,1*lodR, d)) — Komplement zu lodR oben.
-#define LEAF_FLOATS  11
+#define LEAF_FLOATS  13   // plus anchorX anchorZ
 #define LEAF_CAP     2400000  // Budget erhoeht statt Geometrie zu ueberspringen (Nutzerregel):
                             // Stress-Szenario DEMO_LODRSCALE=2 brauchte 1,60 Mio, 90 Baeume
                             // fielen raus. 2,4 Mio x 40 B x 2 Saetze = 192 MB

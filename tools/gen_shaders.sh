@@ -3,9 +3,28 @@
 # Shader werden minifiziert (tools/minify_glsl.py: Kommentare/Leerzeilen
 # raus) und als EINER String-Literal eingebettet (statt Zeile-fuer-Zeile:
 # spart ~2 Byte pro Zeile an Anführungszeichen).
+# #include "x.glsl" durch den Inhalt von x.glsl ersetzen (rekursiv).
+# Damit teilt der LOD-Kern (src/shaders/lod.glsl) alle drei Baum-Shader: drei
+# handgeschriebene Baelen in drei Shadern waren unterschiedlich und erzeugten
+# die Spruenge beim Bewegen.
+expand() {
+  python3 -c '
+import os, re, sys
+def go(p, seen):
+    if p in seen: return ""
+    seen.add(p)
+    d = os.path.dirname(p)
+    out = []
+    for line in open(p).read().split("\n"):
+        m = re.match(r"\s*#include\s+\"([^\"]+)\"", line)
+        out.append(go(os.path.join(d, m.group(1)), seen) if m else line)
+    return "\n".join(out)
+sys.stdout.write(go(sys.argv[1], set()))
+' "$1"
+}
 emit() {
   printf 'const char %s[] =\n' "$1"
-  python3 "$(dirname "$0")/minify_glsl.py" --embed < "$2"
+  expand "$2" | python3 "$(dirname "$0")/minify_glsl.py" --embed
   printf '\n\n'
 }
 emit VS_SRC      src/shaders/vertex.glsl

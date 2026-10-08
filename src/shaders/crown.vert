@@ -6,6 +6,7 @@ layout(location=3) in float iLodR;   // Radius, ab dem diese Karte das Laub dies
                                      // Baumes eretzt (CPU: 10x Wuchshoehe)
 layout(location=4) in vec3 iCol;     // Blattfarbe DIESES Baum
 layout(location=5) in float iLodR2;  // Schaltweite der groebsten Stufe (20x Wuchshoehe)
+layout(location=6) in vec2  aAnchor;  // Lotpunkt DIESES Baums — kanonischer LOD-Abstand
 uniform mat4 uMVP;
 uniform vec3 uCamPos;
 uniform vec3 uCamTgt;
@@ -42,6 +43,8 @@ float vnoise(vec2 p){
   return mix(mix(hash12(i),           hash12(i + vec2(1,0)), u.x),
              mix(hash12(i + vec2(0,1)), hash12(i + vec2(1,1)), u.x), u.y);
 }
+#include "lod.glsl"   // kanonische Baelen — Spiegelbild von src/tree_lod.c
+
 void main(){
   // Kamera-Achsen exakt wie der Raymarcher
   vec3 fwd;
@@ -88,7 +91,10 @@ void main(){
   // (Nutzer: sonst arg komische Luftbilder — aus der Hoehe war jeder Baum
   // 'fern', obwohl er direkt unter einem stand). Der Dunst bleibt 3D.
   float d3 = length(aCenter - uCamPos);
-  float d  = length((aCenter - uCamPos) * vec3(1.0, 0.0, 1.0));
+  // KANONISCHER LOD-ABSTAND: Lotpunkt des Baums, nicht Kartenmittelpunkt —
+  // damit Blatt, Karte, Geruest und Billboard desselben Baums dieselbe Zahl
+  // sehen und die Baelen komplementaer werden.
+  float d  = length(aAnchor - uCamPos.xz);
   // Die drei Kronen-Stufen schliessen sich AUS und ueberblenden nur im Band:
   //   Einzelblaetter   bis 0,9 R1 ... aus bei 0,9..1,1 R1   (leaf.vert)
   //   Karten           ein bei 0,9..1,1 R1, aus bei 0,85..1,1 R2
@@ -99,7 +105,7 @@ void main(){
   // Karten bei R1 vorher rissen, kommt nicht wieder: R1 liegt jetzt bei 5x
   // Wuchshoehe, genau an der Stelle, an der die Einzelblaetter aufhoeren zu
   // decken (gemessen), und die Karten sind dichter (div 3 / scale 2,0).
-  float near = (uLightFace > 0.5) ? 1.0 : smoothstep(iLodR * 0.90, iLodR * 1.10, d);
+  float near = (uLightFace > 0.5) ? 1.0 : lodBandIn(iLodR, d);
   // Uebergang Karten -> Ganzbaum-Billboard (Runde 29): in Stufe 2 liegen beide im
   // Puffer, das Billboard faellt ab 0,7 R2 ein, die Karten duennen bis 1,1 R2 aus.
   // Laeuft ueber die Entfernung, also kontinuierlich und unabhaengig davon, wann
@@ -107,11 +113,11 @@ void main(){
   if(uLightFace < 0.5 && iLodR2 > 0.0){
     // Karten aus 1.00..1.15 R2, Billboard ein 0.85..1.00 R2 — dasselbe
     // Ueberlappungsprinzip wie bei Blaettern/Karten: nie zwei halbe Schichten
-    if(aData.w >= 4.0) near *= smoothstep(iLodR2 * 0.90, iLodR2 * 1.10, d);
+    if(aData.w >= 4.0) near *= lodBandIn(iLodR2, d);
     // Ohne Kacheln im Puffer duerfen die Karten NICHT bei R2 ausblenden — sonst
     // verschwindet der Baum ab ~110 m ganz (gemessen: bei DEMO_ONE + 120 m war
     // nach dem Abschalten des Impostors nichts mehr zu sehen).
-    else if(uBBPresent > 0.5) near *= 1.0 - smoothstep(iLodR2 * 0.90, iLodR2 * 1.10, d);
+    else if(uBBPresent > 0.5) near *= lodBandOut(iLodR2, d);
     // Schicht einzeln abschaltbar: near = 0 -> vFade = 0 -> Alpha 0 -> discard
     near *= (aData.w >= 4.0) ? uBillboardOn : uCardsOn;
   }
