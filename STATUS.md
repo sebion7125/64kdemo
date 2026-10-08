@@ -604,7 +604,8 @@ skaliert bereits korrekt ohne diese Division (gemessen: Abschnitt 4,655 = 37,24/
 | Gerüst Vertices | — | 4 335 | 9 993 |
 
 **Kosten im Wald (Kamera 5/16, 960×540):** 648 Bäume, 4,08 Mio Gerüst-Vertices,
-2,91 Mio Karten, 1,05 Mio Einzelblätter, 393 MB Puffer, Rebuild 507 ms.
+484 246 Kronen-Karten (= 2,91 Mio Eckpunkt-Instanzen à 13 Float), 1,05 Mio
+Einzelblätter, 393 MB Puffer, Rebuild 507 ms.
 Caps erhöht: `TREE_VERT_CAP 3,6 M → 5,2 M`, `CROWN_CAP 2,6 M → 3,6 M`
 → **0 übersprungene Bäume** (vorher 140). Fern-LODs dominieren weiter
 (tier 0: 224 Bäume / 0,78 Mio Vertices) — das Billboard (Plan S5) ist der
