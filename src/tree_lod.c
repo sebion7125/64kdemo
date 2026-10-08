@@ -45,9 +45,11 @@ float treeLodLeafCut(const TreeLod *L){
   return L->R1 * LOD_MARGIN + LOD_BUILD_LAG;
 }
 float treeLodBranchCut(const TreeLod *L){
+  if(!L->bb) return LOD_NO_CUT;   // Geruest blendet ohne Kacheln nie aus
   return L->R2 * LOD_MARGIN + LOD_BUILD_LAG;
 }
 float treeLodMeshCut(const TreeLod *L){
+  if(!L->bb) return LOD_NO_CUT;
   return L->R2 * LOD_MARGIN + LOD_BUILD_LAG;
 }
 

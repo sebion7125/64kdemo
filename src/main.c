@@ -2137,8 +2137,12 @@ int main(int argc, char **argv) {
   // der Uebergang Baum->Billboard und der Rebuild nachvollziehbar, ohne dass
   // dafuer Screenshots noetig sind.
   envOneTree = getenv("DEMO_ONE") ? atoi(getenv("DEMO_ONE")) : 0;
-  if(envOneTree){ treeOneShot = 1; envNoTerrain = 1; reedPassOn = 0; grassMaxDist = 0.5f;
-                   envTreeJump = 1; }   // Kamera an den Fokusbaum (DEMO_TREEDIST)
+  if(envOneTree){ treeOneShot = 1; reedPassOn = 0; grassMaxDist = 0.5f;
+                   envTreeJump = 1;
+                   // envNoTerrain wird weiter UNTEREN bei DEMO_NOTERRAIN neu gesetzt
+                   // (Zeile ~2215) — die Zuweisung hier wurde dadurch ueberschrieben
+                   // und der Ein-Baum-Test renderte trotzdem Terrain (Nutzerbefund).
+                   setenv("DEMO_NOTERRAIN", "1", 1); }   // Kamera an den Fokusbaum
   // DEMO_LODTEST="dStart dEnd step": Ein Baum, sonst nichts, feste Kamerastufe
   // pro Frame, volles Protokoll. Wind eingefroren, damit keine Geometrie durch
   // Blattbewegung wandert.
@@ -2146,8 +2150,9 @@ int main(int argc, char **argv) {
     if(e){ float a = 0, b = 0, c = 0;
       if(sscanf(e, "%f %f %f", &a, &b, &c) == 3 && c > 0.0f && a > b){
         lodTest = 1; ltD0 = a; ltD1 = b; ltStep = c;
-        envOneTree = 1; treeOneShot = 1; envNoTerrain = 1; reedPassOn = 0;
+        envOneTree = 1; treeOneShot = 1; reedPassOn = 0;
         grassMaxDist = 0.5f; envTreeJump = 1; envFreeze = 0.0f;
+        setenv("DEMO_NOTERRAIN", "1", 1);   // siehe DEMO_ONE: spaeterer env-Read
         // Der Rahmenbaum liegt bei DEMO_TREEDIST — der Startabstand des Tests
         // muss dort stehen, sonst startet die Fahrt schon im Bereich der
         // hoechsten Stufe (gemessen: 3 Frames, nur tier 3).

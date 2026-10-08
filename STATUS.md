@@ -2780,3 +2780,31 @@ Der Kern kennt jetzt den Betriebsmodus `bb` (liegen Ganzbaum-Kacheln im Puffer).
 Ohne dieses Feld rechnete der Test „Billboard 1,000 / Karten 0,000" fuer einen
 Baum, der im Bild stand — Modell und Shader waren nicht mehr dasselbe.
 `make test-lod` prueft beide Modi: 14 795 Pruefungen, 0 Fehler.
+
+## Pumpen-Periode gefunden: Schnitt in einem Bereich mit Gewicht 1 (2026-10-08)
+
+Nutzer-Logs (lod.log, lod2.log, Host/NVIDIA, ein Baum, R1 20,0 m, R2 57,9 m,
+Schrittweite 0,05 m, 2740 Frames) statt VM-Screenshots. Auswertung:
+
+* Rebuilds alle **17,0 m** (Ausloeser bei 122,8 / 105,9 / 88,9 / 71,9 / 54,9 /
+  37,9 / 20,9 / 3,9 m).
+* In 395 Frames laeuft eine Satz-Ueberblendung; in **92** davon sind alter und
+  neuer Satz UNTERSCHIEDlich, z. B. bei d = 71,90 m: neu 10 164 Geruest-Vertices,
+  alt 45 (nur Stamm). Das Geruest-Gewicht ist dort durchgehend 1,000 — es wird
+  also eine Schicht mit Gewicht 1 ueber ~14 Frames ein- bzw. ausgeblendet.
+  Genau das ist das periodische Pumpen, Periode = Rebuild-Abstand.
+
+Ursache: `treeLodBranchCut()`/`treeLodMeshCut()` schnitten bei R2*1,15 + Nachlauf
+(hier 86,6 m). Ohne Ganzbaum-Kacheln im Puffer blendet das Geruest aber NIE aus
+(Gewicht 1 bis zur Bau-Grenze) — der Schnitt lag in einem Bereich mit Gewicht 1.
+Ein Schnitt darf per Definition nie in einem Bereich mit Gewicht > 0 liegen.
+Korrektur: ohne Kacheln gar nicht schneiden (`LOD_NO_CUT`). Neuer Wirtstest-Zweig
+prueft genau das ueber die ganze Bau-Reichweite: 22 015 Pruefungen, 0 Fehler.
+
+Nebenbei: `DEMO_ONE`/`DEMO_LODTEST` setzten `envNoTerrain`, das weiter unten bei
+`DEMO_NOTERRAIN` wieder auf 0 gelesen wurde — der Ein-Baum-Test renderte die
+ganze Zeit Terrain (Nutzerbefund). Jetzt per `setenv`.
+
+Test beschleunigt: kleine Aufloesung reicht, die VM-Zeit steckte in der Fuellrate
+(640x360-Raymarch). `DEMO_LODTEST="140 3 0.02" ./bin/64kdemo 32 24` = 6 850 Frames
+in unter 4 Minuten.

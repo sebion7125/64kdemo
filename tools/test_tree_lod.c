@@ -127,6 +127,22 @@ int main(void){
     printf("  Existenz-Raender (H=8): Blatt %.1f m >= %.1f m, Ast %.1f m >= %.1f m\n",
            treeLodLeafCut(&L), L.R1 * LOD_BAND_HI, treeLodBranchCut(&L), L.R2 * LOD_BAND_HI); }
 
+  /* 3b: ein Schnitt darf nie in einem Bereich mit Gewicht > 0 liegen.
+     * Getestet wird ueber die ganze Bau-Reichweite (180 m): wherever
+     * weight(d) > 0, die Geometrie muss existieren (d <= cut). */
+  for(unsigned hi = 0; hi < sizeof(Hs)/sizeof(Hs[0]); hi++)
+  for(unsigned bi = 0; bi < 2; bi++){
+    TreeLod L; treeLodInit(&L, Hs[hi], 0.0f); L.bb = BBs[bi];
+    for(float d = 0.0f; d <= 180.0f; d += 0.5f){
+      ok(!(treeLodWMesh(&L, d) > 0.0f) || d <= treeLodBranchCut(&L),
+         "H=%.0f bb=%d: Geruest-Gewicht %.2f bei %.1f m, aber Ast-Schnitt bei %.1f m",
+         Hs[hi], L.bb, treeLodWMesh(&L, d), d, treeLodBranchCut(&L));
+      ok(!(treeLodWLeaf(&L, d) > 0.0f) || d <= treeLodLeafCut(&L),
+         "H=%.0f bb=%d: Blatt-Gewicht %.2f bei %.1f m, aber Blatt-Schnitt bei %.1f m",
+         Hs[hi], L.bb, treeLodWLeaf(&L, d), d, treeLodLeafCut(&L));
+    }
+  }
+
   /* 4: Hysterese — Kamera wackelt an einer Schaltgrenze */
   for(unsigned hi = 0; hi < sizeof(Hs)/sizeof(Hs[0]); hi++){
     TreeLod L; treeLodInit(&L, Hs[hi], 0.0f);

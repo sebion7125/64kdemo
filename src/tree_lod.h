@@ -31,6 +31,9 @@
  * eines Blendenbands verschwindet. */
 #define LOD_MARGIN 1.15f
 
+/* Kein Schnitt: die Geometrie reicht bis an die Bau-Grenze. */
+#define LOD_NO_CUT 1e9f
+
 typedef struct {
   float H;         // Wuchshoehe des Baums
   float R1;        // Einzelblaetter -> Karten
@@ -59,8 +62,15 @@ float treeLodWMesh(const TreeLod *L, float d);        // Geruest (Stamm/Aeste)
 
 /* Existenz-Schnitte des Builds: bis hierhin muss die Geometrie im Puffer sein. */
 float treeLodLeafCut(const TreeLod *L);      // Einzelblatt-Instanzen
-float treeLodBranchCut(const TreeLod *L);    // Aeste im Geruest
-float treeLodMeshCut(const TreeLod *L);      // feines Geruest-Netz
+/* Aeste / feines Netz. Regel: ein Schnitt darf NIE in einem Bereich liegen,
+ * in dem die Schicht Gewicht hat — sonst verschwindet (oder erscheint)
+ * Geometrie sichtbar, und beim naechsten Build wird das zu einem Sprung mit der
+ * Periode des Rebuild-Abstands (im Nutzer-Log gemessen: alle 17,0 m ein Bau,
+ * dabei Geruest 45 <-> 10 164 Vertices, Ueberblendung mischt zwei verschiedene
+ * Gerueste). Ohne Ganzbaum-Kacheln blendet das Geruest nie aus (Gewicht 1 bis
+ * zur Bau-Grenze) -> dann darf es gar nicht geschnitten werden. */
+float treeLodBranchCut(const TreeLod *L);
+float treeLodMeshCut(const TreeLod *L);
 
 /* Detailstufe. prev = Stufe des letzten Builds (-1 = unbekannt); die
  * Rueckstellung erfolgt frueher als die Hochstellung (Hysterese), damit ein
