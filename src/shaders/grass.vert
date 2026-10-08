@@ -17,6 +17,7 @@ uniform float uFarFade;     // ab hier duennen die Halme zugunsten der Textur au
 uniform float uReedDens;    // DIAGNOSE/TUNING (DEMO_REED): Dichte-Faktor Schilf
 uniform float uReedWide;    // DIAGNOSE/TUNING (DEMO_REED): Breiten-Faktor Schilf
 uniform float uReedH;       // Schilf-Hoehe: EIGENE Skala, nicht der Gras-Slider
+uniform float uReedPass;    // 1 = Schilf zeichnet der EIGENE Pass (TODO 26) -> hier aus
 // Fade-GRUPPEN: (birth, death) pro Gruppe, death == 0 heisst "lebt". Birth und
 // Death sind Fakten pro Build, nicht pro Halm — der Halm traegt beide Indizes
 // gepackt in EINEM Float: iGrp = birthGrp + deathGrp * NGRP (deathGrp 0 = lebt).
@@ -84,7 +85,9 @@ float species(float x, float z, float y, out vec4 reg){
   float dh = y - WATER_Y;
   // Schilf deutlich lichter als vorher: es stand in dichten Teppichen
   // (Nutzer: "zu dicht"). 0.45 laesst Uferbu schel statt Riegel.
-  float wReed  = reedW(x, z, y) * 0.46 * uReedDens;   // wieder dichter (Nutzer)
+  float wReed  = (uReedPass > 0.5) ? 0.0 : reedW(x, z, y) * 0.46 * uReedDens;
+  // Im eigenen Schilf-Pass (TODO 26) zeichnet das Gras KEIN Schilf mehr.
+  // Die Boden-Toenung des Schilfguertels bleibt (fragment.glsl rechnet sie selbst).
   float wTall = 0.0, wLav = 0.0, wDaisy = 0.0, wPoppy = 0.0, wLupine = 0.0;
   if(dh >= 0.15){
     float nA = rgf(vec2(x * 0.011, z * 0.011));

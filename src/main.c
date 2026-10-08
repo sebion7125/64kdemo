@@ -249,6 +249,8 @@ extern const char HUD_VS_SRC[];
 extern const char HUD_FS_SRC[];
 extern const char TREELINES_VS_SRC[];
 extern const char TREELINES_FS_SRC[];
+extern const char REED_VS_SRC[];
+extern const char REED_FS_SRC[];
 extern const char TREE_VS_SRC[];
 extern const char TREE_FS_SRC[];
 extern const char GRASS_VS_SRC[];
@@ -512,6 +514,13 @@ static GLuint vboLeaf[2] = {0,0}, vaoLeaf[2] = {0,0};
 static GLuint vboLeafBase = 0, vboCrownQuad = 0;
 static int drawSet = 0;
 static GLuint vboGrass = 0, vaoGrass = 0, vboGrassBase = 0;
+// Schilf-Pass (TODO 26): eigene Geometrie-Vorlage (Streifen) + Instanz-Puffer
+static GLuint vboReed = 0, vaoReed = 0, vboReedBase = 0;
+static float reedBaseTpl[REED_TEMPLATE_VERTS * 3];
+static int   reedTplVerts = 0;
+static float reedCX = 1e30f, reedCZ = 1e30f;
+static int   reedPassOn = 1;      // DEMO_REEDPASS=0: Schilf bleibt im Gras-Pass
+static float reedMaxDist = 45.0f; // eigener Cull-Abstand
 static GLuint vboWire = 0, vaoWire = 0;
 
 // Grundformen (per-Vertex-Attribute der Instanz-Shader)
@@ -997,6 +1006,57 @@ static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: t
   p_glVertexAttribDivisor(4, 1);
   // Attribut 5 (death-Time) ist weg: Fade-Zeiten stecken in der Gruppen-
   // tabelle uFadeGrp, der Halm traegt nur noch den Gruppen-Index (Attribut 4).
+  // Schilf: Vorlage = 5 Streifen (Culm + 4 Blaetter) a 6 Stationen a 2 Ecken,
+  // mit je 4 entarteten Eckpunkten aneinandergeklebt -> EIN Draw pro Pflanze.
+  {
+    int v = 0;
+    for(int part = 0; part < REED_PARTS; part++){
+      if(part > 0){   // entarteter Uebergang: letzte Ecke wiederholen, erste zweimal
+        reedBaseTpl[v*3+0] = (float)(part-1);
+        reedBaseTpl[v*3+1] = 1.0f; reedBaseTpl[v*3+2] = 0.5f; v++;
+        reedBaseTpl[v*3+0] = (float)(part-1);
+        reedBaseTpl[v*3+1] = 1.0f; reedBaseTpl[v*3+2] = 0.5f; v++;
+        reedBaseTpl[v*3+0] = (float)part;
+        reedBaseTpl[v*3+1] = 0.0f; reedBaseTpl[v*3+2] = -0.5f; v++;
+        reedBaseTpl[v*3+0] = (float)part;
+        reedBaseTpl[v*3+1] = 0.0f; reedBaseTpl[v*3+2] = -0.5f; v++;
+      }
+      for(int st = 0; st < REED_STATIONS; st++){
+        float t = (float)st / (float)(REED_STATIONS - 1);
+        for(int c = 0; c < 2; c++){
+          reedBaseTpl[v*3+0] = (float)part;
+          reedBaseTpl[v*3+1] = t;
+          reedBaseTpl[v*3+2] = (c == 0) ? -0.5f : 0.5f;
+          v++;
+        }
+      }
+    }
+    reedTplVerts = v;
+    printf("Schilf-Vorlage: %d Vertices (%d Streifen a %d Stationen)\n",
+           v, REED_PARTS, REED_STATIONS);
+  }
+  p_glGenBuffers(1, &vboReedBase);
+  p_glBindBuffer(GL_ARRAY_BUFFER, vboReedBase);
+  p_glBufferData(GL_ARRAY_BUFFER, sizeof(reedBaseTpl), reedBaseTpl, GL_STATIC_DRAW);
+  p_glGenBuffers(1, &vboReed);
+  p_glBindBuffer(GL_ARRAY_BUFFER, vboReed);
+  p_glBufferData(GL_ARRAY_BUFFER, sizeof(reedInst), NULL, GL_DYNAMIC_DRAW);
+  p_glGenVertexArrays(1, &vaoReed);
+  p_glBindVertexArray(vaoReed);
+  p_glBindBuffer(GL_ARRAY_BUFFER, vboReedBase);
+  p_glEnableVertexAttribArray(0);
+  p_glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 12, (const void *)0);
+  p_glVertexAttribDivisor(0, 0);
+  p_glBindBuffer(GL_ARRAY_BUFFER, vboReed);
+  p_glEnableVertexAttribArray(1);
+  p_glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, REED_FLOATS * 4, (const void *)0);
+  p_glVertexAttribDivisor(1, 1);
+  p_glEnableVertexAttribArray(2);
+  p_glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, REED_FLOATS * 4, (const void *)12);
+  p_glVertexAttribDivisor(2, 1);
+  p_glEnableVertexAttribArray(3);
+  p_glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, REED_FLOATS * 4, (const void *)28);
+  p_glVertexAttribDivisor(3, 1);
 
   // Wireframe: aPos(3)
   p_glGenVertexArrays(1, &vaoWire);
@@ -1492,6 +1552,22 @@ int main(int argc, char **argv) {
   GLuint progWire  = make_program(TREELINES_VS_SRC, TREELINES_FS_SRC, "wire");
   GLuint progTMesh = make_program(TREE_VS_SRC, TREE_FS_SRC, "tmesh");
   GLuint progGrass = make_program(GRASS_VS_SRC, GRASS_FS_SRC, "grass");
+  GLuint progReed = reedPassOn ? make_program(REED_VS_SRC, REED_FS_SRC, "reed") : 0;
+  GLint locRMVP = -1, locRCam = -1, locRTime = -1, locRReedH = -1, locRReedD = -1,
+      locRReedW = -1, locRMaxDist = -1, locRLFace = -1, locRAlb = -1, locRDbg = -1;
+  if(progReed){
+    locRMVP     = p_glGetUniformLocation(progReed, "uMVP");
+    locRCam     = p_glGetUniformLocation(progReed, "uCamPos");
+    locRTime    = p_glGetUniformLocation(progReed, "uTime");
+    locRReedH   = p_glGetUniformLocation(progReed, "uReedH");
+    locRReedD   = p_glGetUniformLocation(progReed, "uReedDens");
+    locRReedW   = p_glGetUniformLocation(progReed, "uReedWide");
+    locRMaxDist = p_glGetUniformLocation(progReed, "uMaxDist");
+    locRLFace   = p_glGetUniformLocation(progReed, "uLightFace");
+    locRAlb     = p_glGetUniformLocation(progReed, "uAlbedoOnly");
+    locRDbg     = p_glGetUniformLocation(progReed, "uDbgCat");
+  }
+  ShadowLoc slReed; if(progReed) fillShadowLoc(progReed, &slReed);
   GLuint progCrown = make_program(CROWN_VS_SRC, CROWN_FS_SRC, "crown");
   GLuint progLeaf  = make_program(LEAF_VS_SRC, LEAF_FS_SRC, "leaf");
 
@@ -1525,6 +1601,7 @@ int main(int argc, char **argv) {
   GLint locGReedW = p_glGetUniformLocation(progGrass, "uReedWide");
   GLint locGReedH = p_glGetUniformLocation(progGrass, "uReedH");
   GLint locGFarFade = p_glGetUniformLocation(progGrass, "uFarFade");
+  GLint locGReedPass = p_glGetUniformLocation(progGrass, "uReedPass");
   GLint locGAlbOnly = p_glGetUniformLocation(progGrass, "uAlbedoOnly");
   gpGrass.prog = progGrass; gpGrass.mvp = locGMVP; gpGrass.cam = locGCam;
   gpGrass.time = locGTime; gpGrass.height = locGHeight; gpGrass.maxdist = locGMaxDist;
@@ -1664,6 +1741,11 @@ int main(int argc, char **argv) {
         ezHueMin = v[0]; ezHueMax = v[1]; ezSatMin = v[2];
         ezSatMax = v[3]; ezValMin = v[4]; ezValMax = v[5];
       } else fprintf(stderr, "DEMO_LEAFHSV erwartet 6 Zahlen: hmin hmax smin smax vmin vmax\n"); } }
+  { const char *rp = getenv("DEMO_REEDPASS"); if (rp) reedPassOn = atoi(rp); }
+  { const char *rr = getenv("DEMO_REEDRANGE"); if (rr) reedRange = atoi(rr); }
+  { const char *rg = getenv("DEMO_REEDGRID"); if (rg) reedGridM = (float)atof(rg); }
+  { const char *rp2 = getenv("DEMO_REEDPER"); if (rp2) reedPerCell = (float)atof(rp2); }
+  { const char *rx = getenv("DEMO_REEDDIST"); if (rx) reedMaxDist = (float)atof(rx); }
   { const char *eh = getenv("DEMO_REEDH"); if (eh) reedH = (float)atof(eh); }
   { const char *er = getenv("DEMO_REED");
     if (er) { reedDens = 1.0f; reedWide = 1.0f;
@@ -2220,6 +2302,20 @@ int main(int argc, char **argv) {
           grass_build_request(gCX, gCZ, 0);
         }
       }
+      // Schilf-Grid: eigener, billder Build (kein Worker-Thread noetig — gemessen
+      // steht die Zeit im Log). Neu nur, wenn die Kamera weit genug gelaufen ist.
+      static float reedLastDens = -1.0f;
+      if(reedPassOn && (fabsf(camPos[0] - reedCX) > 12.0f || fabsf(camPos[2] - reedCZ) > 12.0f ||
+                        reedDens != reedLastDens)){
+        reedCX = camPos[0]; reedCZ = camPos[2];
+        double tr0 = now_sec();
+        reed_build(reedCX, reedCZ, reedDens);
+        reedLastDens = reedDens;
+        printf("  Schilf-Build: %.0f ms\n", (now_sec() - tr0) * 1000.0);
+        p_glBindBuffer(GL_ARRAY_BUFFER, vboReed);
+        p_glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)nReedInst * REED_FLOATS * sizeof(float),
+                       reedInst, GL_DYNAMIC_DRAW);
+      }
       // Fertigen Build vom Worker-Thread abholen (VBO-Upload im Main-Thread,
       // GL-Kontext laeuft dort). Race-Fix: glFinish() NACH dem Upload (GPU
       // liest beim Wechsel noch den alten VBO).
@@ -2335,6 +2431,22 @@ int main(int argc, char **argv) {
         p_glBindVertexArray(vaoLeaf[drawSet]);
         p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInstCur);
       }
+      if(reedPassOn && progReed && nReedInst > 0){
+        p_glUseProgram(progReed);
+        p_glUniformMatrix4fv(locRMVP, 1, GL_FALSE, lightMVP);
+        p_glUniform3f(locRCam, eye[0], eye[1], eye[2]);
+        p_glUniform1f(locRTime, tSh);
+        p_glUniform1f(locRReedH, reedH);
+        p_glUniform1f(locRReedD, reedDens);
+        p_glUniform1f(locRReedW, reedWide);
+        p_glUniform1f(locRMaxDist, reedMaxDist);
+        if(locRLFace >= 0) p_glUniform1f(locRLFace, 1.0f);
+        if(locRAlb >= 0) p_glUniform1f(locRAlb, 0.0f);
+        if(locRDbg >= 0) p_glUniform1f(locRDbg, 0.0f);
+        applyShadow(&slReed, 0);
+        p_glBindVertexArray(vaoReed);
+        p_glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, reedTplVerts, (GLsizei)nReedInst);
+      }
       p_glDisable(GL_POLYGON_OFFSET_FILL);
       p_glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
       if(envShadowDump){
@@ -2444,6 +2556,7 @@ int main(int argc, char **argv) {
     p_glUniform1f(locGAngS0, dbgAngThin ? grassAngS0 : 0.0f);
     p_glUniform1f(locGAngQ, grassAngQ);
     p_glUniform1f(locGCap, 0.0f);
+    if(locGReedPass >= 0) p_glUniform1f(locGReedPass, (float)reedPassOn);
     if(locGReedD >= 0) p_glUniform1f(locGReedD, reedDens);
     if(locGReedW >= 0) p_glUniform1f(locGReedW, reedWide);
     if(locGReedH >= 0) p_glUniform1f(locGReedH, reedH);
@@ -2493,6 +2606,33 @@ int main(int argc, char **argv) {
     p_glDepthMask(GL_TRUE);
     p_glDisable(GL_BLEND);
     p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);   // nicht auf spaetere Passe durchschlagen
+
+    // Schilf-Pass (TODO 26): eigene Pflanzen (Culm + Blaetter + Kolben).
+    if(reedPassOn && progReed && nReedInst > 0 && !grassOnly){
+      p_glUseProgram(progReed);
+      p_glUniformMatrix4fv(locRMVP, 1, GL_FALSE, mvp);
+      p_glUniform3f(locRCam, camPos[0], camPos[1], camPos[2]);
+      p_glUniform1f(locRTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
+      p_glUniform1f(locRReedH, reedH);
+      p_glUniform1f(locRReedD, reedDens);
+      p_glUniform1f(locRReedW, reedWide);
+      p_glUniform1f(locRMaxDist, reedMaxDist);
+      if(locRLFace >= 0) p_glUniform1f(locRLFace, 0.0f);
+      if(locRAlb >= 0) p_glUniform1f(locRAlb, 0.0f);
+      if(locRDbg >= 0) p_glUniform1f(locRDbg, (float)dbgGrassCat);
+      applyShadow(&slReed, 1);
+      if (dbgAlpha2Cov){
+        p_glDisable(GL_BLEND);
+        p_glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+      } else {
+        p_glEnable(GL_BLEND);
+        p_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+      }
+      p_glDepthMask(GL_TRUE);
+      p_glBindVertexArray(vaoReed);
+      p_glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, reedTplVerts, (GLsizei)nReedInst);
+      p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+    }
 
     // Blattdach-Billboards: Alpha-Test (discard) -> entweder opak oder unsichtbar,
     // deshalb Depth SCHREIBEN (damit naechste Mesh-Objekte dagegen testen koennen)

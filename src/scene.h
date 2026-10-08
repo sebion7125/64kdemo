@@ -129,6 +129,21 @@ int  foliage_patch(float *out, int cap, float seed, float s);
 //   dieses Builds traegt. Der Halm speichert nur noch den Gruppen-Index.
 //   Folge: 12 -> 10 Floats (auch der fruehere b-Index d[11] entfaellt, die
 //   Zell-Blöcke sind jetzt in stabiler b-Reihenfolge -> Intervall statt Maske).
+// ---------- Schilf-Pass (TODO 26) ----------
+// Eine Instanz = eine PFLANZE (Culm + 4 Blaetter + Kolben), nicht ein Quad.
+#define REED_FLOATS 8      // pos(3) hfac wfac yaw phase variante
+#define REED_CAP    90000  // Pflanzen im Grid um die Kamera
+#define REED_PARTS  5      // 1 Culm + 4 Blaetter
+#define REED_STATIONS 6    // Stationen pro Streifen
+// Streifen mit je 4 entarteten Eckpunkten aneinandergeklebt
+#define REED_TEMPLATE_VERTS (REED_PARTS * REED_STATIONS * 2 + (REED_PARTS - 1) * 4)
+extern float reedInst[REED_CAP * REED_FLOATS];
+extern int   nReedInst;
+extern int   reedRange;      // Grid-Halbseite [m]
+extern float reedGridM;      // Gelaende-Raster [m]
+extern float reedPerCell;    // Pflanzen pro Rasterzelle
+void reed_build(float cx, float cz, float dens);
+
 #define GRASS_FLOATS 10
 #define GRASS_NGRP   512   // Fade-Gruppen (birth,death) — siehe grass_cpu.c.
 // Messung: bei Fade 1s sind max ~30 Gruppen referenziert, bei L=30s (Debug) ~250.

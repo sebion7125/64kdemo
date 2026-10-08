@@ -86,7 +86,7 @@ Screenshot unsichtbar (siehe oben).
 | 24 | **LOD-Überblendung krisselig** → sauberer Alpha-Blend (Nutzer, Runde 23) | 🔶 Runde 27 — Satz-Wechsel ueberblendet jetzt: der alte Satz loest sich aus, der neue loest sich ein (0,9 s, `DEMO_TREEFADE`), Wuerfelentscheid statt Alpha-Blend (Draw-reihenfolge-unabhaengig). Ferne Baeume, die neu in den Build-Radius kommen, blenden damit langsam ein. **Optik muss der Nutzer auf dem GPU-Host prüfen** |
 | 28 | **Speicher/Datenmenge der Bäume senken** (nach Doppel-Puffer ~876 MB) | ✅ Runde 28 — Kronen-Karten instanziiert: 312 → 44 Byte pro Karte, Puffer 352 → 206 MB, Erstbuild 490 → 373 ms, Karten-Cap 4 Mio → 700 k. Bild bis auf 336 Pixel (0,15 %, Schattenkarten-Rand) unveraendert; ohne Schatten bitgleich |
 | 25 | **Schatten: ganzer Baum statt Stumpf**, bessere Auflösung (Nutzer, Runde 23) | ⬜ — Ist-Zustand und Wurzel-Analyse siehe „Schatten: Ist-Zustand“ unten |
-| 26 | **Eigener Schilf-Pass** (Entwurf steht fest, siehe „Plan: eigener Schilf-Pass“ unten) | ⬜ — Nutzer hat die Umsetzung freigegeben, aber **nach** den Bäumen |
+| 26 | **Eigener Schilf-Pass** (Entwurf steht fest, siehe „Plan: eigener Schilf-Pass“ unten) | ✅ Runde 31 — `reed_cpu.c` + `reed.vert/frag`: eine Instanz = eine Pflanze (Culm + 4 Blätter + Kolben, 76 Vertices, ein Draw), eigenes Grid (0,6 m-Raster, Dichte-Cull auf der CPU), Schattenwurf dabei, Gras zeichnet kein Schilf mehr. Default `DEMO_REEDPER=70` = 10 Pflanzen/m², Build 15 ms, Frame +7,6 %. **Optik prüft der Nutzer** |
 
 ## Plan: eigener Schilf-Pass (Runde 23e, vom Nutzer als Ziel festgelegt)
 
@@ -603,6 +603,50 @@ Gleiche Szene (648 Bäume), Software-GL in der VM, 640×360, `DEMO_NOTERRAIN=1`:
 Frame-Zeit gleich: die eingesparten Vertex-/Uploadkosten sind in die **Full-Rate**
 der jetzt vollen fernen Kronen gewandert. Sichtbar: ferne Kronen sind gefüllt statt
 dünn (Laubpixel in der Szene 2160 → 7606).
+
+## Session 2026-10-09, Runde 31 (Eigener Schilf-Pass, TODO 26)
+
+**Umsetzung nach dem Plan aus Runde 23e:** Schilf läuft nicht mehr als Gras-Quad.
+
+- **Neu** `src/reed_cpu.c`: eine Instanz = **eine Pflanze** — `pos(3), hfac, wfac,
+  yaw, phase, variante` (8 Float). Gelaende wird pro Zelle (0,6 m) **einmal**
+  abgetastet (`c_terrainH` kostet 0,76 µs; ein Raster pro Pflanze wären 160 000
+  Abtastungen = 120 ms), die Pflanzen liegen gestreut darin. Der Dichte-Cull
+  (Feld `reedW` × 0,46 × Dichte gegen `c_hash12`) läuft **auf der CPU** mit —
+  ohne hätte die CPU 41 823 Instanzen gebaut, von denen der Shader 38 122 wieder
+  verworfen hätte (gemessen).
+- **Neu** `src/shaders/reed.vert` / `reed.frag`: eine Pflanze = **5 Streifen**
+  (Culm + 4 Blaetter an Knoten-Etagen) à 6 Stationen, mit entarteten Ecken an
+  einem `TRIANGLE_STRIP` = **76 Vertices**, **ein** `glDrawArraysInstanced`.
+  Culm kamera-/sonnenzugewandt (3 cm dünner Halm ist von der Seite sonst unsichtbar),
+  Kolben als Maske. Farben/Beleuchtung aus `grass.frag` übernommen.
+- `grass.vert` zeichnet **kein Schilf mehr** (`uReedPass`), Schattenwurf läuft mit.
+- Knöpfe: `DEMO_REEDPASS=0|1` (Standard 1), `DEMO_REEDRANGE`, `DEMO_REEDGRID`,
+  `DEMO_REEDPER`, `DEMO_REEDDIST`. Selbsttest prüft den Build (Punkt 6).
+
+**Eigenen Fehler gefunden:** der eigene `sinf`-Hash in `reed_cpu.c` warf bei
+Weltkoordinaten Precision weg (Argument ~1e5) und erzeugte Kurzzyklen — die
+Pflanzen einer Zelle stapelten sich, die Bilddeckung sank mit **mehr** Kandidaten
+(26 % → 7 % → 21 %). Mit `c_hash12` (CPU-Zwilling von `hash12(vec2)`) wieder
+monoton: 25,4 % / 35,5 % / 40,1 %.
+
+**Messbank:** bester Schilf-Punkt der Welt (CPU-Scan): (204, 314), `DEMO_CAM="204 314 -0.10 0.5"`,
+Arten-Farbmodus `DEMO_ARTEN=2` (Schilf = orange, in beiden Wegen dieselbe Farbe).
+
+| `DEMO_REEDPER` | Pflanzen/m² in der Uferzone | Schilf-Bildpixel | Frame (VM) |
+|---|---|---|---|
+| Gras-Weg (alt) | ~198 Halme/m² gesamt | 107 239 px (46,5 %) | 1473 ms |
+| 20 | 3 | 58 861 px (25,6 %) | 1483 ms |
+| 40 | 6 | 71 921 px (31,2 %) | 1519 ms |
+| **70 (Default)** | **10** | **86 630 px (37,6 %)** | **1585 ms (+7,6 %)** |
+| 110 | 16 | 100 969 px (43,8 %) | 1794 ms (+22 %) |
+
+Build: 13 689 Zellen, 12 856 Pflanzen, **15 ms** (neu alle 12 m Kameraweg).
+Schatten-Wurf: 480 725 Texel (neu) gegen 479 502 (alt) — vergleichbar.
+
+**Warum die Bilddeckung unter der alten liegt:** der alte Weg hat ferne Halme mit
+dem Gras-`sizeScale` bis 2,8× hochskaliert; der neue hält echten Maßstab
+(Plan-Punkt 4). Die ferne Riede wirkt dadurch dünner — **Optik prüft der Nutzer.**
 
 ## Zu prüfen, nachdem die Bäume umgebaut sind (Runde 27–30)
 

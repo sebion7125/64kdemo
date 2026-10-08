@@ -21,6 +21,8 @@ emit LEAF_VS_SRC  src/shaders/leaf.vert
 emit LEAF_FS_SRC  src/shaders/leaf.frag
 emit GRASS_VS_SRC src/shaders/grass.vert
 emit GRASS_FS_SRC src/shaders/grass.frag
+emit REED_VS_SRC src/shaders/reed.vert
+emit REED_FS_SRC src/shaders/reed.frag
 emit CROWN_VS_SRC src/shaders/crown.vert
 emit CROWN_FS_SRC src/shaders/crown.frag
 emit DEPTH_FS_SRC src/shaders/depth.frag

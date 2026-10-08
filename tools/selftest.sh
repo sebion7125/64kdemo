@@ -89,7 +89,14 @@ check_tree_counts small
 run big 25 "DEMO_CAM=5 16 -0.15 0.7" "DEMO_LODRSCALE=2.0" "DEMO_SHOT=4"
 check_tree_counts big
 
-# 6) Referenz ohne Gras (Gras-Sichtweite 0) — Baum-Bild isoliert
+# 6) Schilf-Pass: an einem Ufer muss der eigene Build Pflanzen liefern
+run reed 25 "DEMO_CAM=204 314 -0.10 0.5" "DEMO_ARTEN=2" "DEMO_SHOT=6"
+check_no_glerror reed
+np=$(grep -h "Schilf-Build:" "$OUT/reed.log" | head -1 | sed 's/[^0-9]*\([0-9]*\).*/\1/')
+[ "${np:-0}" -gt 0 ] || fail "reed: Schilf-Build liefert 0 Pflanzen"
+log "OK   reed: $np Pflanzen, $(grep -h 'Schilf-Build:' "$OUT/reed.log" | tail -1)"
+
+# 7) Referenz ohne Gras (Gras-Sichtweite 0) — Baum-Bild isoliert
 run nograss 20 "DEMO_CAM=5 16 -0.15 0.7" "DEMO_GRASSMD=1" "DEMO_SHOT=4"
 check_tree_counts nograss
 
