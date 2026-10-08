@@ -88,6 +88,7 @@ extern int treeSkipped;
 extern int treeCapSprig;      // DEMO_TREELOG=1: Stufe je Baum auf der Console
 extern float treeLodScale;   // DEMO_LODRSCALE: Schaltweiten skalieren (0 = aus)
 extern int ezKidPct;         // DEMO_KIDPCT: Kinderzahl aller Stufen gleich duennen
+extern float ezHueMin, ezHueMax, ezSatMin, ezSatMax, ezValMin, ezValMax;  // Blatt-Palette
 // Referenzpunkt fuer die Detailstufe. main.c setzt das auf die ECHTE Kamera
 // (camPos). Vorher war es das Build-Zentrum = camTgt, das haengt 10 m in
 // Blickrichtung vor der Kamera -> die Stufe hing von der Blickrichtung ab.

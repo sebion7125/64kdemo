@@ -1447,6 +1447,27 @@ int main(int argc, char **argv) {
   { const char *eg = getenv("DEMO_TREEGEN"); if (eg) treeGenMode = (strstr(eg,"alt")||strstr(eg,"0")) ? 0 : 1; }
   { const char *es = getenv("DEMO_EZSPREAD"); if (es) treeEzSpread = (float)atof(es); }
   { const char *ep = getenv("DEMO_EZPRESET"); if (ep) treeEzPreset = atoi(ep); }
+  // Blatt-Palette (HSV-Grenzen pro Baum): benannte Voreinstellung oder sechs
+  // Zahlen. Standard (kompiliert) = "saftig": hue 93..133 Grad, sat 0,60..0,85,
+  // val 0,34..0,55. "aktuell" = die Palette vor der Umstellung (hue 72..144 Grad,
+  // enthaelt olivige Randwerte — Nutzer: "herbstlich, blass").
+  { const char *pal = getenv("DEMO_LEAFPAL");
+    if(pal){
+      if(strstr(pal, "aktuell")){ ezHueMin = 0.20f; ezHueMax = 0.40f;
+        ezSatMin = 0.62f; ezSatMax = 0.95f; ezValMin = 0.24f; ezValMax = 0.46f; }
+      else if(strstr(pal, "frisch")){ ezHueMin = 0.24f; ezHueMax = 0.32f;
+        ezSatMin = 0.55f; ezSatMax = 0.75f; ezValMin = 0.45f; ezValMax = 0.65f; }
+      else if(strstr(pal, "tief")){ ezHueMin = 0.30f; ezHueMax = 0.42f;
+        ezSatMin = 0.70f; ezSatMax = 0.92f; ezValMin = 0.26f; ezValMax = 0.40f; }
+      else if(strstr(pal, "wald")){ ezHueMin = 0.28f; ezHueMax = 0.36f;
+        ezSatMin = 0.65f; ezSatMax = 0.88f; ezValMin = 0.38f; ezValMax = 0.58f; }
+    } }
+  { const char *hsv = getenv("DEMO_LEAFHSV");
+    if(hsv){ float v[6];
+      if(sscanf(hsv, "%f %f %f %f %f %f", v, v+1, v+2, v+3, v+4, v+5) == 6){
+        ezHueMin = v[0]; ezHueMax = v[1]; ezSatMin = v[2];
+        ezSatMax = v[3]; ezValMin = v[4]; ezValMax = v[5];
+      } else fprintf(stderr, "DEMO_LEAFHSV erwartet 6 Zahlen: hmin hmax smin smax vmin vmax\n"); } }
   { const char *eh = getenv("DEMO_REEDH"); if (eh) reedH = (float)atof(eh); }
   { const char *er = getenv("DEMO_REED");
     if (er) { reedDens = 1.0f; reedWide = 1.0f;

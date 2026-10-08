@@ -568,6 +568,46 @@ der alten Add-on-Datei sind tot (404), das Add-on ist seit Blender 4.2 eine Exte
 Alpha-Test im Shader, Blatt-Laenge/Breite-Verhaeltnis ~2:1, Blattgroessen-Abstufung
 zum Zweigende hin, Kronenform ueber das Astlaengen-Profil.
 
+## Session 2026-10-08, Runde 25e (Blattfarbe: Kette gemessen in Ordnung, Palette neu gewaehlt)
+
+**Nutzer:** „hast du die blattfarbe noch auf dem schirm?“ / „ja das angleichen der
+farbe hatten wir schon. aber die farbwahl gefaellt mir noch nicht so…“
+
+**Messung der Stufen-Konsistenz** (ein Baum, 40 m, `DEMO_TIER` erzwungen, Maske aus
+Maskenlauf + Farbe aus Normallauf, Terrain aus): tier 3 (1618 Kronenpx,
+72/110/29), tier 2 (1564 px, 72/110/29), tier 0 (1060 px, 73/110/30) → Farbe Δ ≤ 1
+pro Kanal. Die Kette (eine Quelle `ezLeafR/G/B`, farbneutraler Atlas, gleiche
+Beleuchtung in `leaf.frag`/`crown.frag`) haelt.
+
+**Messfehler vorheriger Runden:** die gruenen Bildmasken der Gesamtansicht
+enthielten Gras — deshalb sahen „Karten“ blaecher/heller aus (130/165/108 vs
+141/174/122). Ohne Terrain (oder mit Differenzmaske an identischer Kamera) ist der
+Unterschied real nicht vorhanden.
+
+**Was in der Ferne wirklich anders ist: die Deckung, nicht die Farbe.** tier 0 malt
+1060 statt 1618 Kronenpixel (−34 %). Grund rechnerisch: `wantCards = ezNSprig/4`
+bei `CARDSCALE 1,30` → Deckung 0,25·1,69 = 0,42 gegen 0,5·1,5625 = 0,78 in tier 3.
+Noch offen: `wantCards` in tier 0 auf `ezNSprig/2` (kostet ~19 000 Karten) oder
+`ezNSprig/3` mit `CARDSCALE 1,45`.
+
+**Palette:** neu als HSV-Bereiche `ezHueMin/Max`, `ezSatMin/Max`, `ezValMin/Max`
+(trees_cpu.c), zur Laufzeit justierbar: `DEMO_LEAFPAL=aktuell|saftig|frisch|tief|wald`
+oder `DEMO_LEAFHSV="hmin hmax smin smax vmin vmax"`. Gerendert gemessen (40 m,
+Einzelblaetter, Terrain aus):
+
+| Palette | HSV hue/sat/val | gerendert | Saett. | G/R |
+|---|---|---|---|---|
+| aktuell (alt) | 72–144° / 0,62–0,95 / 0,24–0,46 | (72,110,29) | 0,73 | 1,53 |
+| frisch | 86–115° / 0,55–0,75 / 0,45–0,65 | (103,136,68) | 0,50 | 1,32 |
+| saftig | 93–133° / 0,60–0,85 / 0,34–0,55 | (75,123,50) | 0,60 | 1,64 |
+| **wald (neu, Standard)** | 101–130° / 0,65–0,88 / 0,38–0,58 | **(70,128,47)** | 0,63 | 1,82 |
+| saftig+ | 101–137° / 0,65–0,90 / 0,38–0,58 | (63,128,44) | 0,65 | 2,02 |
+| tief | 108–151° / 0,70–0,92 / 0,26–0,40 | (39,111,43) | 0,65 | 2,85 |
+| blau-gruen | 130–162° / 0,55–0,75 / 0,35–0,55 | (69,124,84) | 0,45 | 1,80 |
+
+Der alte Wert 72° (Gelb-Gruen/Oliv) war der Hauptgrund fuer „herbstlich“; die
+Untergrenze auf 101° zu schieben nimmt ihn heraus. Standard auf **wald** gesetzt.
+
 ## Session 2026-10-08, Runde 25d (EZ-Tree headless ausgeführt — Terminalast gefehlt)
 
 **Nutzer:** „ich sehe 1 und zwar bei dem Stamm. der hört irgendwann weiter zu
@@ -2194,6 +2234,10 @@ Funktioniert auch auf NVIDIA (dort wird `gl_FragDepth` immer geschrieben).
   Wide->nah-Order Koennte es bereits behoben haben)
 
 ### 2. Bäume
+- [ ] **Ferne Krone duenner als nahe** — tier 0 malt 34 % weniger Kronenpixel
+  (`wantCards = ezNSprig/4` × `CARDSCALE 1,30`); Farbe selbst ist über alle Stufen gleich
+- [ ] **Rebuild-Stottern**: 495 ms pro Wald-Rebuild, ausgelöst durch Stufenwechsel
+  (kontinuierlich pro Frame verteilen wie beim Gras, oder Thread mit Doppel-Puffer)
 - [ ] **Nähte in den Röhren** (Tube-Segmente) → parallel transport frames
 - [ ] Stamm-Textur (Rinde) verbessern
 

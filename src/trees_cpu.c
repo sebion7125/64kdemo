@@ -218,6 +218,17 @@ static float ezCardScale = 1.25f;
 // moduliert, und dieselbe Farbe steht in der Karten-Instanz.
 static float ezLeafR = 0.18f, ezLeafG = 0.46f, ezLeafB = 0.09f;
 
+// Blatt-PALETTE (HSV-Bereiche pro Baum). Der Nutzer mag die alte Palette nicht
+// (hue 72..144 Grad enthaelt die olivigen/gelben Randwerte -> "herbstlich").
+// Kompilierter Standard = "wald": hue 101..130 Grad, gemessen gerendert
+// (70,128,47), Saettigung 0,63, G/R 1,82 — gegen (72,110,29)/G-R 1,53 vorher.
+// Justierbar ohne Neukompilieren:
+//   DEMO_LEAFPAL=aktuell|saftig|frisch|tief|wald
+//   DEMO_LEAFHSV="hmin hmax smin smax vmin vmax"   (0..1)
+float ezHueMin = 0.28f, ezHueMax = 0.36f;
+float ezSatMin = 0.65f, ezSatMax = 0.88f;
+float ezValMin = 0.38f, ezValMax = 0.58f;
+
 // Kronen-Quads (Distanz-LOD): 2/3 an den echten Astspitzen, Rest um die
 // Kronenmitte. Steht beiden Generatoren zur Verfuegung.
 static void emit_crown_quads(float bx, float bz, float s, float hf,
@@ -914,10 +925,9 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
   float btone = 0.75f + 0.55f * TH(2);
   // eigene Blattfarbe pro Baum (wie im alternativen Generator) — sie sitzt auch
   // in der Karten-Instanz, damit die Distanzstufe dieselbe Krone zeigt wie nah
-  float hueE  = 0.20f + TH(800) * 0.20f;
-  float lsatE = 0.62f + TH(801) * 0.33f;   // saettigter: 0,45..0,90 war zu blass
-  float lvalE = 0.24f + TH(802) * 0.22f;   // dunkler, damit die Beleuchtung Sattel
-                                          // erzeugen kann statt Auswaschung
+  float hueE  = ezHueMin + TH(800) * (ezHueMax - ezHueMin);
+  float lsatE = ezSatMin + TH(801) * (ezSatMax - ezSatMin);
+  float lvalE = ezValMin + TH(802) * (ezValMax - ezValMin);
   hsv2rgb(hueE, lsatE, lvalE, &ezLeafR, &ezLeafG, &ezLeafB);
   Sec root;
   root.rg.p[0] = bx; root.rg.p[1] = by; root.rg.p[2] = bz;
