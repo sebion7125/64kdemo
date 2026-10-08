@@ -2808,3 +2808,34 @@ ganze Zeit Terrain (Nutzerbefund). Jetzt per `setenv`.
 Test beschleunigt: kleine Aufloesung reicht, die VM-Zeit steckte in der Fuellrate
 (640x360-Raymarch). `DEMO_LODTEST="140 3 0.02" ./bin/64kdemo 32 24` = 6 850 Frames
 in unter 4 Minuten.
+
+## Pumpen gemessen: Satz-Ueberblendung ist nicht deckungserhaltend (2026-10-08)
+
+Modellfreie Messung im Ein-Baum-Test: `LT-DECKUNG` zaehlt pro Frame helle Pixel
+der ganzen Bildflaeche (Terrain aus, also = sichtbare Baumdeckung). Read erst
+nach dem MSAA-Resolve (vorher kam aus dem Multisample-FBO Muell: konstant 6 HUD-
+Pixel). Kamera zielt im Test pro Frame auf die Baummitte, sonst wandert der Baum
+aus dem Bild.
+
+Ergebnis mit Satz-Ueberblendung (treeFadeDur 0.9 s): in JEDEM Ueberblend-Fenster
+faellt die Deckung unter den Wert der Frames davor und danach —
+115,6->114,5 m: 133 -> 122 -> 135 px, 103,5 m: 161 -> 151 -> 167 px,
+91,4 m: 204 -> 193 -> 209 px. Periode = Rebuild-Abstand. Das ist das Pumpen.
+
+Grund: zwei identische halbtransparente Kopien mit komplementaerem Alpha sind
+nicht deckungserhaltend. Mischt man eine Schicht mit Deckung a bei Fade f zweimal,
+steht danach a - a^2 f (1-f); bei f = 0.5 fehlen bis zu 25 %. Die Regel "w und
+1-w" gilt nur fuer disjunkte Schichten, nicht fuer dieselbe Geometrie doppelt.
+
+Konsequenz: Satz-Ueberblendung aus (treeFadeDur 0.0, DEMO_TREEFADE holt sie
+zurueck). Sie ist ueberfluessig, seit Geometrie-Unterschiede zwischen Saetzen
+nur noch bei Gewicht 0 auftreten (Wirtstest-Zweig + LT-PUMP-Pruefung im Engine-
+Test: 0 Treffer).
+
+Vorher/Nachher, groesste Deckungs-Dellen im Bereich 60-140 m:
+  mit Ueberblendung  -4,31 % / -3,85 % / -3,75 % / -3,45 % / -3,18 %
+  ohne Ueberblendung -1,27 % / -1,20 % / -1,18 % / -1,12 % / -1,12 %
+Rest ~1-2 Pixel bei ~150 px Deckung = Messraster.
+
+Test schneller: `DEMO_LODTEST="140 3 0.1" ./bin/64kdemo 320 180` (1370 Frames,
+~2,5 min). Die Laufzeit steckt in der Fuellrate, nicht in der Logik.

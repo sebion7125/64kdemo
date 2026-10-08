@@ -438,7 +438,7 @@ static int   lodTest = 0, ltFrame = 0, ltTierSeqN = 0, ltBuildsSeen = 0;
 static float ltD0 = 140.0f, ltD1 = 3.0f, ltStep = 0.5f;
 static float ltPrevW[4] = {0,0,0,0}, ltPrevD = 0.0f, ltSlope[4] = {0,0,0,0}, ltHole = 0.0f;
 static int   ltPrevTier = -999, ltPrevVerts = -1, ltPrevCrown = -1, ltPrevLeaf = -1;
-static int   ltTierSeq[16]; static int ltGeomChg = 0, ltGeomChgInBand = 0;   // DEMO_EXIT=1: arbeiten, dann sofort beenden
+static int   ltTierSeq[16]; static int ltGeomChg = 0, ltGeomChgInBand = 0, ltPump = 0;   // DEMO_EXIT=1: arbeiten, dann sofort beenden
 static float envShotTimes[16]; static int envShotN = 0, envShotIdx = 0;
 static int   envShotTimes_on = 0;
 static unsigned long frameNo = 0;
@@ -1193,7 +1193,15 @@ static int upActive = 0, upNextSet = 1;
 // waehrend der neue sich einloest — beides per Wuerfelentscheid im Vertex-/Frag-
 // ment, also ohne Alpha-Blend und ohne Sortierabhaengigkeit.
 static double treeSwapT = -1e30;
-static double treeFadeDur = 0.9;
+// Satz-Ueberblendung AUS. Zwei identische halbtransparente Kopien mit
+// komplementaerem Alpha mischen ist nicht deckungserhaltend: eine Schicht mit
+// Deckung a ergibt a - a^2*f*(1-f), bei f=0.5 bis zu 25 % weniger. Gemessen im
+// Ein-Baum-Test (LT-DECKUNG): in JEDEM Ueberblend-Fenster fiel die Deckung unter
+// den Wert der Frames davor/danach (115,6->114,5 m: 133 -> 122 -> 135 px,
+// 103,5 m: 161 -> 151 -> 167 px). Das ist das periodische Pumpen.
+// Da Geometrie-Unterschiede zwischen Saetzen jetzt nur noch bei Gewicht 0
+// auftreten, ist die Ueberblendung ueberfluessig. DEMO_TREEFADE=0.9 holt sie.
+static double treeFadeDur = 0.0;
 static int treeOldSet = -1;
 double treeTierSwitchS = 0.0;   // DEMO_TIERSWITCH (Messbank)
 int treeDbg = 0;              // DEMO_TREEDEBUG: Satz-Wechsel + Ueberblendung protokollieren
@@ -2309,6 +2317,15 @@ int main(int argc, char **argv) {
           camTgt[0] -= ax * s; camTgt[2] -= az * s;
           if(flyMode){ flyPos[0] -= ax * s; flyPos[2] -= az * s; }
         }
+        // Blick pro Frame auf die Baummitte. Ohne das bleibt die Richtung von
+        // der Startposition stehen, der Baum wandert aus dem Bild und die
+        // Deckungs-Messung zaehlt 6 HUD-Pixel statt Baum.
+        {
+          float midY = treeFocus[1];   // Zielpunkt des Ein-Baum-Sprungs
+          float hx = treeFocus[0] - flyPos[0], hz = treeFocus[2] - flyPos[2];
+          flyYaw = atan2f(hx, hz);
+          flyPitch = atan2f(midY - flyPos[1], sqrtf(hx * hx + hz * hz));
+        }
       }
       if(appr != 0.0f && treeFocusValid){
         float rx = flyMode ? flyPos[0] : camTgt[0], rz = flyMode ? flyPos[2] : camTgt[2];
@@ -3172,6 +3189,31 @@ int main(int argc, char **argv) {
           ltPrevVerts = treeDbgVerts; ltPrevCrown = treeDbgCrown; ltPrevLeaf = treeDbgLeaf;
         }
         ltPrevW[0] = w[0]; ltPrevW[1] = w[1]; ltPrevW[2] = w[2]; ltPrevW[3] = w[3];
+        // PUMP-Pruefung: die Satz-Ueberblendung mischt zwei Saetze mit
+        // komplementaerem Alpha. Enthalten sie fuer dieselbe Schicht
+        // UNTERSCHIEDLICHE Geometrie, und diese Schicht hat gerade Gewicht > 0,
+        // dann wird eine voll sichtbare Schicht ueber die Ueberblendzeit hoch-
+        // bzw. runtergeblendet — genau das periodische Pumpen (im Nutzer-Log bei
+        // allen 17 m: Geruest 45 <-> 10 164 Vertices). Das ist ein FEHLER, egal
+        // wie stetig die Gewichte selbst sind.
+        if(treeFadeNew < 1.0f){
+          const char *why = 0;
+          if(nTreeVertsCur != nTreeVertsOld && w[3] > 0.001f) why = "Geruest";
+          else if(nCrownVertsCur != nCrownVertsOld && w[1] > 0.001f) why = "Karten";
+          else if(nLeafInstCur != nLeafInstOld && w[0] > 0.001f) why = "Blaetter";
+          if(why){
+            ltPump++;
+            printf("LT-PUMP frame %d bei d=%.2f m: %s unterscheidet sich zwischen Saetzen "
+                   "(%d/%d) bei Gewicht %.3f fade %.2f -> die Schicht wird ueber die "
+                   "Ueberblendzeit ein- bzw. ausgeblendet\n",
+                   ltFrame, dCam, why,
+                   strcmp(why,"Geruest")==0 ? nTreeVertsCur : (strcmp(why,"Karten")==0 ? nCrownVertsCur : nLeafInstCur),
+                   strcmp(why,"Geruest")==0 ? nTreeVertsOld : (strcmp(why,"Karten")==0 ? nCrownVertsOld : nLeafInstOld),
+                   strcmp(why,"Geruest")==0 ? w[3] : (strcmp(why,"Karten")==0 ? w[1] : w[0]),
+                   treeFadeNew);
+            fflush(stdout);
+          }
+        }
         ltPrevD = dCam; ltFrame++;
         if(dCam <= ltD1 + ltStep){
           float lim1 = 1.5f / (treeDbgR1 * (LOD_BAND_HI - LOD_BAND_LO));
@@ -3187,12 +3229,14 @@ int main(int argc, char **argv) {
           printf("LT-SUMME groesstes Deckungsloch |Blatt+Karte+Billboard-1| = %.4f\n", ltHole);
           printf("LT-SUMME Geometrie-Wechsel %d, davon innerhalb eines Blendenbands %d\n",
                  ltGeomChg, ltGeomChgInBand);
+          printf("LT-SUMME Pump-Frames (Schicht mit Gewicht > 0 unterscheidet sich zwischen Saetzen): %d\n", ltPump);
           printf("LT-SUMME Bauten %d\n", treeDbgBuilds);
           int bad = 0;
           if(ltHole > 0.01f){ bad = 1; printf("LT-FEHLER Deckungsloch %.4f > 0,01\n", ltHole); }
           if(ltSlope[0] > lim1 * 1.1f || ltSlope[1] > lim1 * 1.1f){ bad = 1; printf("LT-FEHLER Blatt/Karten-Steigung ueber der Schranke\n"); }
           if(ltSlope[2] > lim2 * 1.1f || ltSlope[3] > lim2 * 1.1f){ bad = 1; printf("LT-FEHLER Billboard/Geruest-Steigung ueber der Schranke\n"); }
           if(ltGeomChgInBand > 0){ bad = 1; printf("LT-FEHLER Geometrie verschwindet innerhalb eines Blendenbands\n"); }
+          if(ltPump > 0){ bad = 1; printf("LT-FEHLER Pumpen: %d Frames mit sichtbarer Satz-Differenz\n", ltPump); }
           printf("LT-ERGBNIS %s\n", bad ? "FEHLER" : "OK");
           fflush(stdout);
           lodTest = 0;
@@ -3443,6 +3487,34 @@ int main(int argc, char **argv) {
                                GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST);
       p_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     }
+
+    // EIN-BAUM-LOD-TEST, Deckungs-Messung: was liegt WIRKLICH auf dem Schirm?
+    // Alle bisherigen Pruefungen rechnen mit dem Modell (Gewichte, Mengen,
+    // Saetze). Diese Zeile zaehlt Pixel — modellfrei. Pumpen aeussert sich als
+    // Delle in der Deckung, und zwar an Entfernungen, an denen das Modell "glatt"
+    // meldet.
+    if(lodTest && treeDbgTier >= 0){
+      // Ganze Bildflaeche lesen und helle Pixel zaehlen. Bei ausgeschalteter
+      // Landschaft ist das die sichtbare Baumdeckung — ohne Fenster, das bei
+      // Naehe neben dem Bild landet (der erste Versuch lieferte -1/6 Pixel).
+      static unsigned char *covbuf = 0; static int covW = -1, covH = -1;
+      int lit = -1;
+      if(covW != fboW || covH != fboH){
+        free(covbuf); covW = fboW; covH = fboH;
+        covbuf = (unsigned char*)malloc((size_t)fboW * fboH * 4);
+      }
+      if(covbuf){
+        p_glReadPixels(0, 0, fboW, fboH, GL_RGBA, GL_UNSIGNED_BYTE, covbuf);
+        lit = 0;
+        for(int i = 0; i < fboW * fboH; i++)
+          if(covbuf[i*4] > 12 || covbuf[i*4+1] > 12 || covbuf[i*4+2] > 12) lit++;
+      }
+      float ddx = treeDbgX - camPos[0], ddz = treeDbgZ - camPos[2];
+      printf("LT-DECKUNG frame %4d d %6.2f m: %7d helle Pixel (fade %.2f, Satz %d)\n",
+             ltFrame - 1, sqrtf(ddx * ddx + ddz * ddz), lit, treeFadeNew, drawSet);
+      fflush(stdout);
+    }
+
     // 4) Blit auf den Screen
     p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
     p_glViewport(0, 0, winW, winH);
