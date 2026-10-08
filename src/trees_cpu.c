@@ -20,6 +20,7 @@ int   treeOneShot = 0;
 int   treeDbgTier = -1, treeDbgVerts = 0, treeDbgCrown = 0, treeDbgLeaf = 0, treeDbgBuilds = 0;
 float treeDbgR1 = 0, treeDbgR2 = 0, treeDbgDBuild = 0, treeDbgH = 0;
 float treeDbgX = 0, treeDbgZ = 0, treeDbgY = 0;
+int   treeDbgBucket = -1; float treeDbgRepX = 0, treeDbgRepZ = 0;
 int   treeGenMode = 1;   // 0 = eigener Generator, 1 = EZ-Tree-Port
 int   treeEzPreset = -1;   // DEMO_EZPRESET=0..3: Preset erzwingen (-1 = pro Baum gewuerfelt)
 float treeEzSpread = 1.0f;  // DEMO_EZSPREAD: Laengenfaktor der Kronenlevel (1 = 1:1-Port)
@@ -1329,8 +1330,13 @@ int trees_build_step(int maxTrees){
     gLodR = R1;
     gLodR2 = R2;
     gTreeDist = d;
-    gBranchCut = R2 * 1.15f;
-    gMeshFineCut = R2 * 1.15f;
+    // Der Rand muss den Nachlauf des Builds abdecken (bis 12 m Kameraweg wird
+    // nicht neu gebaut): gemessen bei DEMO_ONE + Kameraweg sprang das Geruest
+    // eines Baums zwischen zwei Builds von 45 auf 7 362 Vertices, weil der Cut
+    // an der Build-Zentrums-Entfernung hing, die Mesh-Blende aber an der
+    // Kameraentfernung liegt und der Cut dadurch INS Blendenband fiel.
+    gBranchCut = R2 * 1.15f + 16.0f;
+    gMeshFineCut = R2 * 1.15f + 16.0f;
     // Der Rand muss die Nachlaufzeit des Builds abdecken: d ist der Abstand zum
     // BUILD-ZENTRUM, der Shader blendet aber gegen die KAMERA aus (bis 1,15 R1),
     // und das Build-Zentrum hinkt der Kamera bis 12 m nach. Bei 1,3 R1 (bei
@@ -1410,6 +1416,8 @@ int trees_build_step(int maxTrees){
       treeDbgTier = tier; treeDbgR1 = R1; treeDbgR2 = R2; treeDbgDBuild = d;
       treeDbgH = H; treeDbgX = cand[i].p[0]; treeDbgY = cand[i].p[1];
       treeDbgZ = cand[i].p[2];
+      treeDbgBucket = ezBucket;
+      treeDbgRepX = impRepD[ezBucket].cx; treeDbgRepZ = impRepD[ezBucket].cz;
       treeDbgVerts = nTreeVerts - vertBefore; treeDbgCrown = nCrownVerts - quadBefore;
       treeDbgLeaf = nLeafInst - leafBefore; treeDbgBuilds++;
     }

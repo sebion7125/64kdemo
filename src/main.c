@@ -608,6 +608,81 @@ static void build_crown_tiles(void){
 // (tier 2) und Billboards. Wir unschaerfen pro Kachel die Alpha (Box, nur
 // innerhalb der Kachel, kein Ueberlauf in die Nachbarkachel) und ersetzen sie
 // durch eine weiche Mischung. Duenne Zweige bleiben stehen (Untergrenze).
+// Transparente Texel tragen RGB = 0. Schon bei LINEAR-Filterung wandert dieses
+// Schwarz in die sichtbaren Nachbartexel (gemessen am Karten-Atlas: 3 075 913
+// transparente Texel, 100 % davon RGB = 0, sichtbare Texel neutral 241). Ergebnis
+// im Bild: dunkle, flache Kronen — der Nutzerbefund "sieht aus wie ein Toon
+// Shader". Abhilfe: pro Kachel den mittleren TON in die transparenten Texel.
+static void fill_rgb(GLuint tex, int size, int tilepx, int cols){
+  unsigned char *buf = (unsigned char *)malloc((size_t)size * size * 4);
+  if(!buf) return;
+  p_glBindTexture(GL_TEXTURE_2D, tex);
+  p_glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+  for(int t = 0; t < cols * cols; t++){
+    int tx0 = (t % cols) * tilepx, ty0 = (t / cols) * tilepx, sr = 0, sg = 0, sb = 0, n = 0;
+    for(int y = 0; y < tilepx; y++)
+      for(int x = 0; x < tilepx; x++){
+        unsigned char *p = buf + ((size_t)(ty0 + y) * size + tx0 + x) * 4;
+        if(p[3] > 128){ sr += p[0]; sg += p[1]; sb += p[2]; n++; }
+      }
+    if(!n) continue;
+    for(int y = 0; y < tilepx; y++)
+      for(int x = 0; x < tilepx; x++){
+        unsigned char *p = buf + ((size_t)(ty0 + y) * size + tx0 + x) * 4;
+        if(p[3] <= 128){ p[0] = (unsigned char)(sr / n); p[1] = (unsigned char)(sg / n);
+                         p[2] = (unsigned char)(sb / n); }
+      }
+  }
+  p_glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size, size, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+  free(buf);
+}
+
+// Mip-Kette PRO KACHEL. Der Atlas legt Kacheln nebeneinander, die normale
+// Mip-Kette des Treibers wuerde sie vermischen, also jede Stufe selbst aus der
+// vorherigen herunterfalten (2x2-Box, innerhalb der Kachel).
+// Kein Luxus: crown.frag schaetzt die Aufloesungsstufe selbst (lod bis 3) und
+// sampelt mit textureLod. Auf einer Textur OHNE Mip-Kette ist das undefiniert —
+// Mesa liefert Schwarz, die ferne Krone wird dunkel und flach (Nutzer: "tier 2
+// sieht aus wie ein Toon Shader"). Beim schnellen Bewegen verschwand es, weil
+// dann noch der alte Satz mit Einzelblaettern gezeichnet wurde.
+static void build_tile_mips(GLuint tex, int size, int tilepx, int cols){
+  int maxlvl = 0; while((tilepx >> (maxlvl + 1)) >= 1 && (size >> (maxlvl + 1)) >= cols) maxlvl++;
+  unsigned char *cur = (unsigned char *)malloc((size_t)size * size * 4);
+  if(!cur) return;
+  p_glBindTexture(GL_TEXTURE_2D, tex);
+  p_glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, cur);
+  int ss = size;
+  for(int L = 1; L <= maxlvl; L++){
+    int ns = ss / 2, ts = tilepx >> L;
+    if(ts < 1 || ns < cols) break;
+    unsigned char *nxt = (unsigned char *)malloc((size_t)ns * ns * 4);
+    if(!nxt) break;
+    // Quell-Kachelgroesse ist die der VORSTUFE (tilepx >> (L-1)), nicht die
+    // urspruengliche — sonst landet die Quelle ausserhalb des Puffers (gemessen:
+    // Speicherzugriffsfehler im ersten Lauf dieser Funktion).
+    int pss = ss, pts = tilepx >> (L - 1);
+    for(int t = 0; t < cols * cols; t++){
+      int cx0 = (t % cols) * ts, cy0 = (t / cols) * ts;
+      int ox0 = (t % cols) * pts, oy0 = (t / cols) * pts;
+      for(int y = 0; y < ts; y++)
+        for(int x = 0; x < ts; x++){
+          unsigned s[4] = {0,0,0,0};
+          for(int dy = 0; dy < 2; dy++)
+            for(int dx = 0; dx < 2; dx++){
+              unsigned char *q = cur + ((size_t)(oy0 + 2*y + dy) * pss + ox0 + 2*x + dx) * 4;
+              for(int k = 0; k < 4; k++) s[k] += q[k];
+            }
+          unsigned char *q = nxt + ((size_t)(cy0 + y) * ns + cx0 + x) * 4;
+          for(int k = 0; k < 4; k++) q[k] = (unsigned char)((s[k] + 2) / 4);
+        }
+    }
+    p_glTexImage2D(GL_TEXTURE_2D, L, GL_RGBA8, ns, ns, 0, GL_RGBA, GL_UNSIGNED_BYTE, nxt);
+    free(cur); cur = nxt; ss = ns;
+  }
+  p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+  free(cur);
+}
+
 static void soften_alpha(GLuint tex, int size, int tilepx, int cols){
   unsigned char *buf = (unsigned char *)malloc((size_t)size * size * 4);
   unsigned char *bl  = (unsigned char *)malloc((size_t)size * size);
@@ -675,7 +750,8 @@ static void impostor_fix(void){
   }
   p_glBindTexture(GL_TEXTURE_2D, crnTex);
   p_glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, A, A, GL_RGBA, GL_UNSIGNED_BYTE, buf);
-  soften_alpha(crnTex, A, IMP_TILEPX, IMP_COLS);   // weiche Silhouette statt Saegezaahn
+  soften_alpha(crnTex, A, IMP_TILEPX, IMP_COLS);   // weiche Silhouette statt Saegezaehn
+  build_tile_mips(crnTex, A, IMP_TILEPX, IMP_COLS);
 }
 
 // FBO fuer die Kachel-Aufnahme (Farbe = crnTex, eigene Depth-Renderbuffer)
@@ -993,6 +1069,8 @@ static void build_foliage_atlas(GLuint progLeaf){
     }
   }
   soften_alpha(folTex, FOL_ATLAS, FOL_TILEPX, FOL_TILES);   // weiche Kartenkanten
+  fill_rgb(folTex, FOL_ATLAS, FOL_TILEPX, FOL_TILES);        // kein Schwarz in den Luecken
+  build_tile_mips(folTex, FOL_ATLAS, FOL_TILEPX, FOL_TILES); // textureLod braucht Mips
   // DEBUG (DEMO_FOLDUMP=1): Atlas als PPM — verifiziert, dass die Kacheln
   // wirklich Blattwerk enthalten und nicht leer sind.
   if(getenv("DEMO_FOLDUMP")){
@@ -2885,10 +2963,11 @@ int main(int argc, char **argv) {
         fflush(stdout);
         ss_prevTier = (float)treeDbgTier; ss_prevVerts = (float)treeDbgVerts;
       }
-      printf("EB,%.2f,%.1f,%.1f,%.1f,%.1f,%d,%.0f,%.0f,%d,%d,%d,%.3f,%.3f,%.3f,%.3f,%.2f,%d,%d\n",
+      printf("EB,%.2f,%.1f,%.1f,%.1f,%.1f,%d,%.0f,%.0f,%d,%d,%d,%.3f,%.3f,%.3f,%.3f,%.2f,%d,%d,Kachel %d Rep(%.1f,%.1f)\n",
              now_sec() - loopT0, camPos[0], camPos[2], dCam, treeDbgDBuild, treeDbgTier,
              treeDbgR1, treeDbgR2, treeDbgVerts, treeDbgCrown, treeDbgLeaf,
-             leafW, cardW, bbW, meshW, treeFadeNew, drawSet, upActive ? 1 : 0);
+             leafW, cardW, bbW, meshW, treeFadeNew, drawSet, upActive ? 1 : 0,
+             treeDbgBucket, treeDbgRepX, treeDbgRepZ);
       fflush(stdout);
     }
     // Baum-Mesh (Stamm/Aeste)

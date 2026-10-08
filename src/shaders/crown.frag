@@ -99,7 +99,10 @@ void main(){
     // vermischt die Mip-Kette Nachbar-Kacheln, und im Wald erscheinen harte
     // gruenue Rechtecke aus der Nachbarkrone. Deshalb hier bei lod 0/1 bleiben.
     // Rand des Billboards: siehe unten bei der Alpha-Berechnung (emEdge).
-    float clod = min(lod, 1.0);
+    // Mip-Kette liegt jetzt PRO KACHEL vor (build_tile_mips in main.c); die
+    // alte Begrenzung auf lod 0/1 war nur noetig, weil die Treiber-Mip-Kette
+    // Nachbar-Kacheln vermischt haette.
+    float clod = min(lod, 3.0);
     // Einzug um eine HALBE TEXEL DER KACHEL (128 px), nicht des ganzen Atlas:
     // der alte Wert (0.5/1024) war 8x zu klein -> LINEAR mischt an der Kachel-
     // kante die Nachbarkachel rein, und die ist am Rand schwarz (gemessen: 64

@@ -60,8 +60,33 @@ check_tree_counts standard; check_no_glerror standard
 #    (Laufzeit-abhaengige Effekte sind mit DEMO_FREEZE=1 abgeschaltet)
 run repeat 20 "DEMO_CAM=5 16 -0.15 0.7" "DEMO_SHOT=4"
 if [ -f "$OUT/standard.ppm" ] && [ -f "$OUT/repeat.ppm" ]; then
-  if cmp -s "$OUT/standard.ppm" "$OUT/repeat.ppm"; then
-    log "OK   Bild deterministisch (zwei Laeufe bitgleich)"
+  # Der HUD-Text (FPS-Zeile oben) zeigt die Laufzeit, ist also per Definition
+  # nicht deterministisch. Gemessen: die einzigen Unterschiede beider Laeufe
+  # lagen in y 3..38, x 633..639 (123 Pixel, max Delta 9) — genau dort.
+  # Verglichen wird deshalb die Szene unterhalb des HUD; der HUD-Streifen wird
+  # getrennt gemeldet, nicht ignoriert.
+  if python3 - "$OUT/standard.ppm" "$OUT/repeat.ppm" <<'PYEOF'
+import sys
+def ppm(p):
+    d=open(p,'rb').read(); parts=d.split(b'\n',3)
+    w,h = parts[1].split()
+    return int(w), int(h), parts[3]
+w,h,a=ppm(sys.argv[1]); _,_,b=ppm(sys.argv[2])
+HUD=48
+def diff(buf,off):
+    c=0; mx=0
+    for i in range(off*3, len(buf), 3):
+        d=max(abs(a[i+k]-b[i+k]) for k in range(3))
+        if d: c+=1; mx=max(mx,d)
+    return c,mx
+scene,sceneMax = diff(a, HUD*w)
+hud,hudMax = diff(a, 0)
+print("  Szene (y>=%d): %d unterschiedliche Pixel, max Delta %d"%(HUD,scene,sceneMax))
+print("  HUD-Streifen (y<%d): %d Pixel, max Delta %d (FPS-Text, zeitabhaengig)"%(HUD,hud,hudMax))
+sys.exit(0 if scene==0 else 1)
+PYEOF
+  then
+    log "OK   Bild deterministisch (Szene bitgleich, HUD ausgenommen)"
   else
     fail "Bild nicht deterministisch: standard.ppm != repeat.ppm"
   fi
