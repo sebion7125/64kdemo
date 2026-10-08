@@ -61,7 +61,7 @@ float c_terrainH(float px, float py);
                                 // Eiche); 5,2 Mio = Reserve, 0 uebersprungene Baeume
 #endif
 #ifndef CROWN_CAP
-#define CROWN_CAP     3600000   // gemessen 2,49 Mio Karten nach dem Terminalast-Fix
+#define CROWN_CAP     4200000   // gemessen 3,0 Mio Eckpunkt-Instanzen (= 500k Karten)
 #endif
 #define WIRE_CAP      90000
 

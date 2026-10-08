@@ -1533,7 +1533,36 @@ int main(int argc, char **argv) {
       if (rawDt > 0) fpsEMA = fpsEMA * 0.95 + (1.0 / rawDt) * 0.05;
     }
     if (frameCount % 10 == 0) printf("DBG fps %.2f t %.2f\n", fpsEMA, tNow);
+    // Frame-Zeit-Statistik (Messbank fuer das Stottern): Roh-Abstaende sammeln
+    // und periodisch Median/p95/Max ausgeben. Der fps-EMA allein versteckt einen
+    // 500-ms-Einbruch, weil er gluettet.
+    {
+      static float smp[2048]; static int nsmp = 0; static double lastPrintT = 0;
+      if(nsmp < 2048) smp[nsmp++] = (float)(rawDt * 1000.0);
+      if(tNow - lastPrintT >= 2.0 && nsmp > 0){
+        lastPrintT = tNow;
+        static float buf[2048];
+        for(int i = 0; i < nsmp; i++) buf[i] = smp[i];
+        for(int i = 1; i < nsmp; i++){ float v = buf[i]; int j = i - 1;
+          while(j >= 0 && buf[j] > v){ buf[j+1] = buf[j]; j--; } buf[j+1] = v; }
+        printf("Frame-Zeiten %d Frames: median %.0f ms  p95 %.0f ms  max %.0f ms\n",
+               nsmp, buf[nsmp/2], buf[(int)(nsmp*0.95)], buf[nsmp-1]);
+        fflush(stdout);
+        nsmp = 0;
+      }
+    }
     float dt = rawDt > 0.1f ? 0.1f : (float)rawDt;
+    // DEMO_WALK="vx vz": Kameraweg mit fester Geschwindigkeit (m/s) — macht
+    // Rebuild-Stottern reproduzierbar messbar, ohne Tastatur. Nur camTgt verschieben,
+    // camPos wird pro Frame daraus abgeleitet (Orbit-Modus).
+    { static float wx = 0, wz = 0; static int wread = 0;
+      if(!wread){ wread = 1;
+        const char *ew = getenv("DEMO_WALK");
+        if(ew) { if(sscanf(ew, "%f %f", &wx, &wz) != 2){ wx = wz = 0; } }
+      }
+      if(wx != 0.0f || wz != 0.0f){
+        camTgt[0] += wx * dt; camTgt[2] += wz * dt;
+      } }
 
     // --- Events (XEvent aus Xlib.h, Tasten via XLookupKeysym) ---
     while (p_XPending(disp)) {
@@ -1848,6 +1877,7 @@ int main(int argc, char **argv) {
                ((double)nTreeVerts * TREE_FLOATS + (double)nCrownVerts * CROWN_FLOATS
                 + (double)nLeafInst * LEAF_FLOATS) * 4.0 / 1e6);
         builtT = 1;
+        fflush(stdout);
         printf("Baeume um (%.0f,%.0f): %d Baeume, %d Vertices, %d Canopy-Quads, %d Einzelblaetter\n", tCX, tCZ, nTrees, nTreeVerts, nCrownVerts / 6, nLeafInst);
         printf("  Caps: Geruest %d/%d  Karten %d/%d  Blaetter %d/%d   TREffer: Geruest %d Karten %d Blaetter %d\n",
                nTreeVerts, TREE_VERT_CAP, nCrownVerts, CROWN_CAP, nLeafInst, LEAF_CAP,

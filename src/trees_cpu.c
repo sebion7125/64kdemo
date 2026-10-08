@@ -815,12 +815,17 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
   }
 
   // ---- Roehren senden: nur an den gehaltenen Ringen (sectionStride) ----
+  // tier 0 (d > 20 x Wuchshoehe): Aeste sind dort 1..2 Pixel gross und liegen
+  // voll in den Laubkarten. Gemessen: 224 tier-0-Baeume kosten 0,78 Mio der
+  // 4,08 Mio Geruest-Vertices, ohne sichtbaren Beitrag. Deshalb bleibt nur der
+  // Stamm stehen (tragende Silhouette), die Zweigroehre entfaellt.
+  int meshBranch = !(tier == 0 && lvl > 0);
   float tone = btone * (0.86f + 0.05f * (float)lvl);
   float cr = (0.30f - 0.03f * (float)lvl) * tone;
   float cg = (0.24f + 0.03f * (float)lvl) * tone;
   float cb2 = (0.15f - 0.02f * (float)lvl) * tone;
   float sw = 0.20f + 0.30f * (float)lvl;
-  {
+  if(meshBranch){
     int prev = 0;
     for(;;){
       int cur = prev + stride; if(cur > S) cur = S;
@@ -835,7 +840,7 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
   // sogar 58 %. Ohne Abschluss sieht man in das offene Rohr hinein (Nutzer-
   // befund "abgebrochene Aeste", "abgeschnittener Stamm oben in der Krone").
   // Terminale Aeste brauchen keinen: deren letzter Abschnitt geht auf 0,001 zu.
-  if(lvl < maxKid){
+  if(lvl < maxKid && meshBranch){
     int sides = G >= 3 ? G : 3;
     emit_cap(&sec[S].rg, sides, sw, cr, cg, cb2, 0.9f, (float)S * sl);
   }
@@ -951,7 +956,11 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
   // von 640 Baeumen waren beim Bau tier 3 -> 0 Karten). Zusatzkosten klein: nur
   // tier-3-Baeume bekommen sie, jeder vierte Laubansatz (79 x ~82 Karten = 39k
   // von 2,66 Mio Geruest-Vertices).
-  int wantCards = ezNSprig / (tier >= 2 ? 2 : 4);
+  // Deckung: tier 0 bekam bisher nur ezNSprig/4 Karten -> die ferne Krone deckt
+  // 34 % weniger Pixel ab als die nahe (gemessen 1060 vs 1618 Kronenpixel).
+  // Gleiche Kartenanzahl wie tier 2 gleicht das aus; die eingesparten
+  // Zweigroehren (meshBranch) finanzieren das.
+  int wantCards = ezNSprig / (tier >= 2 ? 2 : 3);   // tier 0: /3 deckt wie tier 3 (gemessen)
   emit_sprig_quads(seed, wantCards);
 }
 

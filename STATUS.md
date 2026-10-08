@@ -568,6 +568,45 @@ der alten Add-on-Datei sind tot (404), das Add-on ist seit Blender 4.2 eine Exte
 Alpha-Test im Shader, Blatt-Laenge/Breite-Verhaeltnis ~2:1, Blattgroessen-Abstufung
 zum Zweigende hin, Kronenform ueber das Astlaengen-Profil.
 
+## Session 2026-10-08, Runde 25f (Stocken: Messbank eingebaut, Fernstufe entlastet)
+
+**Nutzer:** „dann sollten wir uns als naechstes mal um das stocken kuessmern.“
+
+**Messbank:** Frame-Zeit-Statistik (median/p95/max, alle 2 s) und `DEMO_WALK="vx vz"`
+(fester Kameraweg in m/s) in main.c — ohne Tastatur reproduzierbar.
+
+**Befund 1 — Rebuild blockiert den Frame:** Ausloeser ist `|camTgt − Buildzentrum| > 12 m`
+(main.c, seit Runde 25 mit echter Kamera als LOD-Referenz). Kosten gemessen:
+`Generieren 350 ms + Upload 140 ms = 490 ms` (352 MB Puffer) — synchron, also ein
+sichtbarer Einbruch alle ~12 m Kameraweg.
+
+**Befund 2 — Frame-Zeit skaliert mit der Geometriemenge** (VM, llvmpipe, 640x360,
+`DEMO_LODRSCALE` skaliert die Schaltweiten, also den Detailanteil):
+
+| LODRSCALE | Geruest | Karten-Ecken | Blaetter | Frame median |
+|---|---|---|---|---|
+| 0,3 | 2,36 M | 2,06 M | 0,06 M | 1179 ms |
+| 1,0 | 4,08 M | 2,91 M | 1,05 M | 1735 ms |
+| 2,0 | 4,44 M | 2,36 M | 1,60 M | 2605 ms |
+
+**Aenderung (1): tier 0 ohne Zweigroehren.** 224 ferne Baeume kosteten 0,78 Mio der
+4,08 Mio Geruest-Vertices; ihre Aeste sind 1..2 px gross und liegen in den Laubkarten.
+`meshBranch = !(tier == 0 && lvl > 0)` — Stamm bleibt, Zweigroehre entfaellt.
+Gleichzeitig `wantCards` tier 0 von `ezNSprig/4` auf `/3`: die ferne Krone deckte
+34 % weniger Pixel ab als die nahe (1060 vs 1618 Kronenpixel bei 40 m). Gemessen
+nachher: **1298 vs 1618 (−20 %)**, Farbe identisch (69/127/46 vs 70/128/47).
+Ergebnis: Geruest 4,08 M -> **2,83 M (−31 %)**, Puffer 393 -> 352 MB,
+0 uebersprungene Baeume (CROWN_CAP 3,6 M -> 4,2 M, weil Karten 2,91 -> 3,28 M).
+Frame-Zeit in der VM kaum geaendert (1735 -> ~1690 ms): die eingesparten Vertices
+wurden durch mehr Karten (Full-Rate) aufgebraucht.
+
+**Offen (2): den Rebuild aufteilen.** Vorgesehen nach Gras-Muster
+(`grass_build_begin/step/finish` + Worker-Thread): Generieren in Baeumen pro Frame
+in einen zweiten Puffersatz, Upload in Scheiben (~24 MB/Frame), Swap wenn fertig.
+Ziel: kein Frame ueber ~30 ms durch Rebuild. Dazu kommen TODO 23
+(Ganzbaum-Billboard) und die permanente Baum-Geometrie pro Baum (Slot-Verwaltung),
+damit nicht der ganze Wald neu gebaut werden muss.
+
 ## Session 2026-10-08, Runde 25e (Blattfarbe: Kette gemessen in Ordnung, Palette neu gewaehlt)
 
 **Nutzer:** „hast du die blattfarbe noch auf dem schirm?“ / „ja das angleichen der
@@ -2234,10 +2273,11 @@ Funktioniert auch auf NVIDIA (dort wird `gl_FragDepth` immer geschrieben).
   Wide->nah-Order Koennte es bereits behoben haben)
 
 ### 2. Bäume
-- [ ] **Ferne Krone duenner als nahe** — tier 0 malt 34 % weniger Kronenpixel
-  (`wantCards = ezNSprig/4` × `CARDSCALE 1,30`); Farbe selbst ist über alle Stufen gleich
-- [ ] **Rebuild-Stottern**: 495 ms pro Wald-Rebuild, ausgelöst durch Stufenwechsel
-  (kontinuierlich pro Frame verteilen wie beim Gras, oder Thread mit Doppel-Puffer)
+- [x] **Ferne Krone duenner als nahe** — war −34 % Kronendeckung, jetzt −20 %
+  (tier 0: `wantCards ezNSprig/3`, Zweigroehren weg; Farbe war schon vorher gleich)
+- [ ] **Rebuild-Stottern**: 490 ms pro Wald-Rebuild (Generieren 350 + Upload 140),
+  Ausloeser >12 m Kameraweg — aufteilen (Baum fuer Baum in Zweitpuffer, Upload
+  in Scheiben) oder Worker-Thread wie beim Gras
 - [ ] **Nähte in den Röhren** (Tube-Segmente) → parallel transport frames
 - [ ] Stamm-Textur (Rinde) verbessern
 
