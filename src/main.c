@@ -2095,8 +2095,9 @@ int main(int argc, char **argv) {
                nTreeVertsD, TREE_VERT_CAP, nCrownVertsD, CROWN_CAP, nLeafInstD, LEAF_CAP,
                treeCapTree, treeCapCrown, treeCapLeaf);
         if(treeCapSprig) printf("  Laub-Liste pro Baum voll: %d\n", treeCapSprig);
-        printf("  uebersprungen (Budget): %d Baeume\n", treeSkipped);
-        treeCapTree = treeCapCrown = treeCapLeaf = treeSkipped = 0;
+        printf("  uebersprungen (Budget): %d Baeume, heruntergestuft auf groebste Stufe: %d\n",
+               treeSkipped, treeDowngraded);
+        treeCapTree = treeCapCrown = treeCapLeaf = treeSkipped = treeDowngraded = 0;
         // Messbank: Welt-BBox des Baumgeruests in Metern (Kronendurchmesser,
         // Wuchshoehe, Stammradius unten) — ohne Bildskala-Raten zu muessen.
         if(treeOneShot && nTreeVertsD > 0){

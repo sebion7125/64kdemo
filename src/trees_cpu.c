@@ -236,6 +236,7 @@ static float ezCardScale = 1.25f;
 // der groebsten Stufe — Sweep-Bank, damit die ferne Kronendeckung messbar an die
 // nahe angepasst werden kann.
 int treeCardDiv0 = 3; float treeCardScale0 = 1.45f;   // gemessen: deckt wie tier 3
+int treeDowngraded = 0;   // Baeume, die wegen Budget auf die groebste Stufe fielen
 int treeBillboard0 = 1;      // DEMO_NOBB0=1: tier 0 wieder mit Einzelkarten
 // Blattfarbe des gerade gebauten Baumes. Der EZ-Generator wuerfelte sie vorher
 // pro Terminalast (0,10..0,26 / 0,26..0,52 / 0,05..0,15) — deshalb sahen die
@@ -1226,11 +1227,25 @@ int trees_build_step(int maxTrees){
     //   tier 3: bis 30 096 Geruest-Vertices, 1 230 Karten, 12 300 Blatt-Instanzen
     //   tier 2: bis  8 016 Vertices, 1 230 Karten, 12 300 Instanzen
     //   tier 0: bis  2 988 Vertices,  615 Karten
-    int needV = (tier >= 3) ? 31000 : (tier == 2 ? 8500 : 3200);
-    int needC = (tier >= 1) ? 1400 : 700;   // Karten (vor der Instanzierung 8000/4200 Eckpunkte)
-    int needL = ezWantLeaves ? 12500 : 0;
-    if(nTreeVerts + needV > TREE_VERT_CAP || nCrownVerts + needC > CROWN_CAP ||
-       nLeafInst + needL > LEAF_CAP){ treeSkipped++; continue; }
+    // Passt der Baum nicht ins Budget, wird er HERUNTERGESTUFT statt weggelassen
+    // (Selbsttest tools/selftest.sh hat es gefunden: bei DEMO_LODRSCALE=2 fehlten
+    // 296 Baeume komplett). Reihenfolge: erst die Detailstufe auf die groebste
+    // (Stamm + ein Ganzbaum-Billboard = 45 Vertices), dann die Einzelblaetter
+    // weg, erst dann der ganze Baum. Baeume werden von nah nach fern gebaut,
+    // getroffen hat es also immer die fernsten.
+    int tUse = tier, leavesWanted = ezWantLeaves, fits = 0;
+    for(;;){
+      int needV = (tUse >= 3) ? 31000 : (tUse == 2 ? 8500 : 200);
+      int needC = (tUse >= 1) ? 1400 : (treeBillboard0 ? 4 : 700);
+      int needL = leavesWanted ? 12500 : 0;
+      if(nTreeVerts + needV <= TREE_VERT_CAP && nCrownVerts + needC <= CROWN_CAP &&
+         nLeafInst + needL <= LEAF_CAP){ fits = 1; break; }
+      if(tUse > 0){ tUse = 0; treeDowngraded++; continue; }
+      if(leavesWanted){ leavesWanted = 0; continue; }
+      break;
+    }
+    if(!fits){ treeSkipped++; continue; }
+    tier = tUse; ezWantLeaves = leavesWanted;
     int leafBefore = nLeafInst, quadBefore = nCrownVerts, vertBefore = nTreeVerts;
     float tseed = cand[i].p[0] * 12.9898f + cand[i].p[2] * 78.233f;
     treeCapTree = treeCapCrown = treeCapLeaf = treeCapSprig = 0;
