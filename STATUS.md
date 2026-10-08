@@ -648,6 +648,26 @@ Schatten-Wurf: 480 725 Texel (neu) gegen 479 502 (alt) — vergleichbar.
 dem Gras-`sizeScale` bis 2,8× hochskaliert; der neue hält echten Maßstab
 (Plan-Punkt 4). Die ferne Riede wirkt dadurch dünner — **Optik prüft der Nutzer.**
 
+## Session 2026-10-09, Runde 32 (Schatten: Kartenrand ausgeblendet, Auflösung gemessen)
+
+**Gemacht:** `shadowAt` (alle sechs Kopien) mischt am Rand der Licht-Frustum weich
+auf „voll beleuchtet" (7 % der Karte = 6,3 m). Ohne das wandert eine harte Linie
+durchs Bild, sobald die Karte mit der Kamera läuft.
+
+**Aufloesung der Schattenkarte gemessen, aber NICHT geaendert** (ein Baum-Wald,
+Schatten an/aus, Differenz-Histogramm):
+
+| Konfiguration | Texel | Schattenpixel | max. Abdunklung | Frame (VM) |
+|---|---|---|---|---|
+| 2048 / 45 m (ist so) | 4,4 cm | 12 484 | 69 | 2007 ms |
+| 3072 / 45 m | 2,9 cm | 16 042 (+28 %) | 70 | 2033 ms (+1,3 %) |
+| 2048 / 28 m | 2,7 cm | 27 372 | 43 (schwächer) | 2048 ms |
+
+3072 wäre ein echter Gewinn (mehr Wurf bei 1,3 % Kosten), aber ob die Kante
+dadurch *besser* wird, sieht nur ein Auge — die Messgroesse (Anzahl Schattenpixel)
+sagt das nicht. Deshalb nichts geaendert; auf dem GPU-Host ist 3072 leicht drin,
+wenn es dort scharf genug wirkt (eine Zeile in `main.c`: `SHADOW_SZ`).
+
 ## Zu prüfen, nachdem die Bäume umgebaut sind (Runde 27–30)
 
 Knöpfe dafür (alle Umgebungsvariablen, kein Neubauen nötig):
