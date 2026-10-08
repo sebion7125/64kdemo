@@ -34,7 +34,7 @@ float vnoise(vec2 p){
 void main(){
   float size = iData.x, rotY = iData.y, tilt = iData.z;
   float t = aBase.x, w = aBase.y;
-  float d = length(iPos - uLodCam);
+  float d = length((iPos - uLodCam) * vec3(1.0, 0.0, 1.0));  // LOD: waagerecht
   // LOD: die Kronen-Karten gibt es ab 0,9*iLodR, die echten Blaetter sterben bis
   // 1,1*iLodR statistisch aus — per Hash pro Blatt, damit die Dichte sanft faellt
   // und nicht schlagartig. Beide Seiten nutzen dieselbe Bande um iLodR, die

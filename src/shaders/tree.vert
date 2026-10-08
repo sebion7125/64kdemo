@@ -48,7 +48,7 @@ void main(){
   // gegen den Himmel sieht nach Rauschen aus (gemessen: graue Punkte ueber dem
   // halben Hintergrund). Das Billboard ist bei R2 schon voll, das Geruest geht
   // bei R2 — beide gleichzeitig sieht man damit nicht (Nutzer).
-  float md = length(p - uCamPos);
+  float md = length((p - uCamPos) * vec3(1.0, 0.0, 1.0));  // LOD: waagerecht
   // Uebergabe ans Billboard im selben Band, in dem das Billboard einblendet
   // (0,90..1,10 R2): die Gewichte sind komplementaer, Summe immer 1.
   float mf = 1.0 - smoothstep(aR2 * 0.90, aR2 * 1.10, md);

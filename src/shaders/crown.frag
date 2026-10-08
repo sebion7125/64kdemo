@@ -130,13 +130,13 @@ void main(){
   // MSAA weich) — sie macht die Krone fest. GEDITHERT wird nicht mehr die
   // UEBERBLENDUNG (Nutzer: "das Blending soll nicht gedithert sein"): vFade
   // geht als echtes Alpha ins Ergebnis statt in die Schwelle.
-  float thr = 0.5 + (hash12(gl_FragCoord.xy + vTile * 37.0) - 0.5) * 0.75;
-  if(a < thr) discard;
-  cov = a * vFade;
-  // Depth-only-Nachpass (Z-Buffer-Trick, Nutzer): die gemischte Krone soll den
-  // Hintergrund trotzdem verdecken. Im Nachpass wird nur geschrieben, was wenig
-  //stens halb deckt.
-  if(uDepthOnly > 0.5){ if(cov < 0.5) discard; }
+  // KEIN zufälliger Schwellwert mehr (alt: thr = 0.5 + (hash(gl_FragCoord)-0.5)
+  // * 0.75): der war pro Pixel unterschiedlich und abhaengig von der
+  // Bildschirmposition -> die Kronensilhouette schimmerte bei Kamerabewegung.
+  // Die Texturalpha selbst ist die weiche Kante, gemischt wird mit echtem Alpha.
+  // Depth-only-Nachpass: Schwelle am SCHICHTGEWICHT vFade, nicht am pro-Pixel
+  // cov — sonst kippt die Tiefenwrite mitten in der Blende hart um (Sprung).
+  if(uDepthOnly > 0.5){ if(vFade < 0.5 || a < 0.5) discard; }
   else if(cov < 0.02) discard;
   // Masken-Diagnose erst nach dem Discard: sonst zaehlt sie auch die leeren
   // areas der Kachel und die Farbmessung mittelt den Hintergrund mit.

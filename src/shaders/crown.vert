@@ -80,7 +80,11 @@ void main(){
   p.x += (wnd * 0.5 + gust) * amp;
   p.z += cos(uTime * 1.3 + ph * 1.7) * amp * 0.7;
   p.y += sin(uTime * 2.2 + ph) * amp * 0.35;
-  float d = length(aCenter - uCamPos);
+  // LOD nach WAAGERECHTEM Abstand zum Lotpunkt der Kamera aufs Terrain
+  // (Nutzer: sonst arg komische Luftbilder — aus der Hoehe war jeder Baum
+  // 'fern', obwohl er direkt unter einem stand). Der Dunst bleibt 3D.
+  float d3 = length(aCenter - uCamPos);
+  float d  = length((aCenter - uCamPos) * vec3(1.0, 0.0, 1.0));
   // Die drei Kronen-Stufen schliessen sich AUS und ueberblenden nur im Band:
   //   Einzelblaetter   bis 0,9 R1 ... aus bei 0,9..1,1 R1   (leaf.vert)
   //   Karten           ein bei 0,9..1,1 R1, aus bei 0,85..1,1 R2
@@ -91,7 +95,7 @@ void main(){
   // Karten bei R1 vorher rissen, kommt nicht wieder: R1 liegt jetzt bei 5x
   // Wuchshoehe, genau an der Stelle, an der die Einzelblaetter aufhoeren zu
   // decken (gemessen), und die Karten sind dichter (div 3 / scale 2,0).
-  float near = (uLightFace > 0.5) ? 1.0 : smoothstep(iLodR * 0.85, iLodR * 1.00, d);
+  float near = (uLightFace > 0.5) ? 1.0 : smoothstep(iLodR * 0.90, iLodR * 1.10, d);
   // Uebergang Karten -> Ganzbaum-Billboard (Runde 29): in Stufe 2 liegen beide im
   // Puffer, das Billboard faellt ab 0,7 R2 ein, die Karten duennen bis 1,1 R2 aus.
   // Laeuft ueber die Entfernung, also kontinuierlich und unabhaengig davon, wann
@@ -99,8 +103,8 @@ void main(){
   if(uLightFace < 0.5 && iLodR2 > 0.0){
     // Karten aus 1.00..1.15 R2, Billboard ein 0.85..1.00 R2 — dasselbe
     // Ueberlappungsprinzip wie bei Blaettern/Karten: nie zwei halbe Schichten
-    if(aData.w >= 4.0) near *= smoothstep(iLodR2 * 0.85, iLodR2 * 1.00, d);
-    else               near *= 1.0 - smoothstep(iLodR2 * 1.00, iLodR2 * 1.15, d);
+    if(aData.w >= 4.0) near *= smoothstep(iLodR2 * 0.90, iLodR2 * 1.10, d);
+    else               near *= 1.0 - smoothstep(iLodR2 * 0.90, iLodR2 * 1.10, d);
     // Schicht einzeln abschaltbar: near = 0 -> vFade = 0 -> Alpha 0 -> discard
     near *= (aData.w >= 4.0) ? uBillboardOn : uCardsOn;
   }
@@ -110,7 +114,7 @@ void main(){
   // Build-Rand: Baeume werden bis RANGE=20 Zellen a 9 m gebaut (180 m halbe
   // Kantenlaenge, Ecken ~255 m). Bis 2026-10-07 endete das Blattdach bei 185 m,
   // die Staemme gingen aber bis ~255 m -> kahle Stummel in der Ferne.
-  float far = 1.0 - smoothstep(190.0, 250.0, d);
+  float far = 1.0 - smoothstep(190.0, 250.0, d3);
   vFade = near * far * uTreeFade;
   // Beim Ueberblenden den alten Satz durchgaengig ausblenden (uTreeFade) statt
   // ihn unter 30 m hart wegucullen: das war genau bei nahen Baeumen ein Sprung
