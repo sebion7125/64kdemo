@@ -80,7 +80,9 @@ extern const char *ezDbgName; extern float ezDbgUnit, ezDbgR0;
 extern float ezDbgR[13]; extern int ezDbgNSec;
 extern float ezDbgS, ezDbgHf;
 extern int treeForceTier;    // DEMO_TIER=0|2|3: Detailstufe erzwingen (-1 = automatisch)
-extern int treeTierLog;      // DEMO_TREELOG=1: Stufe je Baum auf der Console
+extern int treeTierLog;
+extern int treeCapTree, treeCapCrown, treeCapLeaf;
+extern int treeSkipped;      // DEMO_TREELOG=1: Stufe je Baum auf der Console
 extern float treeLodScale;   // DEMO_LODRSCALE: Schaltweiten skalieren (0 = aus)
 extern int ezKidPct;         // DEMO_KIDPCT: Kinderzahl aller Stufen gleich duennen
 // Referenzpunkt fuer die Detailstufe. main.c setzt das auf die ECHTE Kamera

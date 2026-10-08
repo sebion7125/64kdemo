@@ -113,7 +113,7 @@ void main(){
   float sh = shadowAt(vPos, nrm);
   float dif = abs(dot(nrm, SUN)) * mix(0.18, 1.0, sh) * 0.7 + 0.3;
   float thru = pow(max(dot(-nrm, SUN), 0.0), 1.5) * 0.8 * mix(0.2, 1.0, sh);
-  vec3 amb = vec3(0.35, 0.45, 0.40) * (0.5 + 0.5 * max(nrm.y, 0.0)) * (0.62 + 0.38 * sh);
+  vec3 amb = vec3(0.18, 0.32, 0.16) * (0.5 + 0.5 * max(nrm.y, 0.0)) * (0.62 + 0.38 * sh);
   // Die Kachel ist ein farbneutraler BLATTBUSCHEL (mehrere unserer Blaetter an
   // kurzen Stielen) — dieselbe Silhouette wie das Nah-LOD. Die Farbe kommt pro
   // Baum aus der Instanz, vorher steckte eine zufaellige Fremdfarbe in der Textur.

@@ -96,7 +96,9 @@ void main(){
   // Transluzenz: Licht durchs Blatt (gruenstichig, dominant)
   float thru = pow(max(dot(-rd, SUN), 0.0), 1.5) * 0.8 * mix(0.2, 1.0, sh);
   // weiches, warmes Ambient (weniger blau)
-  vec3 amb = vec3(0.35, 0.45, 0.40) * (0.5 + 0.5 * max(n.y, 0.0)) * (0.62 + 0.38 * sh);
+  // Ambient gruenlich und dunkler als frueher (0.35,0.45,0.40): ein graues
+  // Ambient woesch die Blattfarbe aus (Nutzerbefund: blass, herbstlich).
+  vec3 amb = vec3(0.18, 0.32, 0.16) * (0.5 + 0.5 * max(n.y, 0.0)) * (0.62 + 0.38 * sh);
   float pat = vnoise(vPos.xz * 16.0 + vPos.y * 9.0);
   vec3 albedo = vCol * (0.72 + 0.55 * pat);
   albedo *= 1.0 + midrib * 0.35 - vein * 0.10;          // Rippen heller, Adern dunkler

@@ -1817,10 +1817,22 @@ int main(int argc, char **argv) {
         // Detailstufe an der echten Kamera messen, nicht am Build-Zentrum
         treeLodRef[0] = camPos[0]; treeLodRef[1] = camPos[1]; treeLodRef[2] = camPos[2];
         treeLodRefValid = 1;
+        double tB0 = now_sec();
         trees_build(tCX, tCZ);
+        double tB1 = now_sec();
         upload_mesh_buffers();
+        double tB2 = now_sec();
+        printf("  Baum-Rebuild: Generieren %.0f ms + Upload %.0f ms = %.0f ms  (%.0f MB Puffer)\n",
+               (tB1 - tB0) * 1000.0, (tB2 - tB1) * 1000.0, (tB2 - tB0) * 1000.0,
+               ((double)nTreeVerts * TREE_FLOATS + (double)nCrownVerts * CROWN_FLOATS
+                + (double)nLeafInst * LEAF_FLOATS) * 4.0 / 1e6);
         builtT = 1;
         printf("Baeume um (%.0f,%.0f): %d Baeume, %d Vertices, %d Canopy-Quads, %d Einzelblaetter\n", tCX, tCZ, nTrees, nTreeVerts, nCrownVerts / 6, nLeafInst);
+        printf("  Caps: Geruest %d/%d  Karten %d/%d  Blaetter %d/%d   TREffer: Geruest %d Karten %d Blaetter %d\n",
+               nTreeVerts, TREE_VERT_CAP, nCrownVerts, CROWN_CAP, nLeafInst, LEAF_CAP,
+               treeCapTree, treeCapCrown, treeCapLeaf);
+        printf("  uebersprungen (Budget): %d Baeume\n", treeSkipped);
+        treeCapTree = treeCapCrown = treeCapLeaf = treeSkipped = 0;
         // Messbank: Welt-BBox des Baumgeruests in Metern (Kronendurchmesser,
         // Wuchshoehe, Stammradius unten) — ohne Bildskala-Raten zu muessen.
         if(treeOneShot && nTreeVerts > 0){

@@ -24,6 +24,10 @@ float ezDbgR[13]; int ezDbgNSec = 0;
 float ezDbgS = 0.0f, ezDbgHf = 0.0f;
 int   treeForceTier = -1;
 int   treeTierLog = 0;
+// Cap-Waechter: eine Stufe, die mitten im Baum abbricht, sieht aus wie ein
+// abgesaegter Stamm ohne Laub. Deshalb wird jeder Cap-Treffer gezaehlt.
+int   treeCapTree = 0, treeCapCrown = 0, treeCapLeaf = 0;
+int   treeSkipped = 0;   // Baeume, die komplett ins Budget passten
 float treeLodScale = 0.0f;   // DEMO_LODRSCALE (0 = aus)
 float treeLodRef[3] = { 0.0f, 0.0f, 0.0f };
 int   treeLodRefValid = 0;
@@ -134,7 +138,7 @@ static void emit_tube(const Ring *a, const Ring *b, int sides,
     int idx[6]  = { k, k2, k,  k2, k2, k };
     int ring[6] = { 0,  0, 1,   0,  1, 1 };
     for(int m = 0; m < 6; m++){
-      if(nTreeVerts + 1 > TREE_VERT_CAP) return;
+      if(nTreeVerts + 1 > TREE_VERT_CAP){ treeCapTree++; return; }
       int kk = idx[m];
       const float *pp = ring[m] ? px1[kk] : px0[kk];
       float *d = &treeVerts[nTreeVerts * TREE_FLOATS];
@@ -168,7 +172,7 @@ static void emit_cap(const Ring *a, int sides, float sway,
     float ang0 = k * 6.2831853f / (float)sides, ang1 = k2 * 6.2831853f / (float)sides;
     const float angs[3] = { ang0, ang1, ang0 };
     for(int m = 0; m < 3; m++){
-      if(nTreeVerts + 1 > TREE_VERT_CAP) return;
+      if(nTreeVerts + 1 > TREE_VERT_CAP){ treeCapTree++; return; }
       float ca = cosf(angs[m]), sa = sinf(angs[m]);
       float dx = a->u[0] * ca + a->v[0] * sa;
       float dy = a->u[1] * ca + a->v[1] * sa;
@@ -245,7 +249,7 @@ static void emit_crown_quads(float bx, float bz, float s, float hf,
     float qrot  = h3 * 6.283f;
     float qseed = h4 * 13.7f + q * 0.37f;
     for(int c = 0; c < 6; c++){
-      if(nCrownVerts + 1 > CROWN_CAP) return;
+      if(nCrownVerts + 1 > CROWN_CAP){ treeCapCrown++; return; }
       float *d = &crownVerts[nCrownVerts * CROWN_FLOATS];
       d[0] = cc; d[1] = ccy2; d[2] = ccz2;
       d[3] = corners[c][0]; d[4] = corners[c][1];
@@ -271,7 +275,7 @@ static void emit_sprig_quads(float seed, int want){
     float qrot  = h3 * 6.283f;
     float qseed = h4 * 13.7f + q * 0.37f;
     for(int c = 0; c < 6; c++){
-      if(nCrownVerts + 1 > CROWN_CAP) return;
+      if(nCrownVerts + 1 > CROWN_CAP){ treeCapCrown++; return; }
       float *d = &crownVerts[nCrownVerts * CROWN_FLOATS];
       d[0] = ezSx[q]; d[1] = ezSy[q]; d[2] = ezSz[q];
       d[3] = corners[c][0]; d[4] = corners[c][1];
@@ -285,7 +289,7 @@ static void emit_sprig_quads(float seed, int want){
 // Einzelblatt-Instanz: Basispunkt (Welt), Groesse, Orientierung, Seitenverhaeltnis, Farbe
 static void add_leaf(float x, float y, float z, float size, float rotY, float tilt,
                      float aspect, float cr, float cg, float cb){
-  if(nLeafInst >= LEAF_CAP) return;
+  if(nLeafInst >= LEAF_CAP){ treeCapLeaf++; return; }
   float *d = &leafInst[nLeafInst * LEAF_FLOATS];
   d[0] = x; d[1] = y; d[2] = z;
   d[3] = size; d[4] = rotY; d[5] = tilt; d[6] = aspect;   // aspect = Breite/Laenge
@@ -356,7 +360,7 @@ static void leaf_cluster(float cx, float cy, float cz, float r, int cnt,
                          float size, float aspect, float upBias, float seed, int sb,
                          float lcr, float lcgg, float lcb){
   for(int i = 0; i < cnt; i++){
-    if(nLeafInst >= LEAF_CAP) return;
+    if(nLeafInst >= LEAF_CAP){ treeCapLeaf++; return; }
     float h1 = TH(sb + i), h2 = TH(sb + i + 977), h3 = TH(sb + i + 1889);
     // gleichmaessige Richtungen ueber die Kugel (goldener Winkel + gleichmaessiges z)
     float th = (float)(sb + i) * GOLD;
@@ -884,8 +888,9 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
   // eigene Blattfarbe pro Baum (wie im alternativen Generator) — sie sitzt auch
   // in der Karten-Instanz, damit die Distanzstufe dieselbe Krone zeigt wie nah
   float hueE  = 0.20f + TH(800) * 0.20f;
-  float lsatE = 0.45f + TH(801) * 0.45f;
-  float lvalE = 0.30f + TH(802) * 0.30f;
+  float lsatE = 0.62f + TH(801) * 0.33f;   // saettigter: 0,45..0,90 war zu blass
+  float lvalE = 0.24f + TH(802) * 0.22f;   // dunkler, damit die Beleuchtung Sattel
+                                          // erzeugen kann statt Auswaschung
   hsv2rgb(hueE, lsatE, lvalE, &ezLeafR, &ezLeafG, &ezLeafB);
   Sec root;
   root.rg.p[0] = bx; root.rg.p[1] = by; root.rg.p[2] = bz;
@@ -1099,6 +1104,16 @@ void trees_build(float tx, float tz){
     // beide, der Shader blendet sie um R1 +/-10 % uebereinander.
     gLodR = R1;
     ezWantLeaves = (d <= R1 * 1.10f);
+    // Budget: passt ein BAUM nicht mehr in die Puffer, wird er uebersprungen —
+    // und nicht mitten im Ast abgebrochen. Ein abgebrochener Baum sieht aus wie
+    // ein abgesaegter Stamm ohne Laub (Nutzerbefund; gemessen: 54 Cap-Abbrueche,
+    // Karten-Puffer 1 800 000/1 800 000 voll, Geruest 2 663 286/2 700 000).
+    // Baeume werden von nah nach fern gebaut, es fehlen also nur die fernsten.
+    int needV = (tier >= 3) ? 9000 : (tier == 2 ? 1800 : 500);
+    int needC = (tier >= 2) ? 8000 : 4000;
+    int needL = (tier >= 3) ? 9000 : 0;
+    if(nTreeVerts + needV > TREE_VERT_CAP || nCrownVerts + needC > CROWN_CAP ||
+       nLeafInst + needL > LEAF_CAP){ treeSkipped++; continue; }
     int leafBefore = nLeafInst, quadBefore = nCrownVerts;
     float tseed = cand[i].p[0] * 12.9898f + cand[i].p[2] * 78.233f;
     if(treeGenMode) gen_tree_ez(cand[i].p[0], cand[i].p[1], cand[i].p[2], cand[i].s, tseed, tier, d, R1);
