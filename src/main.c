@@ -1708,6 +1708,9 @@ int main(int argc, char **argv) {
   { const char *cp = getenv("DEMO_CARDT0");
     if(cp) { int d = 3; float sc = 1.30f;
       if(sscanf(cp, "%d %f", &d, &sc) == 2){ treeCardDiv0 = d < 1 ? 1 : d; treeCardScale0 = sc; } } }
+  { const char *c2 = getenv("DEMO_CARDT2");
+    if(c2) { int d = 2; float sc = 1.25f;
+      if(sscanf(c2, "%d %f", &d, &sc) == 2){ treeCardDivN = d < 1 ? 1 : d; treeCardScaleN = sc; } } }
   { const char *ea = getenv("DEMO_ARTEN"); if (ea) dbgGrassCat = atoi(ea); }
   // DEMO_GRASSMD=<m>  : max. Gras-Sichtweite (statt Slider)
   // DEMO_GRASSTEX="<far0> <far1>" : Uebergabe an die Einfangtextur, "0" = Textur aus
@@ -1845,6 +1848,10 @@ int main(int argc, char **argv) {
       }
       if(wx != 0.0f || wz != 0.0f){
         camTgt[0] += wx * dt; camTgt[2] += wz * dt;
+        // In Fly-Modus wird die Ansicht nicht aus camTgt abgeleitet — ohne das
+        // hieraendert sich am Bild nichts, eine visuelle Messung des Uebergangs
+        // waere also blind.
+        if(flyMode){ flyPos[0] += wx * dt; flyPos[2] += wz * dt; }
       } }
 
     // --- Events (XEvent aus Xlib.h, Tasten via XLookupKeysym) ---

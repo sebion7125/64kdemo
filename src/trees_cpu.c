@@ -236,6 +236,11 @@ static float ezCardScale = 1.25f;
 // der groebsten Stufe — Sweep-Bank, damit die ferne Kronendeckung messbar an die
 // nahe angepasst werden kann.
 int treeCardDiv0 = 3; float treeCardScale0 = 1.45f;   // gemessen: deckt wie tier 3
+// Basisstufe der Krone (tier 2/3). Gemessen an einem Baum, Deckung = gruenen
+// Pixel / bbox-Flaeche, Gras+Schilf aus: div 2 / scale 1,25 -> 38 % auf 25 m und
+// 39 % auf 40 m. div 3 / scale 2,0 -> 50 % / 52 % bei 18 % WENIGER Karten
+// (287 194 -> 234 129 im Wald). Wenige grosse Karten schlagen viele kleine.
+int treeCardDivN = 3; float treeCardScaleN = 2.00f;    // DEMO_CARDT2 "<div> <scale>" 
 // DEMO_T2="<stride> <Gzaehler> <Gnenner>": Vernetzung der mittleren Detailstufe.
 // Sweep-Bank, um Geruest-Kosten gegen Silhouette-Qualitaet zu messen.
 int treeT2Stride = 3, treeT2Gnum = 3, treeT2Gden = 4;
@@ -990,7 +995,9 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
   root.d[0] = 0.0f; root.d[1] = 1.0f; root.d[2] = 0.0f;
   ring_basis(&root.rg, 0.0f, 1.0f, 0.0f);
   ezNSprig = 0;
-  ezCardScale = (tier >= 2) ? 1.25f : treeCardScale0;   // muss VOR ez_grow stehen
+  // Karten-Groesse gleicht die Ausduennung aus (div 2 -> 1,25, div 8 -> 2,20);
+  // muss VOR ez_grow stehen, die Groesse sitzt in der Sprig-Liste.
+  ezCardScale = (tier >= 2) ? treeCardScaleN : (tier == 1 ? treeCardScale0 : 2.20f);
   ezDbgName = P->name; ezDbgUnit = unit; ezDbgR0 = root.rg.r; ezDbgNSec = 0;  ezDbgS = s; ezDbgHf = hf;
   ez_grow(0, &root, P, unit, seed, tier, btone, 0, 0);
   // Karten (Distanzstufe): ab 0,9 lodR uebernehmen sie das Laub, im Band um
@@ -1010,7 +1017,13 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
   // 34 % weniger Pixel ab als die nahe (gemessen 1060 vs 1618 Kronenpixel).
   // Gleiche Kartenanzahl wie tier 2 gleicht das aus; die eingesparten
   // Zweigroehren (meshBranch) finanzieren das.
-  int wantCards = ezNSprig / (tier >= 2 ? 2 : treeCardDiv0);
+  // Karten sind die BASISstufe der Krone: jeder Baum in jeder Stufe hat sie,
+  // der Shader zeichnet sie ohne Entfernungsschwelle. Einzelblaetter legen sich
+  // als Detailschicht darueber, das Billboard ersetzt sie in der Ferne. Eine
+  // Stufe ohne Karten (frueher tier 0) laesst beim Annaehern nichts einblenden.
+  // Weniger Karten in der groebsten Stufe, aber grosse: Deckung bleibt gleich.
+  int cardDiv = (tier >= 2) ? treeCardDivN : (tier == 1 ? treeCardDiv0 : (treeBB0Cards > 0 ? treeBB0Cards : 8));
+  int wantCards = ezNSprig / cardDiv;
   if(treeBillboard0 && tier <= 2){
     // Das Billboard liegt auch in Stufe 2 im Puffer: der Shader blendet es ab
     // 0,7 R2 ein und die Karten bis 1,1 R2 aus — der Uebergang laeuft mit der
@@ -1019,7 +1032,6 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
     // DEMO_BB0CARDS=<div>: zusaetzliche Einzelkarten unter dem Billboard der
     // groebsten Stufe (0 = nur Billboard). Mit div 8 bekommt die ferne Krone
     // wieder etwas Parallax-Struktur, fuer 364 Baeume ~1/3 der alten Kartenzahl.
-    if(tier == 0) wantCards = treeBB0Cards > 0 ? ezNSprig / treeBB0Cards : 0;
   }
   if(wantCards > 0) emit_sprig_quads(seed, wantCards);
 }
@@ -1198,14 +1210,17 @@ int trees_build_step(int maxTrees){
   int end = treeCandPos + maxTrees; if(end > treeNCand) end = treeNCand;
   for(int i = treeCandPos; i < end; i++){
     float d = sqrtf(cand[i].d2), H = cand[i].H;
-    // Schaltweiten nach deren Verhaeltnis (LOD1 bei 2,7x, LOD2 bei 6,7x der
-    // Wuchslaenge), hier auf Nutzerwunsch deutlich weiter: volle Dichte bis
-    // 10x Wuchshoehe, Kartenstufe bis 20x. Absolut begrenzt, damit die
-    // 13,8-m-Baeume nicht bis 138 m Vollast bekommen und die 2,6-m-Baeume nicht
-    // schon auf 26 m ausduennen.
-    float R1 = 10.0f * H, R2 = 20.0f * H;
-    if(R1 < 25.0f) R1 = 25.0f; else if(R1 > 90.0f) R1 = 90.0f;
-    if(R2 < 50.0f) R2 = 50.0f; else if(R2 > 160.0f) R2 = 160.0f;
+    // Schaltweiten: R1 = wo die EINZELBLAETTER aufhoeren zu decken, R2 = wo das
+    // Ganzbaum-Billboard uebernimmt. 2026-10-07 auf 10x/20x Wuchshoehe gesetzt,
+    // dann gemessen (ein Baum, Laubpixel ueber der Entfernung, DEMO_TREEDIST):
+    //   10 m 46470 | 25 m 20569 | 50 m 13896 | 60 m 7280 | 86 m 2934  (kahl!)
+    //   90 m 12828 | 108 m 20231  <- erst hier kamen die Karten dazu
+    // Ein 6-cm-Blatt ist ab ~50 m unter einem Pixel, die Einzelblaetter decken
+    // die Krone also nur bis etwa 5x Wuchshoehe. Die Luecke dazwischen war der
+    // "verschwindende Blattwald". Deshalb jetzt 5x und 15x, absolut begrenzt.
+    float R1 = 5.0f * H, R2 = 15.0f * H;
+    if(R1 < 20.0f) R1 = 20.0f; else if(R1 > 60.0f) R1 = 60.0f;
+    if(R2 < 40.0f) R2 = 40.0f; else if(R2 > 120.0f) R2 = 120.0f;
     // DEMO_LODRSCALE: Schaltweiten skalieren — Messbank, um an EINEM Standort
     // beide Repraesentationen (Einzelblaetter / Karten) vergleichend zu sehen.
     if(treeLodScale > 0.0f){ R1 *= treeLodScale; R2 *= treeLodScale; }
@@ -1219,12 +1234,15 @@ int trees_build_step(int maxTrees){
       else               tier = (d < R1) ? 3 : (d < R2 ? 2 : 0);
       lodSet(cand[i].ix, cand[i].iz, tier);
     }
-    // Laub-Entscheidung haengt an der Entfernung, nicht an der Build-Stufe:
-    // Einzelblaetter bis 1,1 R1, Karten ab 0,9 R1. Im Band um R1 existieren
-    // beide, der Shader blendet sie um R1 +/-10 % uebereinander.
+    // Laub-Entscheidung haengt an der Entfernung, nicht an der Build-Stufe.
+    // Der Shader blendet die Einzelblaetter im Band 0,9..1,1 R1 aus. Damit in
+    // diesem Band IMMER beide Schichten im Puffer liegen (das Build entscheidet
+    // nur, was existiert, und ist bis 12 m Kameraweg alt), werden Blaetter bis
+    // 1,3 R1 gebaut. Fehlte der Puffer, blendete nichts ein: gemessen 2934
+    // Laubpixel auf 86 m gegen 12828 auf 90 m fuer denselben Baum.
     gLodR = R1;
     gLodR2 = R2;
-    ezWantLeaves = (d <= R1 * 1.10f);
+    ezWantLeaves = (d <= R1 * 1.30f);
     // Budget: passt ein BAUM nicht mehr in die Puffer, wird er uebersprungen —
     // und nicht mitten im Ast abgebrochen. Ein abgebrochener Baum sieht aus wie
     // ein abgesaegter Stamm ohne Laub (Nutzerbefund; gemessen: 54 Cap-Abbrueche,
@@ -1243,7 +1261,7 @@ int trees_build_step(int maxTrees){
     int tUse = tier, leavesWanted = ezWantLeaves, fits = 0;
     for(;;){
       int needV = (tUse >= 3) ? 31000 : (tUse == 2 ? 8500 : 200);
-      int needC = (tUse >= 1) ? 1400 : (treeBillboard0 ? 4 : 700);
+      int needC = (tUse >= 1) ? 1400 : 400;   // tier 0: Billboard + ~250 Karten
       int needL = leavesWanted ? 12500 : 0;
       if(nTreeVerts + needV <= TREE_VERT_CAP && nCrownVerts + needC <= CROWN_CAP &&
          nLeafInst + needL <= LEAF_CAP){ fits = 1; break; }

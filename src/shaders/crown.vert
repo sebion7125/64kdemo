@@ -65,12 +65,11 @@ void main(){
   p.z += cos(uTime * 1.3 + ph * 1.7) * amp * 0.7;
   p.y += sin(uTime * 2.2 + ph) * amp * 0.35;
   float d = length(aCenter - uCamPos);
-  // Uebergabe an die echten Einzelblaetter: leaf.vert duennt seine Blaetter um
-  // iLodR +/-10 % statistisch aus — die Karten fuellen exakt komplementaer auf.
-  // Der feste Schwellwert 20..28 m passte zu keiner CPU-Detailstufe: die Karten
-  // waren unter 20 m ganz aus, die Blaetter hoerten schon viel frueher auf.
-  // Im Schatten-Wurf ist uCamPos das Sonnenauge (63 m weg) -> dort immer 1.
-  float near = (uLightFace > 0.5) ? 1.0 : smoothstep(iLodR * 0.90, iLodR * 1.10, d);
+  // Karten sind die Basisstufe: sie werden NICHT mehr per Entfernung weggeblendet
+  // (vorher smoothstep(0,9 R1 .. 1,1 R1) -> unterhalb von R1 war die Karte aus,
+  // die Einzelblaetter deckten da aber schon lange nicht mehr, gemessen Loch von
+  // 60..86 m). Einzelblaetter sind jetzt eine Zusatzschicht, keine Ersetzung.
+  float near = 1.0;
   // Uebergang Karten -> Ganzbaum-Billboard (Runde 29): in Stufe 2 liegen beide im
   // Puffer, das Billboard faellt ab 0,7 R2 ein, die Karten duennen bis 1,1 R2 aus.
   // Laeuft ueber die Entfernung, also kontinuierlich und unabhaengig davon, wann
@@ -84,11 +83,10 @@ void main(){
   // die Staemme gingen aber bis ~255 m -> kahle Stummel in der Ferne.
   float far = 1.0 - smoothstep(190.0, 250.0, d);
   vFade = near * far * uTreeFade;
-  // Beim Ueberblenden den alten Satz NAHE am Betrachter weglassen: dort steht
-  // dieselbe Karte schon im neuen Satz (gleicher Baum, gleicher Seed), das
-  // Doppel-Zeichnen kostet nur Full-Rate. Ferne Baeume, die neu in den
-  // Build-Radius gekommen sind, bleiben zum Einblenden erhalten.
-  if(uTreeOld > 0.5 && uTreeFade < 1.0 && d < 30.0){ gl_Position = vec4(2.0,2.0,2.0,1.0); return; }
+  // Beim Ueberblenden den alten Satz durchgaengig ausblenden (uTreeFade) statt
+  // ihn unter 30 m hart wegucullen: das war genau bei nahen Baeumen ein Sprung
+  // (dort ist der Uebergang am auffaelligsten). Doppeltes Zeichnen kostet nur
+  // waehrend der 0,9 s Ueberblendung.
   if(uLightFace < 0.5 && vFade < 0.002){ gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vUV = aOff * 2.0;
   vPos = p;

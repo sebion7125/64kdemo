@@ -42,7 +42,9 @@ float c_terrainH(float px, float py);
 // iLodR = Radius, ab dem die Karten dieses Baumes die Blaetter uebernehmen
 // (keep = 1 - smoothstep(0,9*lodR, 1,1*lodR, d)) — Komplement zu lodR oben.
 #define LEAF_FLOATS  11
-#define LEAF_CAP     1600000  // gemessen max. 772k pro Wald; 1,6M = Reserve (70 MB)
+#define LEAF_CAP     2400000  // Budget erhoeht statt Geometrie zu ueberspringen (Nutzerregel):
+                            // Stress-Szenario DEMO_LODRSCALE=2 brauchte 1,60 Mio, 90 Baeume
+                            // fielen raus. 2,4 Mio x 40 B x 2 Saetze = 192 MB
 // Referenz-Krone fuer den Blatthorizont-Atlas (ferne Baeume sampeln diese
 // Textur statt prozeduraler Flecken). Layout im Atlas: 8x8 Kacheln =
 // 4 Kronen-Varianten x 16 Ansichts-Richtungen.
@@ -56,11 +58,12 @@ float c_terrainH(float px, float py);
 // werden zuerst gebaut, bei Cap-Uberlauf fehlt Geometrie also ganz hinten —
 // nicht vor der Kamera.
 #ifndef TREE_VERT_CAP
-#define TREE_VERT_CAP 3800000   // gemessen 2,83 Mio nach tier-0-Entlastung.
+#define TREE_VERT_CAP 5200000   // Stress (DEMO_LODRSCALE=2) riss 3,8 Mio -> 90 Baeume
+                            // uebersprungen. 5,2 Mio x 32 B x 2 Saetze = 333 MB
                                 // Doppel-Puffer (Build-Thread) = 2x diese Groesse.
 #endif
 #ifndef CROWN_CAP
-#define CROWN_CAP     700000    // Karten (instanziert); gemessen 546k
+#define CROWN_CAP     900000    // Karten (instanziert); gemessen 318k im Stress-Szenario
 #endif
 #define WIRE_CAP      90000
 
@@ -86,6 +89,7 @@ void trees_build_finished_snapshot(float **tv, float **cv, float **lv,
 int  trees_thread_start(void);
 extern int treeBuildRange;   // Zellen-Radius, in dem Baeume gebaut werden
 extern int treeCardDiv0; extern float treeCardScale0;   // DEMO_CARDT0 (Sweep-Bank)
+extern int treeCardDivN; extern float treeCardScaleN;   // DEMO_CARDT2 (Basisstufe)
 extern int treeBillboard0;   // tier 0 als Ganzbaum-Billboard (TODO 23)
 extern int treeBB0Cards;     // Zusatzkarten darunter (DEMO_BB0CARDS)
 extern int treeDowngraded;   // wegen Budget auf die groebste Stufe herabgestuft
