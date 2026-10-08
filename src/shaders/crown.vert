@@ -118,7 +118,7 @@ void main(){
     // Karten aus 1.00..1.15 R2, Billboard ein 0.85..1.00 R2 — dasselbe
     // Ueberlappungsprinzip wie bei Blaettern/Karten: nie zwei halbe Schichten
     if(aData.w >= 4.0) near *= lodWBillboard(iLodR2, d, uBBPresent);
-    else near *= (1.0 - lodWBillboard(iLodR2, d, uBBPresent));
+    else near *= lodBandOutHold(iLodR2, d);   // Karten bleiben opak bis 0,9 des Bands
     // Schicht einzeln abschaltbar: near = 0 -> vFade = 0 -> Alpha 0 -> discard
     near *= (aData.w >= 4.0) ? uBillboardOn : uCardsOn;
   }

@@ -2928,3 +2928,28 @@ Metrik geaendert: Deckungs-Stufe = Mittelwert der 3 Frames davor gegen den der
 Nachbarschaft) meldete -83 % bei 79,3 m, wo die Rohzahlen glatt 251 px zeigen.
 Restliche Stufe -4 %: Uebergabe Einzelblatt -> Karte (12 600 Blaetter gegen
 840 Karten, Karten decken weniger) — naechster Punkt.
+
+## Lineare Blende: opaker Grund statt zwei Folien (2026-10-08, 3. Runde)
+
+Problem (Nutzer): zwei halbtransparente Folien vor dem Hintergrund. Ursache:
+komplementaere Baelen (abgehend 1-w ueber kommend w) ergeben als geblendet
+1 - (1-w)^2 Abdeckung, und A2C bei 4x MSAA quantisiert jede Kartenskante auf
+0/25/50/75/100 % Samples -> die ganze Krone wird durchlaessig.
+
+Neu: `lodBandOutHold` (lod.glsl + tree_lod.c, identische Zahlen). Die abgehende
+Schicht bleibt opak (1) und faellt erst in den letzten 3 % des Bands auf 0, die
+kommende blendet linear hoch. Abdeckung bleibt damit durchgehend ~1 und die
+Farbe ist ein linearer Uebergang. Theoretischer Rest: max
+0,26 * Auslaufbreite = 0,8 % (gemessen 0,78 %).
+
+Zweiter Fund, am Bild gemessen: die Kurve fiel MITTEN im Band (31,9 m: 1396 px,
+31,1 m: 1177 px, 30,7 m: 1397 px). Eine Karte in der Blende schrieb Tiefe und
+cullte die opaken Blaetter dahinter -> 0,5 Karte + 0,5 Hintergrund statt
+0,5 Karte + 0,5 Blatt. Jetzt gilt: wer blendet (vFade/vAlpha < 0,999), schreibt
+keine nutzbare Tiefe (gl_FragDepth = 1.0). Bildmessung groesste Deckungs-Delle
+-8,16 % -> -5,52 %.
+
+A2C wieder aus (Standard). Pruefungen umgestellt: nicht die SUMME der Gewichte,
+sondern die ABDECKUNG cov = 1-(1-Karten)(1-Billboard)(1-Blaetter) muss ~1 sein,
+und ihre Steigung muss stetig sein. Wirtstest 30 090 Pruefungen, 0 Fehler
+(|cov-1| max 0,0078, Sprung pro 0,5 m max 0,0027). Ein-Baum-Test LT-ERGBNIS OK.

@@ -67,6 +67,8 @@ float treeLodSmoothstep(float a, float b, float x);
 
 /* Schichtgewichte in Abhaengigkeit vom kanonischen Abstand d
  * (waagerechter Abstand Kamera -> Lotpunkt des Baums). */
+/* Abgehende Schicht mit Halt: 1 bis t = 0,9 des Bands, dann auf 0. */
+float treeLodBandOutHold(float R, float d);
 float treeLodWLeaf(const TreeLod *L, float d);        // Einzelblaetter
 float treeLodWCard(const TreeLod *L, float d);        // Kronen-Karten
 float treeLodWBillboard(const TreeLod *L, float d);   // Ganzbaum-Kachel
