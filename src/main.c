@@ -425,7 +425,14 @@ static int   envExitWhenDone = 0;
 //                  mitten in der Blende)
 //   DEMO_TABC=1    SAMPLE_ALPHA_TO_COVERAGE im Kronen+Blatt-Pass (Tiefe folgt der
 //                  abgedeckten Flaeche statt dem Mischwert)
-static int   dbgTreeDepthWrite = 1, dbgTreeDepthPass = 1, dbgTreeA2C = 0;
+// Alpha-to-Coverage AN: die Karten-/Blattkanten werden über MSAA-Abdeckung
+// aufgelöst statt über Alpha-Blending. Messung im Ein-Baum-Test (grösste
+// Deckungs-Stufe über den ganzen Anflug): aus = -8,16 % bei 31,1 m, an =
+// -4,04 %. Grund: mit Alpha-Blending + Depth-Write verdeckt die weiche Kante
+// einer Karte die dahinterliegende und schreibt Tiefe -> Löcher; mit A2C belegt
+// sie nur einen Teil der Samples, die hintere Karte darf trotzdem zeichnen
+// (reihenfolge-unabhängig, keine Z-Artefakte). DEMO_TABC=0 schaltet es ab.
+static int   dbgTreeDepthWrite = 1, dbgTreeDepthPass = 1, dbgTreeA2C = 1;
 
 // DEMO_LODTEST="dStart dEnd step": EIN Baum, sonst nichts. Die Kamera rueckt pro
 // Frame eine FESTE Strecke (Meter, nicht m/s) radial auf den Baum zu, damit das
@@ -439,7 +446,7 @@ static float ltD0 = 140.0f, ltD1 = 3.0f, ltStep = 0.5f;
 static float ltPrevW[4] = {0,0,0,0}, ltPrevD = 0.0f, ltSlope[4] = {0,0,0,0}, ltHole = 0.0f;
 static int   ltPrevTier = -999, ltPrevVerts = -1, ltPrevCrown = -1, ltPrevLeaf = -1;
 static int   ltTierSeq[16]; static int ltGeomChg = 0, ltGeomChgInBand = 0, ltPump = 0;
-static int   ltCov[3]; static int ltCovN = 0; static float ltDipWorst = 0.0f, ltDipAt = 0.0f;   // DEMO_EXIT=1: arbeiten, dann sofort beenden
+static int   ltCov[7]; static int ltCovN = 0; static float ltDipWorst = 0.0f, ltDipAt = 0.0f;   // DEMO_EXIT=1: arbeiten, dann sofort beenden
 static float envShotTimes[16]; static int envShotN = 0, envShotIdx = 0;
 static int   envShotTimes_on = 0;
 static unsigned long frameNo = 0;
@@ -3536,14 +3543,26 @@ int main(int argc, char **argv) {
       float dCov = sqrtf(ddx * ddx + ddz * ddz);
       // Groesste Delle: Deckung gegenueber der linearen Nachbarschaft. Eine Delle
       // ist ein sichtbarer Sprung beim Bewegen, egal ob das Modell "glatt" meldet.
+      // Metrik: Mittelwert der 3 Frames VOR dem Fenster gegen den Mittelwert der
+      // 3 Frames NACHHER. Eine echte Stufe (Schicht uebergibt, Ast klappt weg)
+      // bleibt als Unterschied stehen; ein einzelner Mess-Ausreisser (verunglueckter
+      // Read, eine helle Frame) mittelt sich raus. Der erste Versuch (Mitte gegen
+      // lineare Nachbarschaft) meldete -83 % bei 79,3 m, wo die Rohzahlen glatt
+      // 251 px zeigen.
       if(lit >= 0){
-        if(ltCovN < 3){ ltCov[ltCovN++] = lit; }
-        else { ltCov[0] = ltCov[1]; ltCov[1] = ltCov[2]; ltCov[2] = lit;
-               float lin = 0.5f * (float)(ltCov[0] + ltCov[2]);
-               if(lin > 30.0f){
-                 float dip = 100.0f * ((float)ltCov[1] - lin) / lin;
-                 if(dip < ltDipWorst){ ltDipWorst = dip; ltDipAt = dCov; }
-               } }
+        for(int q = 0; q < 6; q++) ltCov[q] = ltCov[q + 1 < 7 ? q + 1 : q];
+        ltCov[6] = lit;
+        if(ltCov[0] > 0 && ltCov[1] > 0 && ltCov[2] > 0 &&
+           ltCov[4] > 0 && ltCov[5] > 0 && ltCov[6] > 0){
+          float before = (ltCov[0] + ltCov[1] + ltCov[2]) / 3.0f;
+          float after  = (ltCov[4] + ltCov[5] + ltCov[6]) / 3.0f;
+          if(before > 30.0f){
+            float step = 100.0f * (after - before) / before;   // negativ = Deckung sinkt
+            // Die Deckung steigt mit der Naehe; eine Stufe ist die Abweichung von
+            // dem, was die Nachbarschaft nahe legt (hier grob: lokale Steigung).
+            if(step < ltDipWorst){ ltDipWorst = step; ltDipAt = dCov; }
+          }
+        }
       }
       printf("LT-DECKUNG frame %4d d %6.2f m: %7d helle Pixel (fade %.2f, Satz %d)\n",
              ltFrame - 1, dCov, lit, treeFadeNew, drawSet);

@@ -60,7 +60,11 @@ void main(){
   vec3 right = normalize(cross(fwd, vec3(0,1,0)));
   vec3 up = cross(right, fwd);
   // Quad in der Kameraebene, um rotY (aData.y) gedreht
-  float cr = cos(aData.y), sr = sin(aData.y);
+  // rotY traegt bei Ganzbaum-Kacheln das Seitenverhaeltnis (siehe unten), darf
+  // also nicht als Drehwinkel missbraucht werden — das gab Kacheln mit
+  // "zufaelliger" Orientierung (1,3 als Radiant = 74 grad, Nutzerbefund).
+  float rot = (aData.w >= 4.0) ? 0.0f : aData.y;
+  float cr = cos(rot), sr = sin(rot);
   vec2 ro = vec2(aOff.x * cr - aOff.y * sr, aOff.x * sr + aOff.y * cr);
   // Das Ganzbaum-Quad ist nicht quadratisch: aData.y traegt bei ihm die
   // Seitenverhaelung h/w (bei Karten ist der Slot die Rotation, dort 1,0).

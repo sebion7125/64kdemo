@@ -204,5 +204,11 @@ void main(){
   // Die Ganzbaum-Kachel kriegt IMMER echtes Alpha: ihre Silhouette lebt von der
   // Textur-Alpha, ein Alpha von 1 macht bei gefilterter Kachel ein Rechteck.
   if(vCrown > 0.5){ O = vec4(col, cov); return; }
-  O = vec4(col, vFade >= 0.999 ? 1.0 : cov);
+  // Alpha durchgehend = cov. Der fruehere Sprung `vFade >= 0.999 ? 1.0 : cov`
+  // machte beim Start der Blende aus einem Texel mit a = 0,5 schlagartig alpha
+  // 0,4995: die weiche Kartekante wurde instant durchsichtig, die Karte wirkte
+  // einen Texel kleiner (Nutzerbefund " sprunghaft ein bisschen kleiner, der
+  // Texeluebergang wandert um ein Texel"). Eine Blende darf keine Kantenregel
+  // wechseln - cov ist bei vFade = 1 dasselbe wie vorher a.
+  O = vec4(col, cov);
 }

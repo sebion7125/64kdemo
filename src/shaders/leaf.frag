@@ -136,5 +136,6 @@ void main(){
   col = pow(col, vec3(0.4545));
   // opak bei vAlpha = 1 (sonst wirkt das Laubdach duenn), echtes Alpha nur
   // waehrend der Ueberblendung — und die ist nicht gedithert
-  O = vec4(col, vAlpha >= 0.999 ? 1.0 : vAlpha);
+  // durchgehend, kein Sprung beim Start der Blende (begruendung wie crown.frag)
+  O = vec4(col, vAlpha);
 }

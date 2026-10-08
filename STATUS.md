@@ -2899,3 +2899,32 @@ Das ist der naechste Punkt.
 Nachtrag: TREE_VERT_CAP 12 Mio -> 4 Mio (gemessenes Maximum 1 785 495 ueber vier
 Kamerapositionen, 124 % Luft). RSS 2,40 GB -> 1,19 GB, 0 Cap-Treffer, 0
 uebersprungene Baeume (auch Stress DEMO_LODRSCALE=2.0).
+
+## Drei Nutzerfehler behoben (2026-10-08, 2. Runde)
+
+1. Weisse Vierecke an Astspitzen: die Bildgroessen-Aufloesung entschied PRO
+   VERTEX (Radius pro Ring verschieden, a->r / b->r). Ein Dreieck konnte mit
+   einem weggeklappten und zwei stehenden Vertices aufreissen. Jetzt tragen alle
+   Vertices eines Abschnitts denselben Radius und dieselbe Schwelle (gDissRad),
+   und der Ast-Deckel erbt denselben Wert (sonst schwebt er ueber einem
+   weggeklappten Abschnitt).
+2. Ganzbaum-Kacheln mit "zufaelliger" Orientierung (Taste 1): crown.vert drehte
+   das Quad mit cos/sin(aData.y) — seit dem Seitenverhaeltnis in aData.y war das
+   eine Drehung um 1,3 RAD (= 74 grad). Kacheln werden jetzt nicht gedreht.
+3. Sprung beim Start der Blende ("blaetter werden sprunghaft ein bisschen
+   kleiner, der Texeluebergang wandert um ein Texel"): crown.frag/leaf.frag
+   schrieben `vFade >= 0.999 ? 1.0 : cov`. Beim ersten Tick der Blende wurde aus
+   a = 0,5 schlagartig alpha 0,4995 — die weiche Kartekante wurde instant
+   durchsichtig. Alpha ist jetzt durchgehend cov (bei vFade = 1 dasselbe wie
+   vorher a, keine Kantenregel wechselt waehrend einer Blende).
+
+Alpha-to-Coverage standardmaessig AN (DEMO_TABC=0 schaltet ab): groesste
+Deckungs-Stufe ueber den ganzen Anflug 140->3 m: aus -8,16 % bei 31,1 m,
+an -4,04 %. Mit Alpha-Blending + Depth-Write verdeckt die weiche Kante einer
+Karte die dahinterliegende; mit A2C belegt sie nur Teile der Samples.
+
+Metrik geaendert: Deckungs-Stufe = Mittelwert der 3 Frames davor gegen den der
+3 Frames danach. Der alte Einzelbild-Vergleich (Mitte gegen lineare
+Nachbarschaft) meldete -83 % bei 79,3 m, wo die Rohzahlen glatt 251 px zeigen.
+Restliche Stufe -4 %: Uebergabe Einzelblatt -> Karte (12 600 Blaetter gegen
+840 Karten, Karten decken weniger) — naechster Punkt.

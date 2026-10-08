@@ -57,7 +57,7 @@ static float gTreeDist = 0.0f, gBranchCut = 0.0f;
 // Aufloes-Schwellwert. diss kommt aus dem Ast-Seed — bei jedem Build identisch,
 // haengt an keiner Bildschirmposition (kein Schimmern), und derselbe Wert sitzt
 // auf allen Vertices des Astes (der Ast loest sich als Ganzes auf, nicht stuckweise).
-static float gFocalPx = 0.0f, gDiss = 0.0f;
+static float gFocalPx = 0.0f, gDiss = 0.0f, gDissRad = 0.0f;
 static TreeLod gTL;
 void trees_set_focal_px(float f){ gFocalPx = f; }
 // Lotpunkt DES BAUMS, zu dem die gerade geschriebenen Datensaetze gehoeren.
@@ -226,7 +226,7 @@ static void emit_tube(const Ring *a, const Ring *b, int sides,
                            // selben Band aus, damit Stamm und Ganzbaumbild nicht
                            // gleichzeitig zu sehen sind (Nutzer)
   d[13] = gAnchorX; d[14] = gAnchorZ;   // kanonischer LOD-Anker = Lotpunkt des Baums
-      d[15] = ring[m] ? b->r : a->r; d[16] = gDiss;   // Bildgroessen-LOD
+      d[15] = gDissRad; d[16] = gDiss;   // Bildgroessen-LOD: EIN Wert pro Abschnitt
       nTreeVerts++;
     }
   }
@@ -266,7 +266,7 @@ static void emit_cap(const Ring *a, int sides, float sway,
       d[11] = v0;
       d[12] = gLodR2;      // Schaltweite Billboard (siehe emit_tube)
   d[13] = gAnchorX; d[14] = gAnchorZ;   // kanonischer LOD-Anker = Lotpunkt des Baums
-      d[15] = a->r; d[16] = gDiss;   // Bildgroessen-LOD
+      d[15] = gDissRad; d[16] = gDiss;   // wie der letzte Abschnitt des Astes
       nTreeVerts++;
     }
   }
@@ -1037,6 +1037,12 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
       // von innen nach aussen.
       gDiss = c_hash12(seed * 1.913f + 3.37f + (float)prev * 0.713f,
                        seed * 0.731f + 9.11f + (float)prev * 1.371f);
+      // Radius und Schwelle MUESSEN auf allen Vertices eines Dreiecks gleich
+      // sein. War sie pro Ring verschieden (a->r / b->r), riss das Dreieck auf:
+      // ein Vertex weggeklappt, zwei stehen geblieben -> weisses Viereck an der
+      // Astspitze (Nutzerbefund). Der Deckel erbt denselben Wert, sonst schwebt
+      // er ueber einem weggeklappten Abschnitt.
+      gDissRad = sec[prev].rg.r;
       emit_tube(&sec[prev].rg, &sec[cur].rg, G, sw, sw, cr, cg, cb2, 0.9f,
                 (float)cur * sl);
       prev = cur;
