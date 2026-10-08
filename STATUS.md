@@ -2637,3 +2637,38 @@ Bäumen ein Sprung); übergeblendet wird jetzt durchgängig über 0,9 s.
 **Offen nach dieser Runde:** FPS-Einbruch auf Taste `1` (Billboard aus) ist in der VM
 nicht messbar; erklärt ist er durch +246 535 Karten-Instanzen in Stufe 0. Braucht eine
 Draw-Call-/Instanzen-Statistik auf dem GPU-Host.
+
+## Regelwerk Baum-LOD (Runde 38, vom Nutzer freigegeben — verbindlich)
+
+Zwei getrennte Entscheidungen:
+- **Existenz (Build):** entscheidet nur, welche Geometrie im Puffer liegt. Grosszuegig
+  und immer jenseits der aeussersten Blende, damit kein Baum Geometrie verliert,
+  waehrend sein Gewicht > 0 ist.
+- **Sichtbarkeit (Shader):** ausschliesslich gewicht(d) der Kameradistanz, stetig.
+
+Gewichte (H = Wuchshoehe, R1 = clamp(5H,20,60) m, R2 = clamp(15H,40,120) m).
+Zwei sich ablösende Schichten benutzen dasselbe Band und sind komplementaer
+(w und 1-w); mit echtem Alpha ist die Summe ueberall 1 — kein Deckungsloch,
+keine Doppelung.
+
+| Schicht | d klein | Band | d gross |
+|---|---|---|---|
+| Einzelblaetter | 1 | 0,90-1,10 R1 -> 0 | 0 |
+| Karten | 0 | 0,90-1,10 R1 -> 1 | 1 bis 0,90 R2, dann 0,90-1,10 R2 -> 0 |
+| Ganzbaum-Billboard | 0 | 0,90-1,10 R2 -> 1 | 1 |
+| Geruest (Stamm+Aeste) | 1 | 0,90-1,10 R2 -> 0 | 0 |
+
+Existenz-Regeln:
+- Einzelblaetter gebaut bis 1,15 R1 + 20 m (Rand deckt den Nachlauf des Builds ab)
+- Karten: EINE Dichte und EINE Skala fuer alle Stufen (div 3, Skala 2,00)
+- Billboard: fuer alle Bäume
+- Aeste: bis 1,15 R2, danach nur Stamm (ausserhalb jeder Blende, also unsichtbar)
+
+Gemessen nach Umstellung: Karten 234 223 -> 446 918 (Cap 900 000), Geruest
+1 179 702 -> 1 374 750 (Cap 5 200 000), Blaetter 507 870 -> 642 330
+(Cap 2 400 000), 0 Cap-Treffer, Puffer 95 -> 121 MB pro Satz.
+
+Fehler dieser Runde: fuer Attribut 4 (R2 pro Geruest-Vertex) fehlte
+glEnableVertexAttribArray -> aR2 = Generic-Attribut 0 -> smoothstep(0,0,d)=1 ->
+komplettes Geruest weggecullt. Diagnose: Geruest zwangsweise rot gezeichnet,
+0 rote Pixel = gar keine Rasterisierung.

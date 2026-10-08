@@ -42,7 +42,7 @@ void main(){
   // Ueberblendung OHNE Deckungsloch (Nutzer: "pulsieren"): die abgehende
   // Schicht bleibt bis zum Ende des Bands voll an, die kommende blendet im
   // Band DAVOR hoch. Ueberlappung = beide voll, nie beide halb.
-  float keep = 1.0 - smoothstep(iLodR * 1.00, iLodR * 1.15, d);
+  float keep = 1.0 - smoothstep(iLodR * 0.90, iLodR * 1.10, d);
   // Ueberblendung beim LOD-Wechsel (Runde 27): der alte Satz lichtet sich pro
   // Blatt aus — gleiche Technik wie der Bande um iLodR, also ohne Alpha-Blend
   // und ohne Abhaengigkeit von der Draw-Reihenfolge.

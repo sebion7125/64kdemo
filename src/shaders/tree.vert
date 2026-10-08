@@ -49,7 +49,9 @@ void main(){
   // halben Hintergrund). Das Billboard ist bei R2 schon voll, das Geruest geht
   // bei R2 — beide gleichzeitig sieht man damit nicht (Nutzer).
   float md = length(p - uCamPos);
-  float mf = 1.0 - smoothstep(aR2 * 0.97, aR2 * 1.00, md);
+  // Uebergabe ans Billboard im selben Band, in dem das Billboard einblendet
+  // (0,90..1,10 R2): die Gewichte sind komplementaer, Summe immer 1.
+  float mf = 1.0 - smoothstep(aR2 * 0.90, aR2 * 1.10, md);
   vMeshFade = uMeshFade * mf;
   // Cull am ENTFERNUNGS-Faktor, nicht am multiplizierten: im Schattenwurf-Pass
   // ist uMeshFade = 0, das haette das ganze Geruest aus der Schattenkarte

@@ -39,6 +39,7 @@ int   treeFocusValid = 0;
 // hier, weil add_leaf()/leaf_cluster() von beiden Generatoren aus tief unten
 // aufgerufen werden und die Kette dafuer nicht voll durchgereicht wird.
 static float gLodR = 30.0f;
+static float gTreeDist = 0.0f, gBranchCut = 0.0f;   // Abstand zum Baum / Ast-Cut
 static float gLodR2 = 0.0f;
 static float gBbSize = 0.0f, gBbCen[3] = {0,0,0};   // BBox des letzten Baums
 static float ezLszMax = 0.0f;  // groesster Blattgrundradius dieses Baums
@@ -916,7 +917,10 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
   // voll in den Laubkarten. Gemessen: 224 tier-0-Baeume kosten 0,78 Mio der
   // 4,08 Mio Geruest-Vertices, ohne sichtbaren Beitrag. Deshalb bleibt nur der
   // Stamm stehen (tragende Silhouette), die Zweigroehre entfaellt.
-  int meshBranch = !(tier == 0 && lvl > 0);
+  // Aeste fehlen erst JENSEITS deraeussersten Blende (1,15 R2), nicht schon ab
+  // der Build-Stufe: innerhalb der Blende muss die Geometrie existieren, sonst
+  // ist der Uebergang eine Stufe (Regelwerk C).
+  int meshBranch = !(gBranchCut > 0.0f && gTreeDist > gBranchCut && lvl > 0);
   float tone = btone * (0.86f + 0.05f * (float)lvl);
   float cr = (0.30f - 0.03f * (float)lvl) * tone;
   float cg = (0.24f + 0.03f * (float)lvl) * tone;
@@ -1045,7 +1049,10 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
   ezLszMax = 0.0f;
   // Karten-Groesse gleicht die Ausduennung aus (div 2 -> 1,25, div 8 -> 2,20);
   // muss VOR ez_grow stehen, die Groesse sitzt in der Sprig-Liste.
-  ezCardScale = (tier >= 2) ? treeCardScaleN : (tier == 1 ? treeCardScale0 : 2.20f);
+  // Eine Dichte, eine Skala fuer ALLE Stufen (Regelwerk C): die Kartenskala
+  // durfte sich nicht mit der Stufe aendern, sonst wechselt am selben Ort die
+  // Deckungsflaeche — ein Sprung mitten in der Blende.
+  ezCardScale = treeCardScaleN;
   ezDbgName = P->name; ezDbgUnit = unit; ezDbgR0 = root.rg.r; ezDbgNSec = 0;  ezDbgS = s; ezDbgHf = hf;
   ez_grow(0, &root, P, unit, seed, tier, btone, 0, 0);
   // Karten (Distanzstufe): ab 0,9 lodR uebernehmen sie das Laub, im Band um
@@ -1074,7 +1081,7 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
   // einblendet: der Build ist bis 12 m Kameraweg alt, ohne Vorrat waere beim
   // Annaehern nichts zum Einblenden da (derselbe Fehler, den die Einzelblaetter
   // mit 1,3 R1 Puffer hatten).
-  int cardDiv = (tier >= 2) ? treeCardDivN : (tier == 1 ? treeCardDiv0 : (treeBB0Cards > 0 ? treeBB0Cards : 8));
+  int cardDiv = treeCardDivN;   // Regelwerk C: eine Dichte fuer alle Stufen
   int wantCards = ezNSprig / cardDiv;
   // BBox wird fuer JEDEN Baum bestimmt (die Aufnahme-Rahmung braucht sie auch
   // fuer tier-3-Repraesentanten, die selbst kein Billboard bekommen)
@@ -1303,12 +1310,14 @@ int trees_build_step(int maxTrees){
     // Laubpixel auf 86 m gegen 12828 auf 90 m fuer denselben Baum.
     gLodR = R1;
     gLodR2 = R2;
+    gTreeDist = d;
+    gBranchCut = R2 * 1.15f;
     // Der Rand muss die Nachlaufzeit des Builds abdecken: d ist der Abstand zum
     // BUILD-ZENTRUM, der Shader blendet aber gegen die KAMERA aus (bis 1,15 R1),
     // und das Build-Zentrum hinkt der Kamera bis 12 m nach. Bei 1,3 R1 (bei
     // R1 = 20 m also 6 m) fehlten Blaetter, obwohl die Kamera schon innerhalb der
     // Blende war -> Blätter verschwanden schlagartig (Nutzerbefund).
-    ezWantLeaves = (d <= R1 * 1.15f + 16.0f);
+    ezWantLeaves = (d <= R1 * 1.15f + 20.0f);
     // Budget: passt ein BAUM nicht mehr in die Puffer, wird er uebersprungen —
     // und nicht mitten im Ast abgebrochen. Ein abgebrochener Baum sieht aus wie
     // ein abgesaegter Stamm ohne Laub (Nutzerbefund; gemessen: 54 Cap-Abbrueche,
