@@ -59,7 +59,11 @@ float c_terrainH(float px, float py);
 // werden zuerst gebaut, bei Cap-Uberlauf fehlt Geometrie also ganz hinten —
 // nicht vor der Kamera.
 #ifndef TREE_VERT_CAP
-#define TREE_VERT_CAP 5200000   // Stress (DEMO_LODRSCALE=2) riss 3,8 Mio -> 90 Baeume
+#define TREE_VERT_CAP 9500000   // Netz-Dichte ist jetzt entfernungsabhaengig bis
+                                // 1,15 R2 (kein Sprung bei der Blende) — Stress
+                                // (DEMO_LODRSCALE=2) braucht 7,8 Mio; bei 5,2 Mio
+                                // fehlten 217 Baeume. CPU-Puffer stehen im BSS,
+                                // bezahlt wird nur was beschrieben wird.
                             // uebersprungen. 5,2 Mio x 32 B x 2 Saetze = 333 MB
                                 // Doppel-Puffer (Build-Thread) = 2x diese Groesse.
 #endif

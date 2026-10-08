@@ -788,8 +788,17 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
   // 0,9..1,1 R2 = 91..111 m). Der Nutzer sah es als Sprung "an den Zweigen".
   // Volles Netz bis 1,15 R2, also bis ausserhalb der aeussersten Blende.
   int fine = (gMeshFineCut <= 0.0f) || (gTreeDist <= gMeshFineCut);
-  int stride = fine ? 1 : 6;
-  if(!fine) G = (G * 2) / 5;
+  // Volles Netz heisst NICHT ueberall gleich fein: dicke Aeste (lvl 0/1) tragen
+  // die Silhouette und bekommen jeden Ring, duenne (lvl >= 2) bekommen jeden
+  // zweiten. Diese Regel haengt nur am Level, also an der Struktur selbst, und
+  // ist damit ueber alle Entfernungen identisch — kein Sprung, und die
+  // Geruestkosten bleiben tragbar (Stress DEMO_LODRSCALE=2: stride 1 ueber alle
+  // Level kostete 5,2 Mio Vertices bei 279 von 648 Baeumen).
+  int stride = fine ? (lvl <= 1 ? 1 : 2) : 6;
+  if(fine){
+    int gcap = (lvl <= 1) ? 8 : (lvl == 2 ? 6 : 4);
+    if(G > gcap) G = gcap;
+  } else G = (G * 2) / 5;
   if(G < 3) G = 3;
   if(G > 8) G = 8;
   // Kinderzahl: in ALLEN Stufen gleich (deren Regel: detail ändert nur die
