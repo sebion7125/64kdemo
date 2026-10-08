@@ -48,6 +48,7 @@ static float lvA[LEAF_CAP * LEAF_FLOATS],      lvB[LEAF_CAP * LEAF_FLOATS];
 float *treeVerts = tvA, *crownVerts = cvA, *leafInst = lvA;      // Schreibseite (Build)
 float *treeVertsD = tvB, *crownVertsD = cvB, *leafInstD = lvB;   // Zeichenseite (Main)
 float wireVerts[WIRE_CAP * WIRE_FLOATS];
+int treeBuildRange = 20;   // DEMO_TREEBUILDRANGE: Zellen-Radius des Wald-Baus
 int nTreeVerts = 0, nCrownVerts = 0, nWireVerts = 0, nTrees = 0, nLeafInst = 0;   // Schreibseite
 int nTreeVertsD = 0, nCrownVertsD = 0, nLeafInstD = 0, nTreesD = 0;               // Zeichenseite
 
@@ -1099,7 +1100,7 @@ void trees_build_begin(float tx, float tz){
   TreeCand *cand = treeCand;
   int nc = 0;
   treeCandPos = 0;
-  const int RANGE = 20;   // Zellen-Radius um das Kameraziel (~180m, passt zur
+  const int RANGE = treeBuildRange;   // Zellen-Radius um das Kameraziel (20 x 9 m
                           // groesseren Sichtweite: march bis 400m)
   // Referenzpunkt fuer Detailstufe und Budget: die ECHTE Kamera. Vorher das
   // Build-Zentrum = camTgt, das haengt in Fly-Kamera 10 m in Blickrichtung vor

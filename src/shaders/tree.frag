@@ -4,6 +4,12 @@ in vec3 vNrm;
 in vec3 vPos;
 in vec4 vCol;
 in vec2 vUV;      // u = 0..1 einmal um das Rohr, v = Bogenlaenge in Metern
+// Ueberblendung beim LOD-Wechsel (Runde 27): der alte Satz Geometrie wird
+// waehrend der Ueberblendzeit weggeblendet, damit ein Baum nicht schlagartig
+// die Detailstufe wechselt. Aufloesung unabhaengig von der Draw-Reihenfolge:
+// pro Weltwuerfel gewuerfelt, wie das Laub es schon fuer den Blatt-/Karten-
+// Uebergang tut.
+uniform float uTreeFade = 1.0;
 uniform vec3 uCamPos;
 uniform float uTreeMask;   // DEBUG (F3): Baum-Mesh reines Rot -> exakte Maske,
                            // um Rinden-Kennzahlen nur auf Baum-Pixel zu messen
@@ -104,6 +110,10 @@ float shadowAt(vec3 wp, vec3 n){
 
 void main(){
   if(uTreeMask > 0.5){ O = vec4(1.0, 0.0, 0.0, 1.0); return; }
+  // Ueberblendung beim LOD-Wechsel: der alte Satz loest sich pro Weltwuerfel auf
+  // (uTreeFade 1 -> nichts wird verworfen, identisch zu vorher).
+  if(uTreeFade < 1.0 &&
+     hash12(floor(vPos.xz * 3.0) + vec2(floor(vPos.y * 3.0) * 17.0)) > uTreeFade) discard;
   vec3 n = normalize(vNrm);
   vec3 rd = normalize(uCamPos - vPos);
   if(dot(n, rd) < 0.0) n = -n;

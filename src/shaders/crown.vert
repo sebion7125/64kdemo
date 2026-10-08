@@ -11,6 +11,8 @@ uniform vec3 uCamTgt;
 uniform float uTime;   // Wind (gleiches Boen-Feld wie Gras/Aeste/Blaetter)
 uniform float uLightFace; // 1 = Quad steht senkrecht auf der Blickrichtung des
                           // Wurf-Betrachters (Sonne) — nur im Schatten-Pass.
+uniform float uTreeFade = 1.0; // Ueberblendung beim LOD-Wechsel (Runde 27):
+                               // 0 = dieser Satz verschwindet, 1 = voll sichtbar
 out vec2 vUV;
 out vec3 vPos;
 out float vSeed;
@@ -69,7 +71,7 @@ void main(){
   // Kantenlaenge, Ecken ~255 m). Bis 2026-10-07 endete das Blattdach bei 185 m,
   // die Staemme gingen aber bis ~255 m -> kahle Stummel in der Ferne.
   float far = 1.0 - smoothstep(190.0, 250.0, d);
-  vFade = near * far;
+  vFade = near * far * uTreeFade;
   if(uLightFace < 0.5 && vFade < 0.002){ gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vUV = aOff * 2.0;
   vPos = p;

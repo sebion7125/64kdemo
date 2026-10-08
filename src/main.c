@@ -744,6 +744,22 @@ static void build_foliage_atlas(GLuint progLeaf){
 static struct { const float *src; GLuint vbo; size_t bytes, pos; } upBuf[3];
 static int upActive = 0, upNextSet = 1;
 
+// Ueberblendung beim Satz-Wechsel (Runde 27, Nutzer: "die Baeume springen wild
+// zwischen den LODs", "auch die Baeume ganz in der Ferne sollten sich langsam
+// einblenden"). Der bisher gezeichnete Satz bleibt sichtbar und loest sich aus,
+// waehrend der neue sich einloest — beides per Wuerfelentscheid im Vertex-/Frag-
+// ment, also ohne Alpha-Blend und ohne Sortierabhaengigkeit.
+static double treeSwapT = -1e30;
+static double treeFadeDur = 0.9;
+static int treeOldSet = -1;
+double treeTierSwitchS = 0.0;   // DEMO_TIERSWITCH (Messbank)
+int treeDbg = 0;              // DEMO_TREEDEBUG: Satz-Wechsel + Ueberblendung protokollieren
+// Zaehle zum jeweils gezeichneten Satz (die D-Zaehler in trees_cpu.c zeigen schon
+// auf den neuen Build, bevor der Upload fertig ist — die gezeichneten Zaehler
+// duerfen nicht mitlaufen).
+static int nTreeVertsCur = 0, nCrownVertsCur = 0, nLeafInstCur = 0;
+static int nTreeVertsOld = 0, nCrownVertsOld = 0, nLeafInstOld = 0;
+
 static void upload_begin(const float *tv, const float *cv, const float *lv,
                          int ntv, int ncv, int nli, int nextSet){
   upBuf[0].src = tv; upBuf[0].vbo = vboTree[nextSet];
@@ -797,7 +813,16 @@ static int upload_step(double frameMs){
   }
   for(int i = 0; i < 3; i++) if(upBuf[i].pos < upBuf[i].bytes) return 1;
   upActive = 0;
-  drawSet = upNextSet;      // erst JETZT zeichnet der Main-Thread den neuen Build
+  // Wechsel: der alte Satz bleibt zum Ausblenden erhalten.
+  treeOldSet = drawSet;
+  nTreeVertsOld = nTreeVertsCur; nCrownVertsOld = nCrownVertsCur; nLeafInstOld = nLeafInstCur;
+  drawSet = upNextSet;
+  nTreeVertsCur = nTreeVertsD; nCrownVertsCur = nCrownVertsD; nLeafInstCur = nLeafInstD;
+  treeSwapT = now_sec();
+  if(treeDbg) printf("  Satz-Wechsel: alt=Satz %d (%d V / %d K / %d B), neu=Satz %d "
+                     "(%d V / %d K / %d B), Ueberblendung %.2f s\n",
+                     treeOldSet, nTreeVertsOld, nCrownVertsOld, nLeafInstOld,
+                     drawSet, nTreeVertsCur, nCrownVertsCur, nLeafInstCur, treeFadeDur);
   return 0;
 }
 
@@ -1399,6 +1424,7 @@ int main(int argc, char **argv) {
   GLint locTCam    = p_glGetUniformLocation(progTMesh, "uCamPos");
   GLint locTTime   = p_glGetUniformLocation(progTMesh, "uTime");
   GLint locTMask   = p_glGetUniformLocation(progTMesh, "uTreeMask");
+  GLint locTFade   = p_glGetUniformLocation(progTMesh, "uTreeFade");
   GLint locGMVP    = p_glGetUniformLocation(progGrass, "uMVP");
   GLint locGCam    = p_glGetUniformLocation(progGrass, "uCamPos");
   GLint locGTime   = p_glGetUniformLocation(progGrass, "uTime");
@@ -1455,12 +1481,14 @@ int main(int argc, char **argv) {
   GLint locCFol    = p_glGetUniformLocation(progCrown, "uFoliage");
   GLint locCTime   = p_glGetUniformLocation(progCrown, "uTime");
   GLint locCMask   = p_glGetUniformLocation(progCrown, "uCrownMask");
+  GLint locCFade   = p_glGetUniformLocation(progCrown, "uTreeFade");
   GLint locCLFace  = p_glGetUniformLocation(progCrown, "uLightFace");
   GLint locLMVP    = p_glGetUniformLocation(progLeaf, "uMVP");
   GLint locLCam    = p_glGetUniformLocation(progLeaf, "uCamPos");
   GLint locLLod    = p_glGetUniformLocation(progLeaf, "uLodCam");
   GLint locLTime   = p_glGetUniformLocation(progLeaf, "uTime");
   GLint locLMask   = p_glGetUniformLocation(progLeaf, "uLeafMask");
+  GLint locLFade   = p_glGetUniformLocation(progLeaf, "uTreeFade");
   // uAlbedoOnly steht in der Atlas-Kapture auf 1 und wird pro Programm NICHT
   // zurueckgesetzt — ohne dieses 0 hier lief die komplette Blatt-Rendrierung mit
   // roher Albedo (unbeleuchtet), waehrend die Kronen-Karten beleuchtet wurden.
@@ -1495,6 +1523,13 @@ int main(int argc, char **argv) {
   if (getenv("DEMO_TREEMASK")) dbgTreeMask = 1;
   { const char *es = getenv("DEMO_SHOT"); if (es) envShotAt = (float)atof(es); }
   { const char *ef = getenv("DEMO_FREEZE"); if (ef) envFreeze = (float)atof(ef); }
+  // DEMO_TREEFADE=<sek>: Ueberblendzeit beim LOD-Satzwechsel (0 = hart schneiden)
+  { const char *tf = getenv("DEMO_TREEFADE"); if (tf) treeFadeDur = (double)atof(tf); }
+  { const char *ts = getenv("DEMO_TIERSWITCH"); if (ts) treeTierSwitchS = (double)atof(ts); }
+  // DEMO_TREEBUILDRANGE: Zellen-Radius des Wald-Baus (9 m pro Zelle) — kleiner
+  // Wald = schneller Build, damit die Ueberblendung messbar wird.
+  { const char *br = getenv("DEMO_TREEBUILDRANGE"); if (br) treeBuildRange = atoi(br); }
+  { const char *td = getenv("DEMO_TREEDEBUG"); if (td) treeDbg = atoi(td); }
   { const char *ea = getenv("DEMO_ARTEN"); if (ea) dbgGrassCat = atoi(ea); }
   // DEMO_GRASSMD=<m>  : max. Gras-Sichtweite (statt Slider)
   // DEMO_GRASSTEX="<far0> <far1>" : Uebergabe an die Einfangtextur, "0" = Textur aus
@@ -1928,6 +1963,16 @@ int main(int argc, char **argv) {
     {
       static int builtT = 0, builtG = 0;
       static float tCX = 0, tCZ = 0;
+      // DEMO_TIERSWITCH=<sek>: nach n Sekunden hart auf tier 0 umstellen und einen
+      // Build ausloesen — Messbank fuer die Ueberblendung (alter Satz tier 3,
+      // neuer Satz tier 0, Kameraposition identisch).
+      { static double t0 = 0; static int done = 0;
+        if(treeTierSwitchS > 0 && !done){
+          if(t0 == 0) t0 = tNow;
+          if(tNow - t0 >= treeTierSwitchS){ done = 1; treeForceTier = 0; tCX = 1e30f;
+            printf("  Messbank: erzwungener Stufenwechsel auf tier 0 (t=%.2f s)\n", tNow - t0);
+            fflush(stdout); }
+        } }
       if(!builtT || ((!upActive && !trees_build_busy()) &&
                      (fabsf(camTgt[0] - tCX) > 12.0f || fabsf(camTgt[2] - tCZ) > 12.0f))){
         tCX = camTgt[0]; tCZ = camTgt[2];
@@ -2149,9 +2194,10 @@ int main(int argc, char **argv) {
       p_glUniform1f(locTTime, tSh);
       p_glUniform1f(locTMask, 0.0f);
       applyShadow(&slTree, 0);
+      if(locTFade >= 0) p_glUniform1f(locTFade, 1.0f);
       p_glBindVertexArray(vaoTree[drawSet]);
-      p_glDrawArrays(GL_TRIANGLES, 0, nTreeVertsD);
-      if(nCrownVertsD > 0){
+      p_glDrawArrays(GL_TRIANGLES, 0, nTreeVertsCur);
+      if(nCrownVertsCur > 0){
         p_glUseProgram(progCrown);
         p_glUniformMatrix4fv(locCMVP, 1, GL_FALSE, lightMVP);
         p_glUniform3f(locCCam, eye[0], eye[1], eye[2]);
@@ -2166,10 +2212,11 @@ int main(int argc, char **argv) {
         // Kronenflaeche.
         if(locCLFace >= 0) p_glUniform1f(locCLFace, 1.0f);
         applyShadow(&slCrown, 0);
+        if(locCFade >= 0) p_glUniform1f(locCFade, 1.0f);
         p_glBindVertexArray(vaoCrown[drawSet]);
-        p_glDrawArrays(GL_TRIANGLES, 0, nCrownVertsD);
+        p_glDrawArrays(GL_TRIANGLES, 0, nCrownVertsCur);
       }
-      if(shadowLeafOn && nLeafInstD > 0 && !envNoLeaf){
+      if(shadowLeafOn && nLeafInstCur > 0 && !envNoLeaf){
         p_glUseProgram(progLeaf);
         p_glUniformMatrix4fv(locLMVP, 1, GL_FALSE, lightMVP);
         p_glUniform3f(locLCam, eye[0], eye[1], eye[2]);
@@ -2182,8 +2229,9 @@ int main(int argc, char **argv) {
         p_glUniform1f(locLMask, 0.0f);
         if(locLAlb >= 0) p_glUniform1f(locLAlb, 0.0f);
         applyShadow(&slLeaf, 0);
+        if(locLFade >= 0) p_glUniform1f(locLFade, 1.0f);
         p_glBindVertexArray(vaoLeaf[drawSet]);
-        p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInstD);
+        p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInstCur);
       }
       p_glDisable(GL_POLYGON_OFFSET_FILL);
       p_glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -2234,6 +2282,25 @@ int main(int argc, char **argv) {
       p_glDrawArrays(GL_TRIANGLES, 0, 3);
     }
 
+    // Ueberblend-Faktor des neuen Satzes (Runde 27). Der alte Satz laeuft mit
+    // 1-treeFadeNew parallel mit, bis die Ueberblendzeit um ist.
+    float treeFadeNew = 1.0f;
+    if(treeDbg && treeFadeDur > 0.0 && tNow - treeSwapT < treeFadeDur + 0.05){
+      static double lastFadeP = -1;
+      if(tNow - lastFadeP > 0.25){
+        lastFadeP = tNow;
+        printf("  Ueberblendung: neu %.2f (Satz %d), alt %.2f (Satz %d)\n",
+               (float)((tNow - treeSwapT) / treeFadeDur), drawSet,
+               1.0f - (float)((tNow - treeSwapT) / treeFadeDur), treeOldSet);
+        fflush(stdout);
+      }
+    }
+    if(treeFadeDur > 0.0){
+      treeFadeNew = (float)((tNow - treeSwapT) / treeFadeDur);
+      if(treeFadeNew > 1.0f) treeFadeNew = 1.0f;
+      if(treeFadeNew < 0.0f) treeFadeNew = 0.0f;
+    }
+
     // 2) Mesh-Pass (Baeume + Gras + Blattdach) mit Depth-Test gegen Szenen-Tiefe
     p_glEnable(GL_DEPTH_TEST);
     p_glDepthFunc(GL_LESS);
@@ -2246,8 +2313,15 @@ int main(int argc, char **argv) {
       p_glUniform1f(locTTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
       p_glUniform1f(locTMask, (float)dbgTreeMask);
       applyShadow(&slTree, (shadowThis && shadowSampleOn) ? (shadowForce ? 2 : 1) : 0);
+      if(locTFade >= 0) p_glUniform1f(locTFade, 1.0f);
       p_glBindVertexArray(vaoTree[drawSet]);
-      p_glDrawArrays(GL_TRIANGLES, 0, nTreeVertsD);
+      p_glDrawArrays(GL_TRIANGLES, 0, nTreeVertsCur);
+      if(treeFadeNew < 1.0f && treeOldSet >= 0 && nTreeVertsOld > 0){
+        if(locTFade >= 0) p_glUniform1f(locTFade, 1.0f - treeFadeNew);
+        p_glBindVertexArray(vaoTree[treeOldSet]);
+        p_glDrawArrays(GL_TRIANGLES, 0, nTreeVertsOld);
+        if(locTFade >= 0) p_glUniform1f(locTFade, 1.0f);
+      }
     }
 
     // Gras (instanziert) — von WEIT nach NAH zeichnen (Alpha-Blending und
@@ -2334,15 +2408,22 @@ int main(int argc, char **argv) {
       p_glUniform1f(locCMask, (float)envCrownMask);
       if(locCLFace >= 0) p_glUniform1f(locCLFace, 0.0f);
       p_glUniform1f(locCTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
+      if(locCFade >= 0) p_glUniform1f(locCFade, treeFadeNew);
       p_glBindVertexArray(vaoCrown[drawSet]);
-      p_glDrawArrays(GL_TRIANGLES, 0, nCrownVertsD);
+      p_glDrawArrays(GL_TRIANGLES, 0, nCrownVertsCur);
+      if(treeFadeNew < 1.0f && treeOldSet >= 0 && nCrownVertsOld > 0){
+        if(locCFade >= 0) p_glUniform1f(locCFade, 1.0f - treeFadeNew);
+        p_glBindVertexArray(vaoCrown[treeOldSet]);
+        p_glDrawArrays(GL_TRIANGLES, 0, nCrownVertsOld);
+      }
+      if(locCFade >= 0) p_glUniform1f(locCFade, 1.0f);
       p_glDisable(GL_BLEND);
     }
 
     // Einzelblaetter naher Baeume: Alpha-Test im Shader (discard), also opak wie
     // das Baum-Mesh -> Depth schreiben, kein Blend. Vor dem Gras zeichnen, damit
     // der Tiefentest Gras hinter den Blaettern verwirft.
-    if(!grassOnly && nLeafInstD > 0 && !envNoLeaf){
+    if(!grassOnly && (nLeafInstCur > 0 || (treeFadeNew < 1.0f && nLeafInstOld > 0)) && !envNoLeaf){
       p_glDepthMask(GL_TRUE);
       p_glUseProgram(progLeaf);
       p_glUniformMatrix4fv(locLMVP, 1, GL_FALSE, mvp);
@@ -2351,8 +2432,15 @@ int main(int argc, char **argv) {
       p_glUniform1f(locLTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
       p_glUniform1f(locLMask, (float)envLeafMask);
       if(locLAlb >= 0) p_glUniform1f(locLAlb, 0.0f);
+      if(locLFade >= 0) p_glUniform1f(locLFade, treeFadeNew);
       p_glBindVertexArray(vaoLeaf[drawSet]);
-      p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInstD);
+      p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInstCur);
+      if(treeFadeNew < 1.0f && treeOldSet >= 0 && nLeafInstOld > 0){
+        if(locLFade >= 0) p_glUniform1f(locLFade, 1.0f - treeFadeNew);
+        p_glBindVertexArray(vaoLeaf[treeOldSet]);
+        p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInstOld);
+      }
+      if(locLFade >= 0) p_glUniform1f(locLFade, 1.0f);
     }
 
     // 3) MSAA-Resolve: fboMS -> fbo (Farbe + Tiefe in einem Blit, Single-Sample)
@@ -2396,7 +2484,7 @@ int main(int argc, char **argv) {
     snprintf(hud1, sizeof hud1, "FPS %3d %dx%d RES %s CAM %s AA %s TREES %d QUADS %d GRASS %d",
              (int)(fpsEMA + 0.5), winW, winH, sc, flyMode ? "FLY" : "ORB",
              useMSAA ? (msaaSamples == 8 ? "8x" : "4x") : "OFF",
-             nTreesD, nCrownVertsD / 6, nGrass);
+             nTreesD, nCrownVertsCur / 6, nGrass);
     snprintf(hud2, sizeof hud2, "D %.1fx H %.1fx MD %d.%dm%s%s%s%s",
              grassDensityScale, grassHeightScale, (int)grassMaxDist, (int)(grassMaxDist * 10) % 10,
              grassFrozen ? " FRZ" : "", grassOnly ? " NUR-GRAS" : "",
