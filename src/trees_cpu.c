@@ -236,6 +236,9 @@ static float ezCardScale = 1.25f;
 // der groebsten Stufe — Sweep-Bank, damit die ferne Kronendeckung messbar an die
 // nahe angepasst werden kann.
 int treeCardDiv0 = 3; float treeCardScale0 = 1.45f;   // gemessen: deckt wie tier 3
+// DEMO_T2="<stride> <Gzaehler> <Gnenner>": Vernetzung der mittleren Detailstufe.
+// Sweep-Bank, um Geruest-Kosten gegen Silhouette-Qualitaet zu messen.
+int treeT2Stride = 3, treeT2Gnum = 3, treeT2Gden = 4;
 int treeDowngraded = 0;   // Baeume, die wegen Budget auf die groebste Stufe fielen
 int treeBillboard0 = 1;      // DEMO_NOBB0=1: tier 0 wieder mit Einzelkarten
 // Blattfarbe des gerade gebauten Baumes. Der EZ-Generator wuerfelte sie vorher
@@ -726,8 +729,8 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
   // sectionStride = jeden N-ten Ring vernetzen (erster/letzter bleibt),
   // segmentFactor = radiale Segmente. Ganzz Leveln wegzuwerfen (unser altes
   // tier-System) erzeugt den Sprung in der Aststruktur, den der Nutzer sah.
-  int stride = (tier >= 3) ? 1 : (tier == 2 ? 3 : 6);
-  if(tier == 2) G = (G * 3) / 4;
+  int stride = (tier >= 3) ? 1 : (tier == 2 ? treeT2Stride : 6);
+  if(tier == 2) G = (G * treeT2Gnum) / treeT2Gden;   // DEMO_T2 (Sweep-Bank)
   else if(tier == 0) G = (G * 2) / 5;
   if(G < 3) G = 3;
   if(G > 8) G = 8;

@@ -587,6 +587,42 @@ Gemessen: Faktoren laufen 0.00 -> 0.63 -> 1.00 mit Summe 1 (Protokoll der
 Satz-Wechsel). Visuelle Beurteilung steht auf dem GPU-Host aus — in der VM laeuft
 die Ueberblendung wegen 1,4 s/Frame innerhalb eines Frames ab.
 
+## Session 2026-10-08, Runde 30 (Selbsttest-Bank, Herabstufung statt Weglassen, Sweep-Bänke)
+
+**`tools/selftest.sh` (neu):** fährt feste Konfigurationen (Standardszene, Wiederholung,
+jede Detailstufe eines Baumes, Kameraweg, kleinster/grösster Build-Radius, ohne Gras)
+und prüft hart: kein GL-Fehler, **0 übersprungene Bäume**, keine Cap-Treffer,
+Bild über zwei Läufe **bitgleich**, Build/Upload läuft beim Kameraweg.
+Aufruf: `tools/selftest.sh [BREITE HÖHE]`, Log unter `/tmp/64kdemo_selftest`.
+
+**Gefunden und behoben:** bei `DEMO_LODRSCALE=2` fehlten **296 Bäume komplett**
+(Gerüst 3 793 416/3 800 000, Blätter 1 595 260/1 600 000 voll). Neu wird bei
+Budget-Überlast **herabgestuft statt weggelassen**: zuerst auf die gröbste Stufe
+(Stamm 45 Vertices + 1 Ganzbaum-Billboard), dann die Einzelblätter weg, erst zuletzt
+der ganze Baum. Stress-Konfiguration jetzt: 0 übersprungen, 297 herabgestuft.
+Nebenbei: die Grössenschätzung pro Baum war für tier 0 viel zu hoch (3200 Vertices /
+700 Karten statt 45 / 1) — das hat Budget verschenkt.
+
+**Sweep-Bank `DEMO_T2="<stride> <Zähler> <Nenner>"`** (Vernetzung der mittleren
+Stufe) — gemessen, **Default bewusst nicht geändert**:
+
+| Einstellung | Gerüst Szene | Frame | Gerüst-Silhouette 25 m / 35 m / 50 m |
+|---|---|---|---|
+| Default (3, 3/4) | 2 834 673 | 1336 ms | Referenz |
+| `4 2 3` | 2 515 179 (−11 %) | 1255 ms (−6 %) | −13,5 % / −16,7 % / −40,4 % Gerüstpixel |
+| `5 2 3` | 2 379 459 (−16 %) | 1251 ms | — |
+
+Grund gegen die Änderung: tier 2 gilt auch für kleine Bäume ab 25 m, dort fallen bei
+`4 2 3` 13–17 % der Gerüstpixel weg (dünne Zweige verschwinden).
+
+**Schatten gemessen (TODO 25, ein Baum in 16 m):** Grundfläche des Wurfs in der
+Schattenkarte (2048², 4,4 cm/Texel): volle Krone 5838 Texel ≈ 11 m²,
+tier 0 mit Billboard 9301 Texel ≈ 18 m². Auf dem Boden: Schatten an/aus ändert
+1,24 % der Bildpixel (Mittlere Abdunklung 19,2); Blätter abschalten lässt den
+Schatten fast gleich bleiben (1,16 %) — die Kronen-Karten werfen ihn bereits, die
+Einzelblätter tragen nur ~7 % bei. **Der alte Befund „nur Stumpf-Schatten" ist
+damit messteilweise erledigt; die Optik muss der Nutzer prüfen.**
+
 ## Session 2026-10-08, Runde 29 (Ganzbaum-Billboard in der gröbsten Stufe, TODO 23)
 
 **Umsetzung:** pro tier-0-Baum EIN Kamera-Quad statt hunderter Karten. Größe und
