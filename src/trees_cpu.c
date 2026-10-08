@@ -253,10 +253,6 @@ static void emit_crown_quads(float bx, float bz, float s, float hf,
                              const float *tipx, const float *tipy, const float *tipz, int nTip){
   int K = 12;
   int variant = (int)(fabsf(seed) * 7.31f) % 4;
-  static const float corners[6][2] = {
-    {-0.5f,-0.5f},{0.5f,-0.5f},{-0.5f,0.5f},
-    { 0.5f,-0.5f},{ 0.5f, 0.5f},{-0.5f, 0.5f}
-  };
   for(int q = 0; q < K; q++){
     float h1 = TH(95 + q * 3), h2 = TH(96 + q * 3), h3 = TH(97 + q * 3);
     float h4 = TH(98 + q * 3), h5 = TH(99 + q * 3);
@@ -274,15 +270,16 @@ static void emit_crown_quads(float bx, float bz, float s, float hf,
     float qsize = s * (0.85f + 0.55f * h2) * (0.7f + 0.45f * hf);
     float qrot  = h3 * 6.283f;
     float qseed = h4 * 13.7f + q * 0.37f;
-    for(int c = 0; c < 6; c++){
-      if(nCrownVerts + 1 > CROWN_CAP){ treeCapCrown++; return; }
-      float *d = &crownVerts[nCrownVerts * CROWN_FLOATS];
+    // Eine Instanz pro Karte (Runde 28). Vorher 6 Eckpunkt-Instanzen a 13 Float
+    // = 312 Byte pro Karte; die Ecke kommt jetzt aus einem statischen 6-Vertex-
+    // Quad im Vertex-Array. Ersparnis: 170 MB -> 24 MB Puffer, ~6x weniger
+    // Upload und Build-Daten.
+    if(nCrownVerts + 1 > CROWN_CAP){ treeCapCrown++; return; }
+    { float *d = &crownVerts[nCrownVerts * CROWN_FLOATS];
       d[0] = cc; d[1] = ccy2; d[2] = ccz2;
-      d[3] = corners[c][0]; d[4] = corners[c][1];
-      d[5] = qsize; d[6] = qrot; d[7] = qseed; d[8] = (float)variant;
-      d[9] = gLodR; d[10] = ezLeafR; d[11] = ezLeafG; d[12] = ezLeafB;
-      nCrownVerts++;
-    }
+      d[3] = qsize; d[4] = qrot; d[5] = qseed; d[6] = (float)variant;
+      d[7] = gLodR; d[8] = ezLeafR; d[9] = ezLeafG; d[10] = ezLeafB;
+      nCrownVerts++; }
   }
 }
 
@@ -290,25 +287,18 @@ static void emit_crown_quads(float bx, float bz, float s, float hf,
 // Atlas ein ganzer Blattbuschel gemalt, das ist bei uns die Blattreben-Stufe.
 static void emit_sprig_quads(float seed, int want){
   int variant = (int)(fabsf(seed) * 7.31f) % 4;
-  static const float corners[6][2] = {
-    {-0.5f,-0.5f},{0.5f,-0.5f},{-0.5f,0.5f},
-    { 0.5f,-0.5f},{ 0.5f, 0.5f},{-0.5f, 0.5f}
-  };
   if(ezNSprig <= 0 || want <= 0) return;
   int stride = ezNSprig / want; if(stride < 1) stride = 1;
   for(int q = 0; q < ezNSprig && want > 0; q += stride, want--){
     float h3 = TH(97 + q * 3), h4 = TH(98 + q * 3);
     float qrot  = h3 * 6.283f;
     float qseed = h4 * 13.7f + q * 0.37f;
-    for(int c = 0; c < 6; c++){
-      if(nCrownVerts + 1 > CROWN_CAP){ treeCapCrown++; return; }
-      float *d = &crownVerts[nCrownVerts * CROWN_FLOATS];
+    if(nCrownVerts + 1 > CROWN_CAP){ treeCapCrown++; return; }
+    { float *d = &crownVerts[nCrownVerts * CROWN_FLOATS];
       d[0] = ezSx[q]; d[1] = ezSy[q]; d[2] = ezSz[q];
-      d[3] = corners[c][0]; d[4] = corners[c][1];
-      d[5] = ezSsize[q]; d[6] = qrot; d[7] = qseed; d[8] = (float)variant;
-      d[9] = gLodR; d[10] = ezLeafR; d[11] = ezLeafG; d[12] = ezLeafB;
-      nCrownVerts++;
-    }
+      d[3] = ezSsize[q]; d[4] = qrot; d[5] = qseed; d[6] = (float)variant;
+      d[7] = gLodR; d[8] = ezLeafR; d[9] = ezLeafG; d[10] = ezLeafB;
+      nCrownVerts++; }
   }
 }
 
@@ -1191,7 +1181,7 @@ int trees_build_step(int maxTrees){
     //   tier 2: bis  8 016 Vertices, 1 230 Karten, 12 300 Instanzen
     //   tier 0: bis  2 988 Vertices,  615 Karten
     int needV = (tier >= 3) ? 31000 : (tier == 2 ? 8500 : 3200);
-    int needC = (tier >= 1) ? 8000 : 4200;
+    int needC = (tier >= 1) ? 1400 : 700;   // Karten (vor der Instanzierung 8000/4200 Eckpunkte)
     int needL = ezWantLeaves ? 12500 : 0;
     if(nTreeVerts + needV > TREE_VERT_CAP || nCrownVerts + needC > CROWN_CAP ||
        nLeafInst + needL > LEAF_CAP){ treeSkipped++; continue; }

@@ -36,7 +36,7 @@ float c_terrainH(float px, float py);
 // lodR = Radius, ab dem diese Karte die Einzelblaetter dieses Baumes eretzt
 // (blendet um lodR +/- 10 % ein). col = Blattfarbe DIESES Baumes: der Atlas ist
 // farbneutral aufgenommen, die Farbe kommt pro Instanz dazu.
-#define CROWN_FLOATS 13
+#define CROWN_FLOATS 11   // pro KARTE (instanziert): center(3) size rot seed variant lodR col(3)
 // Einzelblaetter an nahen Baeumen (leaf.vert): iPos(3), iData(4: size, rotY,
 // tilt, aspect), iCol(3), iLodR(1). Grundblatt ist ein statisches Quad.
 // iLodR = Radius, ab dem die Karten dieses Baumes die Blaetter uebernehmen
@@ -60,7 +60,7 @@ float c_terrainH(float px, float py);
                                 // Doppel-Puffer (Build-Thread) = 2x diese Groesse.
 #endif
 #ifndef CROWN_CAP
-#define CROWN_CAP     4000000   // gemessen 3,28 Mio Eckpunkt-Instanzen (= 546k Karten)
+#define CROWN_CAP     700000    // Karten (instanziert); gemessen 546k
 #endif
 #define WIRE_CAP      90000
 

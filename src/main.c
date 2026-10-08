@@ -509,7 +509,7 @@ static void ensure_fbo(int w, int h) {
 static GLuint vboTree[2] = {0,0}, vaoTree[2] = {0,0};
 static GLuint vboCrown[2] = {0,0}, vaoCrown[2] = {0,0};
 static GLuint vboLeaf[2] = {0,0}, vaoLeaf[2] = {0,0};
-static GLuint vboLeafBase = 0;
+static GLuint vboLeafBase = 0, vboCrownQuad = 0;
 static int drawSet = 0;
 static GLuint vboGrass = 0, vaoGrass = 0, vboGrassBase = 0;
 static GLuint vboWire = 0, vaoWire = 0;
@@ -527,6 +527,13 @@ static const float grassBase[5][2] = {
   {0.0f, -0.5f}, {0.0f, 0.5f}, {0.55f, -0.34f}, {0.55f, 0.34f}, {1.0f, 0.0f}
 };
 // Grundblatt (leaf.vert): aBase = (t laengs, w quer), zwei Dreiecke
+// Statiches Quad (2 Dreiecke) fuer die instanzierten Kronen-Karten: die Ecke ist
+// identisch fuer alle Karten, deshalb liegt sie einmal im VBO statt sechsmal pro
+// Karte in der Instanz (Runde 28).
+static const float crownQuad[6][2] = {
+  {-0.5f,-0.5f},{0.5f,-0.5f},{-0.5f,0.5f},
+  { 0.5f,-0.5f},{ 0.5f, 0.5f},{-0.5f,0.5f}
+};
 static const float leafBase[6][2] = {
   {-0.5f,-0.5f},{0.5f,-0.5f},{-0.5f,0.5f},{0.5f,-0.5f},{0.5f,0.5f},{-0.5f,0.5f}
 };
@@ -833,6 +840,9 @@ static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: t
     p_glGenBuffers(1, &vboLeaf[k]);
   }
   p_glGenBuffers(1, &vboLeafBase);
+  p_glGenBuffers(1, &vboCrownQuad);
+  p_glBindBuffer(GL_ARRAY_BUFFER, vboCrownQuad);
+  p_glBufferData(GL_ARRAY_BUFFER, sizeof crownQuad, crownQuad, GL_STATIC_DRAW);
   p_glGenBuffers(1, &vboGrass);
   p_glGenBuffers(1, &vboWire);
   p_glGenBuffers(1, &vboGrassBase);
@@ -856,19 +866,27 @@ static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: t
   p_glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, TREE_FLOATS * 4, (const void *)36);  // sway,u,v
 
   // Kronen-Billboards: aCenter(3) aOff(2) aData(4)
+  // Kronen-Karten: 6 Eckpunkte aus vboCrownQuad (divisor 0) + 1 Instanz pro
+  // Karte: aCenter(3) aData(4)=size,rot,seed,variant  iLodR(1) iCol(3)
   p_glGenVertexArrays(1, &vaoCrown[k]);
   p_glBindVertexArray(vaoCrown[k]);
+  p_glBindBuffer(GL_ARRAY_BUFFER, vboCrownQuad);
+  p_glEnableVertexAttribArray(1);
+  p_glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 8, (const void *)0);
+  p_glVertexAttribDivisor(1, 0);
   p_glBindBuffer(GL_ARRAY_BUFFER, vboCrown[k]);
   p_glEnableVertexAttribArray(0);
   p_glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, CROWN_FLOATS * 4, (const void *)0);
-  p_glEnableVertexAttribArray(1);
-  p_glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, CROWN_FLOATS * 4, (const void *)12);
+  p_glVertexAttribDivisor(0, 1);
   p_glEnableVertexAttribArray(2);
-  p_glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, CROWN_FLOATS * 4, (const void *)20);
+  p_glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, CROWN_FLOATS * 4, (const void *)12);
+  p_glVertexAttribDivisor(2, 1);
   p_glEnableVertexAttribArray(3);
-  p_glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, CROWN_FLOATS * 4, (const void *)36); // lodR
+  p_glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, CROWN_FLOATS * 4, (const void *)28); // lodR
+  p_glVertexAttribDivisor(3, 1);
   p_glEnableVertexAttribArray(4);
-  p_glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, CROWN_FLOATS * 4, (const void *)40); // Blattfarbe
+  p_glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, CROWN_FLOATS * 4, (const void *)32); // Blattfarbe
+  p_glVertexAttribDivisor(4, 1);
 
   // Einzelblaetter naher Baeume: aBase(2) statisch + iPos(3) iData(4) iCol(3) [instanzen]
   p_glGenVertexArrays(1, &vaoLeaf[k]);
@@ -1997,7 +2015,7 @@ int main(int argc, char **argv) {
           trees_build_request(tCX, tCZ, camPos);   // Worker baut im Hintergrund
         }
         fflush(stdout);
-        printf("Baeume um (%.0f,%.0f): %d Baeume, %d Vertices, %d Canopy-Quads, %d Einzelblaetter\n", tCX, tCZ, nTreesD, nTreeVertsD, nCrownVertsD / 6, nLeafInstD);
+        printf("Baeume um (%.0f,%.0f): %d Baeume, %d Vertices, %d Canopy-Quads, %d Einzelblaetter\n", tCX, tCZ, nTreesD, nTreeVertsD, nCrownVertsD, nLeafInstD);
         printf("  Caps: Geruest %d/%d  Karten %d/%d  Blaetter %d/%d   TREffer: Geruest %d Karten %d Blaetter %d\n",
                nTreeVertsD, TREE_VERT_CAP, nCrownVertsD, CROWN_CAP, nLeafInstD, LEAF_CAP,
                treeCapTree, treeCapCrown, treeCapLeaf);
@@ -2214,7 +2232,7 @@ int main(int argc, char **argv) {
         applyShadow(&slCrown, 0);
         if(locCFade >= 0) p_glUniform1f(locCFade, 1.0f);
         p_glBindVertexArray(vaoCrown[drawSet]);
-        p_glDrawArrays(GL_TRIANGLES, 0, nCrownVertsCur);
+        p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nCrownVertsCur);
       }
       if(shadowLeafOn && nLeafInstCur > 0 && !envNoLeaf){
         p_glUseProgram(progLeaf);
@@ -2410,11 +2428,11 @@ int main(int argc, char **argv) {
       p_glUniform1f(locCTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
       if(locCFade >= 0) p_glUniform1f(locCFade, treeFadeNew);
       p_glBindVertexArray(vaoCrown[drawSet]);
-      p_glDrawArrays(GL_TRIANGLES, 0, nCrownVertsCur);
+      p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nCrownVertsCur);
       if(treeFadeNew < 1.0f && treeOldSet >= 0 && nCrownVertsOld > 0){
         if(locCFade >= 0) p_glUniform1f(locCFade, 1.0f - treeFadeNew);
         p_glBindVertexArray(vaoCrown[treeOldSet]);
-        p_glDrawArrays(GL_TRIANGLES, 0, nCrownVertsOld);
+        p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nCrownVertsOld);
       }
       if(locCFade >= 0) p_glUniform1f(locCFade, 1.0f);
       p_glDisable(GL_BLEND);
@@ -2484,7 +2502,7 @@ int main(int argc, char **argv) {
     snprintf(hud1, sizeof hud1, "FPS %3d %dx%d RES %s CAM %s AA %s TREES %d QUADS %d GRASS %d",
              (int)(fpsEMA + 0.5), winW, winH, sc, flyMode ? "FLY" : "ORB",
              useMSAA ? (msaaSamples == 8 ? "8x" : "4x") : "OFF",
-             nTreesD, nCrownVertsCur / 6, nGrass);
+             nTreesD, nCrownVertsCur, nGrass);
     snprintf(hud2, sizeof hud2, "D %.1fx H %.1fx MD %d.%dm%s%s%s%s",
              grassDensityScale, grassHeightScale, (int)grassMaxDist, (int)(grassMaxDist * 10) % 10,
              grassFrozen ? " FRZ" : "", grassOnly ? " NUR-GRAS" : "",
