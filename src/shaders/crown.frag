@@ -102,7 +102,17 @@ void main(){
     // Mip-Kette liegt jetzt PRO KACHEL vor (build_tile_mips in main.c); die
     // alte Begrenzung auf lod 0/1 war nur noetig, weil die Treiber-Mip-Kette
     // Nachbar-Kacheln vermischt haette.
-    float clod = min(lod, 3.0);
+    // Hoehere Stufen als 2 verteilen die Kachel-Alpha ueber IHRE ganze Flaeche
+    // (gemessen: Deckung 20,9 %, Alpha-Mittel 52 — bei lod 3 ist die halbe
+    // Kachel > 0.02). Zusammen mit dem Alpha-1-Ausgabe unten war das Ergebnis
+    // ein undurchsichtiges Rechteck ums Ganzbaum-Billboard (Nutzerbefund
+    // "schwarz wo transparent sein sollte", Bild /tmp/q_100_bb.png).
+    // Der Aufloesungsbedarf wird in ATLAS-Texeln gemessen: der Karten-Atlas ist
+    // 2048 px gross (lod oben), der Impostor-Atlas nur 1024. Mit 2048 rechnete
+    // die Kachel eine Stufe zu scharf gefiltert (Beispiel 100 m, Quad 110 px:
+    // richtig lod 1,2, berechnet 2,2) -> die Alpha ueber die ganze Kachel
+    // verschmiert.
+    float clod = clamp(log2(foot * 1024.0), 0.0, 2.0);
     // Einzug um eine HALBE TEXEL DER KACHEL (128 px), nicht des ganzen Atlas:
     // der alte Wert (0.5/1024) war 8x zu klein -> LINEAR mischt an der Kachel-
     // kante die Nachbarkachel rein, und die ist am Rand schwarz (gemessen: 64
@@ -145,6 +155,10 @@ void main(){
   // Depth-only-Nachpass: Schwelle am SCHICHTGEWICHT vFade, nicht am pro-Pixel
   // cov — sonst kippt die Tiefenwrite mitten in der Blende hart um (Sprung).
   if(uDepthOnly > 0.5){ if(vFade < 0.5 || a < 0.5) discard; }
+  // Schwelle schichtabhaengig: die Karten sind duenn gesäte Buschel und
+  // brauchen eine niedrige Schwelle; die Ganzbaum-Kachel hat eine grosse
+  // zusammenhaengende Flaeche, bei der ein niedriger Wert die ganze Kachel
+  // durchlaesst (Rechteck).
   else if(cov < 0.02) discard;
   // Masken-Diagnose erst nach dem Discard: sonst zaehlt sie auch die leeren
   // areas der Kachel und die Farbmessung mittelt den Hintergrund mit.
@@ -154,6 +168,11 @@ void main(){
   // Transluzenz, warmes Ambient). Vorher eigene Kugel-Schattierung mit 0,45
   // Diffus-Anteil -> Karten deutlich heller/grauer als das Nah-LOD (gemessen am
   // selben Baum: 60 m Karten (128,148,116) gegen 16 m Einzelblaetter (59,99,39)).
+  // Ganzbaum-Kachel: sie enthaelt das bereits beleuchtete, getonempte Bild des
+  // Baues (die Aufnahme-Paesse laufen durch dieselben Shader). Noch einmal
+  // Beleuchtung + Tonemapping + Gamma obendraefte machte daraus ein graues
+  // Rechteck (Bild /tmp/s_100.png).
+  if(vCrown > 0.5){ O = vec4(tx.rgb, cov); return; }
   vec3 nrm = normalize(vNrm + (vRight * vUV.x + vUp * vUV.y) * 0.55);
   float sh = shadowAt(vPos, nrm);
   float dif = abs(dot(nrm, SUN)) * mix(0.18, 1.0, sh) * 0.7 + 0.3;
@@ -163,7 +182,7 @@ void main(){
   // kurzen Stielen) — dieselbe Silhouette wie das Nah-LOD. Die Farbe kommt pro
   // Baum aus der Instanz, vorher steckte eine zufaellige Fremdfarbe in der Textur.
   vec3 albedo = tx.rgb * vCol;
-  if(uCrownMask > 1.5){ O = vec4(albedo, 1.0); return; }   // DIAGNOSE: nur Albedo
+  if(uCrownMask > 1.5){ float g = texture(uFoliage, vec2(0.0625,0.0625)).r; O = vec4(g,g,g,1.0); return; }   // DIAGNOSE: feste Atlasstelle Kachel 0
   if(uCrownMask > 2.5){   // DIAGNOSE: R = Sonne, G = Ambient, B = Transluzenz
     O = vec4(dif, amb.g, thru, 1.0);
     return;
@@ -182,5 +201,8 @@ void main(){
   // -> die Kachel hatte harte Kanten (gemessen: 211 161 Texel Alpha 255, 837 282
   // Alpha 0, nur 133 dazwischen). Ferne Billboards aliasen damit.
   if(uImpostor > 0.5){ O = vec4(col, cov); return; }
+  // Die Ganzbaum-Kachel kriegt IMMER echtes Alpha: ihre Silhouette lebt von der
+  // Textur-Alpha, ein Alpha von 1 macht bei gefilterter Kachel ein Rechteck.
+  if(vCrown > 0.5){ O = vec4(col, cov); return; }
   O = vec4(col, vFade >= 0.999 ? 1.0 : cov);
 }

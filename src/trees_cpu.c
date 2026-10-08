@@ -46,7 +46,7 @@ static float gLodR = 30.0f;
 static float gTreeDist = 0.0f, gBranchCut = 0.0f;   // Abstand zum Baum / Ast-Cut
 static float gMeshFineCut = 0.0f;   // bis hierhin volle Netz-Dichte (Regelwerk C)
 static float gLodR2 = 0.0f;
-static float gBbSize = 0.0f, gBbCen[3] = {0,0,0};   // BBox des letzten Baums
+static float gBbSize = 0.0f, gBbAsp = 1.0f, gBbCen[3] = {0,0,0};   // BBox des letzten Baums
 static float ezLszMax = 0.0f;  // groesster Blattgrundradius dieses Baums
 static int   gBbWant = 0;      // Billboard fuer diesen Baum wirklich zeichnen
                         // sitzt pro Karte in der Instanz, damit der Uebergang
@@ -268,7 +268,12 @@ int treeCardDivN = 3; float treeCardScaleN = 2.00f;    // DEMO_CARDT2 "<div> <sc
 int treeT2Stride = 3, treeT2Gnum = 3, treeT2Gden = 4;
 int treeDowngraded = 0;   // Baeume, die wegen Budget auf die groebste Stufe fielen
 int treeBB0Cards = 0;    // Zusatzkarten unter dem tier-0-Billboard (DEMO_BB0CARDS)
-int treeBillboard0 = 1;      // DEMO_NOBB0=1: tier 0 wieder mit Einzelkarten
+int treeBillboard0 = 0;      // 0 = ferne Baeume mit Karten (Standard), 1 =
+                             // Ganzbaum-Impostor. Der Impostor-Pfad malt zurzeit
+                             // eine schwarze Flaeche (Kachel liefert RGB 0 und
+                             // Alpha >= 0,15 ueber ihre ganze Flaeche; gemessen
+                             // mit fest rot/grau ausgegebenem Kachelzweig,
+                             // /tmp/d_rgb.png) -> bis das geklaert ist aus.
 // Blattfarbe des gerade gebauten Baumes. Der EZ-Generator wuerfelte sie vorher
 // pro Terminalast (0,10..0,26 / 0,26..0,52 / 0,05..0,15) — deshalb sahen die
 // Distanz-Karten nach einem ANDEREN Baum aus als das Nah-LOD. Jetzt: eine Farbe
@@ -353,26 +358,34 @@ static void emit_crown_billboard(float seed, float bx, float by, float bz, float
   if(bz < mn[2]) mn[2] = bz; if(bz > mx[2]) mx[2] = bz;
   if(by < mn[1]) mn[1] = by;
   float top = by + treeH; if(top > mx[1]) mx[1] = top;
-  float size = mx[0] - mn[0];
-  if(mx[2] - mn[2] > size) size = mx[2] - mn[2];
-  if(mx[1] - mn[1] > size) size = mx[1] - mn[1];
-  if(size < 0.5f) return;
+  // Breite und HOEHE getrennt. Ein quadratischer Quad (size = max(dx,dy,dz))
+  // rahmt einen schmalen Baum viel zu gross: gemessen fuellte die Kachel nur
+  // 20,9 % (Alpha-Mittel 52/255). Bei gefilterter Kachel mittelt die Alpha ueber
+  // die ganze Flaeche -> sichtbares Rechteck ums Ganzbaum-Bild (Nutzerbefund
+  // "schwarz wo transparent sein sollte"; Bild /tmp/q_100_bb.png).
+  float w = mx[0] - mn[0];
+  if(mx[2] - mn[2] > w) w = mx[2] - mn[2];
+  float h = mx[1] - mn[1];
+  if(w < 0.5f) w = 0.5f;
+  if(h < 0.5f) h = 0.5f;
   // 1.15: der Quad ist etwas grosser als der Baum. Ist er exakt so gross,
   // beruehrt die Krone den Quad-Rand und man sieht gegen den Himmel eine gerade
   // Kante (gemessen: 14 von 64 Kacheln randberuehrend).
-  size *= 1.15f;
+  w *= 1.15f; h *= 1.15f;
   // BBox UNABHAENGIG davon setzen, ob dieser Baum ein Billboard bekommt: die
   // Aufnahme-Rahmung braucht sie fuer jeden Repraesentanten. Tier-3-Baeume
   // zeichnen selbst kein Billboard — ohne das fiel die Rahmung auf 0,75*H
   // zurueck und schnitt die Krone ab (Nutzer: "viele Quads nach oben abgeschnitten").
-  gBbSize = size;
+  gBbSize = w; gBbAsp = h / w;
   gBbCen[0] = (mn[0] + mx[0]) * 0.5f; gBbCen[1] = (mn[1] + mx[1]) * 0.5f;
   gBbCen[2] = (mn[2] + mx[2]) * 0.5f;
   if(!gBbWant) return;         // Rahmung ist gesetzt, Quad aber nicht gewollt
   if(nCrownVerts + 1 > CROWN_CAP){ treeCapCrown++; return; }
   float *d = &crownVerts[nCrownVerts * CROWN_FLOATS];
   d[0] = (mn[0] + mx[0]) * 0.5f; d[1] = (mn[1] + mx[1]) * 0.5f; d[2] = (mn[2] + mx[2]) * 0.5f;
-  d[3] = size; d[4] = 0.0f; d[5] = seed;
+  d[3] = w; d[4] = gBbAsp; d[5] = seed;   // d[4] = Seitenverhoehung h/w
+                                           // (Rotation ist beim Billboard
+                                           // bedeutungslos, der Slot ist frei)
   d[6] = 4.0f + (float)ezBucket;   // 4..67 = Impostor-Kachel (8x8-Atlas)
   d[7] = gLodR; d[8] = ezLeafR; d[9] = ezLeafG; d[10] = ezLeafB; d[11] = gLodR2;
   nCrownVerts++;
@@ -1404,6 +1417,7 @@ int trees_build_step(int maxTrees){
       ir->nTree = impNTree[ezBucket];
       ir->cx = cand[i].p[0]; ir->cy = cand[i].p[1]; ir->cz = cand[i].p[2];
       ir->rad = (gBbSize > 0.5f ? gBbSize : H) * 0.5f;
+      ir->bbAsp = (gBbAsp > 0.05f) ? gBbAsp : 1.0f;
       ir->hasBb = (gBbSize > 0.5f) ? 1 : 0;
       if(ir->hasBb){ ir->cx = gBbCen[0]; ir->cy = gBbCen[1]; ir->cz = gBbCen[2]; }
     }

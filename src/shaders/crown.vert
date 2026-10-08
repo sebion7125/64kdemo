@@ -18,6 +18,7 @@ uniform float uTreeFade = 1.0; // Ueberblendung beim LOD-Wechsel (Runde 27):
 uniform float uTreeOld = 0.0;    // 1 = dieser Satz blendet AUS (der alte)
 uniform float uCardsOn = 1.0;      // Schicht-Schalter (Tasten 4/5/6/7)
 uniform float uBillboardOn = 1.0;
+uniform float uBBPresent = 1.0;   // liegen Ganzbaum-Kacheln im Puffer?
 uniform vec3 uImpJit = vec3(0.0);   // Aufnahme: versetztes Wiederholen der Karten
 uniform float uImpostor = 0.0;   // 1 = Aufnahme in die Impostor-Textur (keine
                                  // Entfernungsblenden, kein Wind, feste Kamera)
@@ -58,7 +59,10 @@ void main(){
   // Quad in der Kameraebene, um rotY (aData.y) gedreht
   float cr = cos(aData.y), sr = sin(aData.y);
   vec2 ro = vec2(aOff.x * cr - aOff.y * sr, aOff.x * sr + aOff.y * cr);
-  vec3 p = aCenter + right * (ro.x * aData.x) + up * (ro.y * aData.x);
+  // Das Ganzbaum-Quad ist nicht quadratisch: aData.y traegt bei ihm die
+  // Seitenverhaelung h/w (bei Karten ist der Slot die Rotation, dort 1,0).
+  float qasp = (aData.w >= 4.0) ? aData.y : 1.0;
+  vec3 p = aCenter + right * (ro.x * aData.x) + up * (ro.y * aData.x * qasp);
   // Ganzbaum-Billboard minimal Richtung Kamera schieben: das Geruest desselben
   // Baums blendet im selben Band aus, schreibt aber Tiefe — ohne diesen Offset
   // faede das Billboard hinter dem halb durchsichtigen Stamm weg.
@@ -104,7 +108,10 @@ void main(){
     // Karten aus 1.00..1.15 R2, Billboard ein 0.85..1.00 R2 — dasselbe
     // Ueberlappungsprinzip wie bei Blaettern/Karten: nie zwei halbe Schichten
     if(aData.w >= 4.0) near *= smoothstep(iLodR2 * 0.90, iLodR2 * 1.10, d);
-    else               near *= 1.0 - smoothstep(iLodR2 * 0.90, iLodR2 * 1.10, d);
+    // Ohne Kacheln im Puffer duerfen die Karten NICHT bei R2 ausblenden — sonst
+    // verschwindet der Baum ab ~110 m ganz (gemessen: bei DEMO_ONE + 120 m war
+    // nach dem Abschalten des Impostors nichts mehr zu sehen).
+    else if(uBBPresent > 0.5) near *= 1.0 - smoothstep(iLodR2 * 0.90, iLodR2 * 1.10, d);
     // Schicht einzeln abschaltbar: near = 0 -> vFade = 0 -> Alpha 0 -> discard
     near *= (aData.w >= 4.0) ? uBillboardOn : uCardsOn;
   }

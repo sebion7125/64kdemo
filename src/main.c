@@ -585,6 +585,9 @@ static int    impCards = 0;          // DEMO_IMPCARDS=1: Karten mit in die Aufna
 // Identifizieren der Stufen im laufenden Bild.
 static int    layLeaf = 1, layCard = 1, layBB = 1;
 static int    impNext = 0, impOn = 1;
+static void build_tile_mips(GLuint tex, int size, int tilepx, int cols);
+static void dump_tex_mip(GLuint tex, int level, int size, const char *path);
+
 static void build_crown_tiles(void){
   p_glGenTextures(1, &crnTex);
   p_glBindTexture(GL_TEXTURE_2D, crnTex);
@@ -592,6 +595,9 @@ static void build_crown_tiles(void){
   // Kacheln fuellen sich erst, wenn der zugehoerige Baum im Puffer liegt).
   p_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, IMP_COLS * IMP_TILEPX,
                  IMP_COLS * IMP_TILEPX, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+  // Leere Kette sofort anlegen: ohne Mip-Kette ist textureLod auf der Kachel
+  // undefiniert (Mesa: schwarz), und die Kacheln fuellen sich erst spaeter.
+  build_tile_mips(crnTex, IMP_COLS * IMP_TILEPX, IMP_TILEPX, IMP_COLS);
   p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -646,41 +652,55 @@ static void fill_rgb(GLuint tex, int size, int tilepx, int cols){
 // sieht aus wie ein Toon Shader"). Beim schnellen Bewegen verschwand es, weil
 // dann noch der alte Satz mit Einzelblaettern gezeichnet wurde.
 static void build_tile_mips(GLuint tex, int size, int tilepx, int cols){
-  int maxlvl = 0; while((tilepx >> (maxlvl + 1)) >= 1 && (size >> (maxlvl + 1)) >= cols) maxlvl++;
   unsigned char *cur = (unsigned char *)malloc((size_t)size * size * 4);
   if(!cur) return;
   p_glBindTexture(GL_TEXTURE_2D, tex);
   p_glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, cur);
-  int ss = size;
-  for(int L = 1; L <= maxlvl; L++){
-    int ns = ss / 2, ts = tilepx >> L;
-    if(ts < 1 || ns < cols) break;
+  // Die Kette muss bis 1x1 gefuehrt werden. Eine STUFENWEISE abgebrochene Kette
+  // macht die Textur mip-inkomplett, und Sampling mit LINEAR_MIPMAP_LINEAR
+  // liefert auf inkompletten Texturen (0,0,0,0) — gemessen: Karten-Atlas enthielt
+  // RGB 241, der Kronen-Shader bekam trotzdem 0 -> schwarze Baeume (Nutzer:
+  // "toon shader", "schwarz wo transparent sein sollte").
+  int ss = size, pts = tilepx;
+  for(int L = 1; ss > 1; L++){
+    int ns = ss / 2;
+    int ts = pts / 2;                       // Kachelgroesse in dieser Stufe
     unsigned char *nxt = (unsigned char *)malloc((size_t)ns * ns * 4);
     if(!nxt) break;
-    // Quell-Kachelgroesse ist die der VORSTUFE (tilepx >> (L-1)), nicht die
-    // urspruengliche — sonst landet die Quelle ausserhalb des Puffers (gemessen:
-    // Speicherzugriffsfehler im ersten Lauf dieser Funktion).
-    int pss = ss, pts = tilepx >> (L - 1);
-    for(int t = 0; t < cols * cols; t++){
-      int cx0 = (t % cols) * ts, cy0 = (t / cols) * ts;
-      int ox0 = (t % cols) * pts, oy0 = (t / cols) * pts;
-      for(int y = 0; y < ts; y++)
-        for(int x = 0; x < ts; x++){
-          unsigned s[4] = {0,0,0,0};
+    int nt = (ts >= 1) ? cols : 1;          // ab Kachelgroesse 1 wird der ganze
+    int cs = (ts >= 1) ? cols : 1;          // Atlas gefaltet (Stufen < 1 Texel
+    for(int t = 0; t < nt * cs; t++){       // pro Kachel = nie erreicht)
+      int cx0 = (t % cs) * ts, cy0 = (t / cs) * ts;
+      int ox0 = (t % cs) * pts, oy0 = (t / cs) * pts;
+      int w = (ts >= 1) ? ts : ns, h = (ts >= 1) ? ts : ns;
+      for(int y = 0; y < h; y++)
+        for(int x = 0; x < w; x++){
+          unsigned sm[4] = {0,0,0,0};
           for(int dy = 0; dy < 2; dy++)
             for(int dx = 0; dx < 2; dx++){
-              unsigned char *q = cur + ((size_t)(oy0 + 2*y + dy) * pss + ox0 + 2*x + dx) * 4;
-              for(int k = 0; k < 4; k++) s[k] += q[k];
+              unsigned char *q = cur + ((size_t)(oy0 + 2*y + dy) * ss + ox0 + 2*x + dx) * 4;
+              for(int k = 0; k < 4; k++) sm[k] += q[k];
             }
           unsigned char *q = nxt + ((size_t)(cy0 + y) * ns + cx0 + x) * 4;
-          for(int k = 0; k < 4; k++) q[k] = (unsigned char)((s[k] + 2) / 4);
+          for(int k = 0; k < 4; k++) q[k] = (unsigned char)((sm[k] + 2) / 4);
         }
     }
     p_glTexImage2D(GL_TEXTURE_2D, L, GL_RGBA8, ns, ns, 0, GL_RGBA, GL_UNSIGNED_BYTE, nxt);
-    free(cur); cur = nxt; ss = ns;
+    free(cur); cur = nxt; ss = ns; pts = ts;
   }
   p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
   free(cur);
+}
+
+// DEBUG: eine Mip-Stufe als RGBA-Datei, damit die Kette pruefbar ist
+static void dump_tex_mip(GLuint tex, int level, int size, const char *path){
+  unsigned char *b = (unsigned char*)malloc((size_t)size * size * 4);
+  if(!b) return;
+  p_glBindTexture(GL_TEXTURE_2D, tex);
+  p_glGetTexImage(GL_TEXTURE_2D, level, GL_RGBA, GL_UNSIGNED_BYTE, b);
+  FILE *f = fopen(path, "wb");
+  if(f){ fwrite(b, 1, (size_t)size * size * 4, f); fclose(f); }
+  free(b);
 }
 
 static void soften_alpha(GLuint tex, int size, int tilepx, int cols){
@@ -752,6 +772,9 @@ static void impostor_fix(void){
   p_glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, A, A, GL_RGBA, GL_UNSIGNED_BYTE, buf);
   soften_alpha(crnTex, A, IMP_TILEPX, IMP_COLS);   // weiche Silhouette statt Saegezaehn
   build_tile_mips(crnTex, A, IMP_TILEPX, IMP_COLS);
+  if(getenv("DEMO_MIPDUMP")){
+    for(int L = 0; L <= 3; L++){ char nm[96]; snprintf(nm,sizeof nm,"/tmp/64kdemo_crn_mip%d.rgba",L); dump_tex_mip(crnTex, L, A >> L, nm); }
+  }
 }
 
 // FBO fuer die Kachel-Aufnahme (Farbe = crnTex, eigene Depth-Renderbuffer)
@@ -779,6 +802,7 @@ static void impostor_init(void){
 // Baum angesetzt. Wind auf Zeit 0, Entfernungsblenden aus (uImpostor).
 static void build_mvp(const float camPos[3], const float camTgt[3], int w, int h, float out[16]);
 static void ortho_mvp(const float cp[3], const float tg[3], float half, float out[16]);
+static void ortho_mvp2(const float cp[3], const float tg[3], float halfX, float halfY, float out[16]);
 struct ImpLoc {
   GLuint pTree, pCrown, pLeaf;
   GLint tMVP, tCam, tTime, tFade;
@@ -792,10 +816,12 @@ static void impostor_step(double budgetMs, int set, const struct ImpLoc *L){
     impOn = 0; return;      // ohne Basis-Instanz lassen sich Karten-Slices nicht zeichnen
   }
   double t0 = now_sec() * 1000.0;
+  int didThis = 0;
   p_glBindFramebuffer(GL_FRAMEBUFFER, impFbo);
   p_glEnable(GL_SCISSOR_TEST);
   while(impNext < IMP_TILES){
     int idx = impNext++;
+    didThis++;
     const struct ImpRep *ir = &treeImp[idx];
     if(!ir->valid) continue;
     int tx = (idx % IMP_COLS) * IMP_TILEPX, ty = (idx / IMP_COLS) * IMP_TILEPX;
@@ -821,14 +847,17 @@ static void impostor_step(double budgetMs, int set, const struct ImpLoc *L){
     // Aufnahmefenster = Quadgroesse (ir->rad = halbe Quadkante; der Rand von
     // 1.15 steckt im Quad selbst). Nur dann ist die Kachel 1:1 auf den Quad
     // abgebildet und der Baum behaelt seine echte Groesse im Bild.
+    // Aufnahmefenster in Breite und Hoehe getrennt, damit es zum nicht
+    // quadratischen Billboard-Quad passt (siehe emit_crown_billboard).
     float half = ir->hasBb ? ir->rad : ir->rad * 1.30f;
+    float halfY = half * ((ir->hasBb && ir->bbAsp > 0.05f) ? ir->bbAsp : 1.0f);
     // ortho_mvp legt das Tiefenfenster um die KAMERA (0 .. 2*half*1.4). Der
     // Abstand muss also in der Mitte liegen, sonst faellt der Baum hinter die
     // Far-Ebene (gemessen: bei 4x rad waren 48 von 64 Kacheln leer).
-    float dist = half * 1.4f;
+    float dist = (half > halfY ? half : halfY) * 1.4f;
     float eye[3] = { tgt[0] + dir[0] * dist, tgt[1] + dir[1] * dist, tgt[2] + dir[2] * dist };
     float mvp[16];
-    ortho_mvp(eye, tgt, half, mvp);
+    ortho_mvp2(eye, tgt, half, halfY, mvp);
     p_glEnable(GL_DEPTH_TEST);
     p_glUseProgram(L->pTree);
     p_glBindVertexArray(vaoTree[set]);
@@ -892,6 +921,16 @@ static void impostor_step(double budgetMs, int set, const struct ImpLoc *L){
     if(now_sec() * 1000.0 - t0 >= budgetMs) break;
   }
   if(impNext >= IMP_TILES) impostor_fix();   // Atlas nachbearbeiten, siehe dort
+  else if(didThis > 0){
+    // Kette nach JEDEM Slice neu bauen, nicht erst nach der letzten Kachel.
+    // Ohne Kette ist textureLod auf der Kachel undefiniert und der Treiber
+    // malt Schwarz: bei Landschaft (mehr Frames pro Aufnahme) war das eine
+    // schwarze Platte anstelle des Baums, und beim Laufen laufen die Aufnahmen
+    // alle 12 m Kameraweg neu -> der Fehler bleibt sichtbar.
+    const int A = IMP_COLS * IMP_TILEPX;
+    fill_rgb(crnTex, A, IMP_TILEPX, IMP_COLS);
+    build_tile_mips(crnTex, A, IMP_TILEPX, IMP_COLS);
+  }
   p_glUseProgram(L->pCrown);   // cImp gehoert zum Kronen-Programm; nach dem
                                // Blatt-Block waere das Leaf-Programm aktiv ->
                                // Uniform-Location fremden Programms = GL 0x502
@@ -919,8 +958,11 @@ static float  lightMVP[16];
 static int    shadowOn = 1, shadowLeafOn = 1, shadowSampleOn = 1, shadowForce = 0, shadowVis = 0;
 static float folPatch[FOLIAGE_CAP * LEAF_FLOATS];
 
-// Orthografische MVP (quadratischer Viewport), fuer die Atlas-Aufnahme
-static void ortho_mvp(const float cp[3], const float tg[3], float half, float out[16]){
+// Orthografische MVP, rechteckiges Fenster (halfX/halfY = halbe Ausdehnung in
+// der Bildebene). Der Viewport der Aufnahme ist quadratisch (Kachel 128x128),
+// das Fenster nicht — der Inhalt wird also auf die Kachel gestreckt, und der
+// Billboard-Quad streckt sie genauso zurueck (1:1).
+static void ortho_mvp2(const float cp[3], const float tg[3], float halfX, float halfY, float out[16]){
   float fx = tg[0] - cp[0], fy = tg[1] - cp[1], fz = tg[2] - cp[2];
   float fl = sqrtf(fx * fx + fy * fy + fz * fz); if(fl < 1e-6f) fl = 1e-6f;
   fx /= fl; fy /= fl; fz /= fl;
@@ -931,12 +973,17 @@ static void ortho_mvp(const float cp[3], const float tg[3], float half, float ou
   float dr = rx * cp[0] + ry * cp[1] + rz * cp[2];
   float du = ux * cp[0] + uy * cp[1] + uz * cp[2];
   float df = fx * cp[0] + fy * cp[1] + fz * cp[2];
-  const float dz = 2.0f * half * 1.4f;      // Tiefenbereich um die Krone
-  out[0] = rx / half; out[4] = ry / half; out[8]  = rz / half; out[12] = -dr / half;
-  out[1] = ux / half; out[5] = uy / half; out[9]  = uz / half; out[13] = -du / half;
+  const float dz = 2.0f * (halfX > halfY ? halfX : halfY) * 1.4f;
+  out[0] = rx / halfX; out[4] = ry / halfX; out[8]  = rz / halfX; out[12] = -dr / halfX;
+  out[1] = ux / halfY; out[5] = uy / halfY; out[9]  = uz / halfY; out[13] = -du / halfY;
   out[2] = 2.0f * fx / dz; out[6] = 2.0f * fy / dz; out[10] = 2.0f * fz / dz;
   out[14] = -2.0f * df / dz - 1.0f;
   out[3] = 0.0f; out[7] = 0.0f; out[11] = 0.0f; out[15] = 1.0f;
+}
+
+// Orthografische MVP (quadratischer Viewport), fuer die Atlas-Aufnahme
+static void ortho_mvp(const float cp[3], const float tg[3], float half, float out[16]){
+  ortho_mvp2(cp, tg, half, half, out);
 }
 
 typedef struct { GLint tex, mvp, on, px, bias; } ShadowLoc;
@@ -1073,6 +1120,9 @@ static void build_foliage_atlas(GLuint progLeaf){
   build_tile_mips(folTex, FOL_ATLAS, FOL_TILEPX, FOL_TILES); // textureLod braucht Mips
   // DEBUG (DEMO_FOLDUMP=1): Atlas als PPM — verifiziert, dass die Kacheln
   // wirklich Blattwerk enthalten und nicht leer sind.
+  if(getenv("DEMO_MIPDUMP")){
+    for(int L = 0; L <= 3; L++){ char nm[96]; snprintf(nm,sizeof nm,"/tmp/64kdemo_fol_mip%d.rgba",L); dump_tex_mip(folTex, L, FOL_ATLAS >> L, nm); }
+  }
   if(getenv("DEMO_FOLDUMP")){
     unsigned char *buf = (unsigned char*)malloc((size_t)FOL_ATLAS * FOL_ATLAS * 4);
     if(buf){
@@ -1943,6 +1993,8 @@ int main(int argc, char **argv) {
   GLint locCImp    = p_glGetUniformLocation(progCrown, "uImpostor");
   GLint locCCards  = p_glGetUniformLocation(progCrown, "uCardsOn");
   GLint locCBB     = p_glGetUniformLocation(progCrown, "uBillboardOn");
+  GLint locCBP     = p_glGetUniformLocation(progCrown, "uBBPresent");
+  GLint locTBB     = p_glGetUniformLocation(progTMesh, "uBBPresent");
   GLint locCOld    = p_glGetUniformLocation(progCrown, "uTreeOld");
   GLint locCLFace  = p_glGetUniformLocation(progCrown, "uLightFace");
   struct ImpLoc impLoc;
@@ -2812,6 +2864,9 @@ int main(int argc, char **argv) {
       // Schattenwurf unveraendert: das Geruest wirft auch dann, wenn es im Bild
       // schon vom Ganzbaum-Billboard verdeckt ist (Schatten-Thema zurueckgestellt)
       if(locTMeshF >= 0) p_glUniform1f(locTMeshF, 0.0f);
+      // Schattenwurf: Geruest immer voll (uBBPresent = 0 -> mf = 1), sonst
+      // fehlten die fernen Aeste in der Schattenkarte.
+      if(locTBB >= 0) p_glUniform1f(locTBB, 0.0f);
       applyShadow(&slTree, 0);
       if(locTFade >= 0) p_glUniform1f(locTFade, 1.0f);
       p_glBindVertexArray(vaoTree[drawSet]);
@@ -2980,6 +3035,7 @@ int main(int argc, char **argv) {
       p_glUniform1f(locTTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
       p_glUniform1f(locTMask, (float)dbgTreeMask);
       if(locTMeshF >= 0) p_glUniform1f(locTMeshF, 1.0f);
+      if(locTBB >= 0) p_glUniform1f(locTBB, (float)treeBillboard0);
       applyShadow(&slTree, (shadowThis && shadowSampleOn) ? (shadowForce ? 2 : 1) : 0);
       if(locTFade >= 0) p_glUniform1f(locTFade, 1.0f);
       p_glBindVertexArray(vaoTree[drawSet]);
@@ -3116,6 +3172,7 @@ int main(int argc, char **argv) {
       if(locCFade >= 0) p_glUniform1f(locCFade, treeFadeNew);
       if(locCCards >= 0) p_glUniform1f(locCCards, (float)layCard);
       if(locCBB >= 0) p_glUniform1f(locCBB, (float)layBB);
+      if(locCBP >= 0) p_glUniform1f(locCBP, (float)treeBillboard0);
       // Z-Buffer-Trick (Nutzer) waehrend einer Ueberblendung: gemischt wird ohne
       // Depth-Write (sonst verdeckt eine halb durchsichtige Karte den Hintergrund,
       // der erst danach kommt), und danach schreibt ein Farbmaske-aus-Pass die
