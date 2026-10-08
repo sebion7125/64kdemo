@@ -410,6 +410,8 @@ static int dbgTreeMask = 0;    // DEBUG (; bzw. DEMO_TREEMASK): Baum-Mesh als Ma
 static int envTreeJump = 0;
 static float envShotAt = -1.0f;
 static int   envExitWhenDone = 0;   // DEMO_EXIT=1: arbeiten, dann sofort beenden
+static float envShotTimes[16]; static int envShotN = 0, envShotIdx = 0;
+static int   envShotTimes_on = 0;
 static unsigned long frameNo = 0;
 //   DEMO_FREEZE=3.5  Shader-Zeit (Wind) auf 3,5 s einfrieren -> Screenshots sind
 //                      zwischen Laeufen Pixel fuer Pixel vergleichbar (noetig fuer
@@ -1827,6 +1829,11 @@ int main(int argc, char **argv) {
   if (getenv("DEMO_TREEMASK")) dbgTreeMask = 1;
   { const char *es = getenv("DEMO_SHOT"); if (es) envShotAt = (float)atof(es); }
   envExitWhenDone = getenv("DEMO_EXIT") ? 1 : 0;
+  { const char *ss = getenv("DEMO_SHOTS");
+    if(ss){ envShotTimes_on = 1;
+      const char *q = ss;
+      while(*q && envShotN < 16){ envShotTimes[envShotN++] = (float)atof(q);
+        while(*q && *q != ' ') q++; while(*q == ' ') q++; } } }
   envImpDump = getenv("DEMO_IMPDUMP") ? 1 : 0;
   impCards = getenv("DEMO_IMPCARDS") ? 1 : 0;
   { const char *ly = getenv("DEMO_LAYERS");   // z.B. "leaf", "card", "bb", "leaf,card"
@@ -2937,6 +2944,12 @@ int main(int argc, char **argv) {
         if(locLOld >= 0) p_glUniform1f(locLOld, 0.0f);
       }
       if(locLFade >= 0) p_glUniform1f(locLFade, 1.0f);
+      // DepthMask ZURUECKsetzen: bleibt sie bei laufender Ueberblendung auf
+      // FALSE, schreibt im NAechsten Frame der Raymarch-Terrain-Pass keine Tiefe
+      // mehr — alle Meshes testen gegen eine kaputte Tiefenbuffer (Nutzerbefund
+      // "Z-Buffer wird nicht geloescht", Bildschirm flackert).
+      p_glDepthMask(GL_TRUE);
+      p_glDisable(GL_BLEND);
     }
 
     // 3) MSAA-Resolve: fboMS -> fbo (Farbe + Tiefe in einem Blit, Single-Sample)
@@ -3063,6 +3076,15 @@ int main(int argc, char **argv) {
     if (!shotDone) { shotDone = 1; save_screenshot_ppm("/tmp/64kdemo_shot.ppm", winW, winH); }
     // DEBUG: geplanter Screenshot (DEMO_SHOT=<Sekunden>) — deterministisch, ohne
     // X-Tasten (synthetische Tasten kommen in der VM nicht immer an).
+    // DEMO_SHOTS="2 4 6 8": mehrere Screenshots in EINEM Lauf, nummeriert —
+    // fuer Fehler, die zeitlich auftreten (Flackern, Uebergangsphasen)
+    if(envShotTimes && envShotIdx < envShotN &&
+       now_sec() - loopT0 >= envShotTimes[envShotIdx]){
+      char nm[128];
+      snprintf(nm, sizeof nm, "/tmp/64kdemo_shot_%02d.ppm", envShotIdx);
+      save_screenshot_ppm(nm, winW, winH);
+      envShotIdx++;
+    }
     if (envShotAt >= 0.0f && now_sec() - loopT0 >= (double)envShotAt){
       double el = now_sec() - loopT0;
       envShotAt = -1.0f;

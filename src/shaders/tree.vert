@@ -49,7 +49,11 @@ void main(){
   // halben Hintergrund). Das Billboard ist bei R2 schon voll, das Geruest geht
   // bei R2 — beide gleichzeitig sieht man damit nicht (Nutzer).
   float md = length(p - uCamPos);
-  vMeshFade = uMeshFade * (1.0 - smoothstep(aR2 * 0.97, aR2 * 1.00, md));
-  if(vMeshFade <= 0.002){ gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  float mf = 1.0 - smoothstep(aR2 * 0.97, aR2 * 1.00, md);
+  vMeshFade = uMeshFade * mf;
+  // Cull am ENTFERNUNGS-Faktor, nicht am multiplizierten: im Schattenwurf-Pass
+  // ist uMeshFade = 0, das haette das ganze Geruest aus der Schattenkarte
+  // geworfen
+  if(mf <= 0.002){ gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   gl_Position = uMVP * vec4(p, 1.0);
 }
