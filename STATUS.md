@@ -2672,3 +2672,31 @@ Fehler dieser Runde: fuer Attribut 4 (R2 pro Geruest-Vertex) fehlte
 glEnableVertexAttribArray -> aR2 = Generic-Attribut 0 -> smoothstep(0,0,d)=1 ->
 komplettes Geruest weggecullt. Diagnose: Geruest zwangsweise rot gezeichnet,
 0 rote Pixel = gar keine Rasterisierung.
+
+## Ein-Baum-Szene DEMO_ONE (Runde 41) — Werkzeug gegen Rebuild-Sprünge
+
+`DEMO_ONE=1` zeichnet genau EINEN Baum (kein Terrain, kein Gras, kein Schilf)
+und die Kamera springt an den Fokusbaum (`DEMO_TREEDIST=<m>`). Pro Frame kommt
+eine CSV-Zeile:
+
+  EB,t,camX,camZ,dCam,dBuild,tier,R1,R2,Geruest,Karten,Blaetter,leafW,cardW,bbW,meshW,fade,set,up
+
+und bei jeder Änderung der Build-Entscheidung eine EB-STUFENWECHSEL-Zeile.
+
+Gemessener Ist-Zustand VOR der Korrektur (ein Baum, H ca. 6,8 m, R1 34 m, R2 101 m):
+
+| dCam | tier | Geruest | Karten | Blätter | mesh-Gewicht |
+|---|---|---|---|---|---|
+| 10–30 m | 3 | 9 993 | 841 | 12 600 | 1,00 |
+| 40–50 m | 2 | **4 191** | 841 | 12 600 | 1,00 |
+| 60–90 m | 2 | 4 191 | 841 | 0 | 1,00 |
+| 110 m | 0 | 3 753 | 841 | 0 | 0,01 |
+| 130 m | 0 | 45 | 841 | 0 | 0,00 |
+
+Der Netzwechsel bei 36 m (tier 3 -> 2) passierte bei Mesh-Gewicht 1,00 — die
+Mesh-Blende liegt erst bei 0,9..1,1 R2 (91..111 m). Ursache in ez_grow:
+`stride = tier>=3 ? 1 : ...` und `G`-Reduktion fuer tier 2/0. Jetzt
+entfernungsabhaengig (volles Netz bis 1,15 R2). Nachher: Geruest 9 993 bei
+10..110 m, erst bei 130 m (Gewicht 0) 45 Vertices.
+Kosten im Vollwald: Geruest 4 342 632 von 5 200 000, 0 Cap-Treffer,
+0 uebersprungene Baeume.

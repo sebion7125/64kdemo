@@ -426,6 +426,7 @@ static int envNoLeaf = 0;
 // Hintergrund. Messbank fuer LOD-Farben: ohne Landschaft mittelt kein
 // Hintergrund in die Baumfarbe hinein, und die Bilddifferenz ist exakt der Baum.
 static int envNoTerrain = 0;
+static int envOneTree = 0;      // DEMO_ONE=1: EIN Baum, sonst nichts, Protokoll pro Frame
 //   DEMO_LEAFMASK=1    Einzelblaetter in reinem Rot (Maske fuer Blatt-Messungen)
 static int envLeafMask = 0;
 static int envCrownMask = 0;
@@ -1962,6 +1963,14 @@ int main(int argc, char **argv) {
   // DEMO_ONETREE: ein einzelner Baum vor der Kamera, kein Gras — damit Baum-
   // Arbeit (Feinast, Blattbuschel, LOD-Stufen) schnell und vergleichbar testbar
   // ist. DEMO_TIER=0|2|3 erzwingt die Detailstufe dieses Baums.
+  // DEMO_ONE=1: EIN einziger Baum, kein Terrain, kein Gras, kein Schilf.
+  // Dazu pro Frame eine CSV-Zeile: was der Build entschieden hat (tier, R1, R2,
+  // Geometrie-Mengen) und welches Gewicht jede Schicht gerade hat. Damit ist
+  // der Uebergang Baum->Billboard und der Rebuild nachvollziehbar, ohne dass
+  // dafuer Screenshots noetig sind.
+  envOneTree = getenv("DEMO_ONE") ? atoi(getenv("DEMO_ONE")) : 0;
+  if(envOneTree){ treeOneShot = 1; envNoTerrain = 1; reedPassOn = 0; grassMaxDist = 0.5f;
+                   envTreeJump = 1; }   // Kamera an den Fokusbaum (DEMO_TREEDIST)
   { const char *eo = getenv("DEMO_ONETREE");
     if (eo && atoi(eo)) { treeOneShot = 1; envTreeJump = 1; grassMaxDist = 0.5f; } }
   { const char *et = getenv("DEMO_TIER"); if (et) treeForceTier = atoi(et); }
@@ -2856,6 +2865,32 @@ int main(int argc, char **argv) {
     p_glEnable(GL_DEPTH_TEST);
     p_glDepthFunc(GL_LESS);
 
+    // EIN-BAUM-PROTOKOLL (DEMO_ONE): Build-Entscheidung + Schichtgewichte.
+    if(envOneTree && treeDbgTier >= 0){
+      static float ss_prevTier = -1, ss_prevVerts = -1;
+      float dx = treeDbgX - camPos[0], dz = treeDbgZ - camPos[2];
+      float dCam = sqrtf(dx * dx + dz * dz);
+      float ss(float a, float b, float x){ float t = (x - a) / (b - a);
+        if(t < 0) t = 0; if(t > 1) t = 1; return t * t * (3 - 2 * t); }
+      float leafW = 1.0f - ss(treeDbgR1 * 0.90f, treeDbgR1 * 1.10f, dCam);
+      float cardW = ss(treeDbgR1 * 0.90f, treeDbgR1 * 1.10f, dCam) *
+                    (1.0f - ss(treeDbgR2 * 0.90f, treeDbgR2 * 1.10f, dCam));
+      float bbW   = ss(treeDbgR2 * 0.90f, treeDbgR2 * 1.10f, dCam);
+      float meshW = 1.0f - ss(treeDbgR2 * 0.90f, treeDbgR2 * 1.10f, dCam);
+      if((float)treeDbgTier != ss_prevTier || (float)treeDbgVerts != ss_prevVerts){
+        printf("EB-STUFENWECHSEL: tier %.0f -> %d, Geruest %.0f -> %d, Karten %d, "
+               "Blaetter %d (dBuild %.1f m, dCam %.1f m, Build %d)\n",
+               ss_prevTier, treeDbgTier, ss_prevVerts, treeDbgVerts, treeDbgCrown,
+               treeDbgLeaf, treeDbgDBuild, dCam, treeDbgBuilds);
+        fflush(stdout);
+        ss_prevTier = (float)treeDbgTier; ss_prevVerts = (float)treeDbgVerts;
+      }
+      printf("EB,%.2f,%.1f,%.1f,%.1f,%.1f,%d,%.0f,%.0f,%d,%d,%d,%.3f,%.3f,%.3f,%.3f,%.2f,%d,%d\n",
+             now_sec() - loopT0, camPos[0], camPos[2], dCam, treeDbgDBuild, treeDbgTier,
+             treeDbgR1, treeDbgR2, treeDbgVerts, treeDbgCrown, treeDbgLeaf,
+             leafW, cardW, bbW, meshW, treeFadeNew, drawSet, upActive ? 1 : 0);
+      fflush(stdout);
+    }
     // Baum-Mesh (Stamm/Aeste)
     if (!grassOnly) {
       p_glEnable(GL_BLEND);

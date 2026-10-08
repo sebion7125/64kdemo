@@ -112,7 +112,10 @@ int  trees_build_busy(void);
 void trees_build_finished_snapshot(float **tv, float **cv, float **lv,
                                    int *ntv, int *ncv, int *nli, int *ntrees);
 int  trees_thread_start(void);
-extern int treeBuildRange;   // Zellen-Radius, in dem Baeume gebaut werden
+// Ein-Baum-Szene (DEMO_ONE): was der Build fuer DEN einen Baum entschieden hat
+extern int   treeDbgTier, treeDbgVerts, treeDbgCrown, treeDbgLeaf, treeDbgBuilds;
+extern float treeDbgR1, treeDbgR2, treeDbgDBuild, treeDbgH, treeDbgX, treeDbgZ, treeDbgY;
+extern int   treeBuildRange;   // Zellen-Radius, in dem Baeume gebaut werden
 extern int treeCardDiv0; extern float treeCardScale0;   // DEMO_CARDT0 (Sweep-Bank)
 extern float ezLeafScale, ezLeafPer;   // DEMO_LEAFSC / DEMO_LEAFPER
 extern int treeCardDivN; extern float treeCardScaleN;   // DEMO_CARDT2 (Basisstufe)

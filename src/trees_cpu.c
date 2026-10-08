@@ -17,6 +17,9 @@
 #include <string.h>
 
 int   treeOneShot = 0;
+int   treeDbgTier = -1, treeDbgVerts = 0, treeDbgCrown = 0, treeDbgLeaf = 0, treeDbgBuilds = 0;
+float treeDbgR1 = 0, treeDbgR2 = 0, treeDbgDBuild = 0, treeDbgH = 0;
+float treeDbgX = 0, treeDbgZ = 0, treeDbgY = 0;
 int   treeGenMode = 1;   // 0 = eigener Generator, 1 = EZ-Tree-Port
 int   treeEzPreset = -1;   // DEMO_EZPRESET=0..3: Preset erzwingen (-1 = pro Baum gewuerfelt)
 float treeEzSpread = 1.0f;  // DEMO_EZSPREAD: Laengenfaktor der Kronenlevel (1 = 1:1-Port)
@@ -40,6 +43,7 @@ int   treeFocusValid = 0;
 // aufgerufen werden und die Kette dafuer nicht voll durchgereicht wird.
 static float gLodR = 30.0f;
 static float gTreeDist = 0.0f, gBranchCut = 0.0f;   // Abstand zum Baum / Ast-Cut
+static float gMeshFineCut = 0.0f;   // bis hierhin volle Netz-Dichte (Regelwerk C)
 static float gLodR2 = 0.0f;
 static float gBbSize = 0.0f, gBbCen[3] = {0,0,0};   // BBox des letzten Baums
 static float ezLszMax = 0.0f;  // groesster Blattgrundradius dieses Baums
@@ -778,9 +782,14 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
   // sectionStride = jeden N-ten Ring vernetzen (erster/letzter bleibt),
   // segmentFactor = radiale Segmente. Ganzz Leveln wegzuwerfen (unser altes
   // tier-System) erzeugt den Sprung in der Aststruktur, den der Nutzer sah.
-  int stride = (tier >= 3) ? 1 : (tier == 2 ? treeT2Stride : 6);
-  if(tier == 2) G = (G * treeT2Gnum) / treeT2Gden;   // DEMO_T2 (Sweep-Bank)
-  else if(tier == 0) G = (G * 2) / 5;
+  // Netz-Dichte nach ENTFERNUNG, nicht nach Build-Stufe (gemessen, DEMO_ONE +
+  // DEMO_TREEDIST, ein Baum, 40 m): tier 3 = 9 993 Geruest-Vertices, tier 2 =
+  // 4 191 — bei einer Mesh-Weight von 1,00 (die Mesh-Blende liegt erst bei
+  // 0,9..1,1 R2 = 91..111 m). Der Nutzer sah es als Sprung "an den Zweigen".
+  // Volles Netz bis 1,15 R2, also bis ausserhalb der aeussersten Blende.
+  int fine = (gMeshFineCut <= 0.0f) || (gTreeDist <= gMeshFineCut);
+  int stride = fine ? 1 : 6;
+  if(!fine) G = (G * 2) / 5;
   if(G < 3) G = 3;
   if(G > 8) G = 8;
   // Kinderzahl: in ALLEN Stufen gleich (deren Regel: detail ändert nur die
@@ -1312,6 +1321,7 @@ int trees_build_step(int maxTrees){
     gLodR2 = R2;
     gTreeDist = d;
     gBranchCut = R2 * 1.15f;
+    gMeshFineCut = R2 * 1.15f;
     // Der Rand muss die Nachlaufzeit des Builds abdecken: d ist der Abstand zum
     // BUILD-ZENTRUM, der Shader blendet aber gegen die KAMERA aus (bis 1,15 R1),
     // und das Build-Zentrum hinkt der Kamera bis 12 m nach. Bei 1,3 R1 (bei
@@ -1386,6 +1396,13 @@ int trees_build_step(int maxTrees){
       nTreeVerts = vertBefore; nCrownVerts = quadBefore; nLeafInst = leafBefore;
       treeSkipped++;
       continue;
+    }
+    if(treeOneShot){
+      treeDbgTier = tier; treeDbgR1 = R1; treeDbgR2 = R2; treeDbgDBuild = d;
+      treeDbgH = H; treeDbgX = cand[i].p[0]; treeDbgY = cand[i].p[1];
+      treeDbgZ = cand[i].p[2];
+      treeDbgVerts = nTreeVerts - vertBefore; treeDbgCrown = nCrownVerts - quadBefore;
+      treeDbgLeaf = nLeafInst - leafBefore; treeDbgBuilds++;
     }
     if(treeTierLog)
       printf("  Baum (%.1f,%.1f) H %.1f m  d %.1f m  R1 %.0f R2 %.0f  tier %d  "
