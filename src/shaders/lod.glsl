@@ -18,7 +18,10 @@ float lodBandOut(float R, float d){ return 1.0 - smoothstep(R * 0.90, R * 1.10, 
 // Gewichte. R1 = Einzelblaetter -> Karten, R2 = Karten/Geruest -> Ganzbaum.
 // Invariante (vom Wirtstest geprueft): lodWLeaf + lodWCard + lodWBillboard == 1
 // fuer jedes d, und lodWMesh + lodWBillboard == 1.
+// bb = liegen Ganzbaum-Kacheln im Puffer (treeBillboard0). Ohne Kacheln duerfen
+// Karten und Geruest bei R2 nicht ausblenden — sonst hat der ferne Baum gar keine
+// Darstellung mehr (im Bild gemessen: ab ~110 m nichts mehr).
 float lodWLeaf(float R1, float d){ return lodBandOut(R1, d); }
-float lodWCard(float R1, float R2, float d){ return lodBandIn(R1, d) * lodBandOut(R2, d); }
-float lodWBillboard(float R2, float d){ return lodBandIn(R2, d); }
-float lodWMesh(float R2, float d){ return lodBandOut(R2, d); }
+float lodWCard(float R1, float R2, float d, float bb){ return lodBandIn(R1, d) * (bb > 0.5 ? lodBandOut(R2, d) : 1.0); }
+float lodWBillboard(float R2, float d, float bb){ return bb > 0.5 ? lodBandIn(R2, d) : 0.0; }
+float lodWMesh(float R2, float d, float bb){ return bb > 0.5 ? lodBandOut(R2, d) : 1.0; }

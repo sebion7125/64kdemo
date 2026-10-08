@@ -62,8 +62,11 @@ int main(void){
   /* 1 + 2: Gewichte ueber die Entfernung, mehrere Wuchshoehen
    * (die Klemmen in treeLodInit erzeugen verschiedene R1/R2-Verhaeltnisse) */
   const float Hs[] = { 2.0f, 4.0f, 8.0f, 16.0f, 40.0f };
-  for(unsigned hi = 0; hi < sizeof(Hs)/sizeof(Hs[0]); hi++){
-    TreeLod L; treeLodInit(&L, Hs[hi], 0.0f);
+  // beide Betriebsarten: mit und ohne Ganzbaum-Kacheln im Puffer
+  const int BBs[] = { 1, 0 };
+  for(unsigned hi = 0; hi < sizeof(Hs)/sizeof(Hs[0]); hi++)
+  for(unsigned bi = 0; bi < 2; bi++){
+    TreeLod L; treeLodInit(&L, Hs[hi], 0.0f); L.bb = BBs[bi];
     float dmax = 1.6f * L.R2;
     float sumWorst = 0.0f, stepWorst = 0.0f;
     float pw[4] = {0,0,0,0};
@@ -103,8 +106,8 @@ int main(void){
     ok(stepWorst * 5.0f <= lim,
        "H=%.0f: Gewichte springen — max Delta bei 0,5 m = %.3f, analytische Grenze %.3f",
        Hs[hi], stepWorst*5.0f, lim);
-    printf("  H=%2.0f m  R1=%5.1f R2=%6.1f  |Summe-1|max=%.1e  Sprung/0,5m=%.3f\n",
-           Hs[hi], L.R1, L.R2, sumWorst, stepWorst*5.0f);
+    printf("  H=%2.0f m  bb=%d  R1=%5.1f R2=%6.1f  |Summe-1|max=%.1e  Sprung/0,5m=%.3f\n",
+           Hs[hi], L.bb, L.R1, L.R2, sumWorst, stepWorst*5.0f);
   }
 
   /* 3: Existenz-Raender muessen ausserhalb des aeussersten Bandendes liegen */

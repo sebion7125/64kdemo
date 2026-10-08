@@ -11,7 +11,7 @@ float treeLodSmoothstep(float a, float b, float x){
 }
 
 void treeLodInit(TreeLod *L, float H, float lodScale){
-  L->H = H;
+  L->H = H; L->bb = 1;
   /* Schaltweiten: R1 = wo die Einzelblaetter aufhoeren zu decken, R2 = wo die
    * Ganzbaum-Darstellung uebernimmt. 5x/15x Wuchshoehe, absolut begrenzt —
    * gemessen an einem Baum (Laubpixel ueber der Entfernung): ein 6-cm-Blatt ist
@@ -28,14 +28,16 @@ float treeLodWLeaf(const TreeLod *L, float d){
   return 1.0f - treeLodSmoothstep(L->R1 * LOD_BAND_LO, L->R1 * LOD_BAND_HI, d);
 }
 float treeLodWBillboard(const TreeLod *L, float d){
+  if(!L->bb) return 0.0f;
   return treeLodSmoothstep(L->R2 * LOD_BAND_LO, L->R2 * LOD_BAND_HI, d);
 }
 float treeLodWCard(const TreeLod *L, float d){
   float in  = treeLodSmoothstep(L->R1 * LOD_BAND_LO, L->R1 * LOD_BAND_HI, d);
-  float out = 1.0f - treeLodSmoothstep(L->R2 * LOD_BAND_LO, L->R2 * LOD_BAND_HI, d);
+  float out = L->bb ? (1.0f - treeLodSmoothstep(L->R2 * LOD_BAND_LO, L->R2 * LOD_BAND_HI, d)) : 1.0f;
   return in * out;
 }
 float treeLodWMesh(const TreeLod *L, float d){
+  if(!L->bb) return 1.0f;
   return 1.0f - treeLodSmoothstep(L->R2 * LOD_BAND_LO, L->R2 * LOD_BAND_HI, d);
 }
 

@@ -60,7 +60,7 @@ void main(){
   // Uebergabe ans Billboard im selben Band, in dem das Billboard einblendet
   // (0,90..1,10 R2): die Gewichte sind komplementaer, Summe immer 1.
   // ohne Billboard im Puffer bleibt das Geruest bis zur Bau-Grenze stehen
-  float mf = (uBBPresent < 0.5) ? 1.0 : lodWMesh(aR2, md);
+  float mf = lodWMesh(aR2, md, uBBPresent);
   vMeshFade = uMeshFade * mf;
   // Cull am ENTFERNUNGS-Faktor, nicht am multiplizierten: im Schattenwurf-Pass
   // ist uMeshFade = 0, das haette das ganze Geruest aus der Schattenkarte

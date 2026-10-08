@@ -2746,3 +2746,37 @@ Geometrie taucht also ausschliesslich dort auf, wo sie unsichtbar ist.
 
 **Schwarze Rechtecke:** gleicher Test (Normalszene, Impostor ueber Taste 1 an):
 alter Bau 56 671 dunkle Pixel, neuer Bau 0. Ohne Impostor ebenfalls 0.
+
+## Ein-Baum-LOD-Test DEMO_LODTEST und der Satz-Wechsel (2026-10-08)
+
+Nutzer: „ich brauche einen Test, bei dem die engine nur den einen Baum und sonst
+nix zeichnet und alle relevanten Schritte sauber loggt … deine Kamerafahrt fährt
+übrigens viel zu schnell".
+
+`DEMO_LODTEST="dStart dEnd step"`: ein Baum, kein Terrain/Gras/Schilf, Wind
+eingefroren, Kamera rueckt pro Frame eine FESTE Strecke (Meter, nicht m/s) radial
+auf den Baum zu. Pro Frame eine Zeile mit allem, was die Darstellung bestimmt
+(Entfernung, Stufe, R1/R2, alle vier Schichtgewichte, Geometrie-Mengen,
+Existenz-Entscheidungen samt Schnittweite, beide Saetze, fade, Upload), dazu
+`LT-STUFE`, `LT-GEOMETRIE`, `LT-SUMME`, `LT-ERGBNIS`.
+
+Messung 140 m -> 3 m in 0,5 m-Schritten (274 Frames, R1 33,7 m, R2 101,1 m):
+Stufenfolge 0 -> 2 -> 3 bei 89 m und 27 m; groesstes Deckungsloch 0,0000;
+max |dw/dd| 0,222 (Schranke 0,223); drei Geometrie-Wechsel (139,5 / 126,5 /
+52,0 m), jeder bei Gewicht 0,000 und ausserhalb der Blende; 11 Bauten.
+Ergebnis OK — die Ein-Baum-Entfernungslogik ist damit als stetig belegt.
+
+**Nebenbefund (erklaert Spruenge, die der Ein-Baum-Test selbst nicht zeigt):**
+11 Bauten x ~14 Frames Ueberblendung = 154 von 274 Frames, in denen
+`treeFadeNew < 1` ist. In genau diesen Frames schreiben Kronen und Blaetter
+**keine Tiefe**, und ein Farbmaske-aus-Nachpass schreibt Tiefe nur fuer Fragmente
+mit Deckung >= 0,5 — die Tiefen-Silhouette des Baums kippt also pro Fragment bei
+0,5. Im Vollbild (Terrain/Gras hinter dem Baum) ist das ein Umschalten der
+Verdeckung, also ein Sprung. Der Satz-Wechsel selbst ist laut Protokoll harmlos:
+alter und neuer Satz waren in allen Ueberblend-Frames identisch (45/45, 840/840,
+0/0).
+
+Der Kern kennt jetzt den Betriebsmodus `bb` (liegen Ganzbaum-Kacheln im Puffer).
+Ohne dieses Feld rechnete der Test „Billboard 1,000 / Karten 0,000" fuer einen
+Baum, der im Bild stand — Modell und Shader waren nicht mehr dasselbe.
+`make test-lod` prueft beide Modi: 14 795 Pruefungen, 0 Fehler.

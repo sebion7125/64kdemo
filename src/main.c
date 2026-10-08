@@ -412,7 +412,33 @@ static int dbgTreeMask = 0;    // DEBUG (; bzw. DEMO_TREEMASK): Baum-Mesh als Ma
 //   DEMO_SHOT=12.5    Screenshot automatisch nach 12,5 s Laufzeit
 static int envTreeJump = 0;
 static float envShotAt = -1.0f;
-static int   envExitWhenDone = 0;   // DEMO_EXIT=1: arbeiten, dann sofort beenden
+static int   envExitWhenDone = 0;
+// Diagnose der Transparenz-/Zeichenreihenfolge-Fehler (Nutzervermutung:
+// "Transparenz und Zeichenreihenfolge ... Z-Buffer problem").
+//   DEMO_TDW=0     Kronen+Blaetter schreiben NIE Tiefe. Ausserhalb der Satz-
+//                  Ueberblendung schrieben sie immer Tiefe — bei Alpha < 1
+//                  verdeckt ein halb durchsichtiges Fragment dann alles spaeter
+//                  Gezeichnete; kippt die Tiefenreihenfolge zweier Quads, springt
+//                  das Bild.
+//   DEMO_TDPASS=0  die Farbmaske-aus-Tiefen-Nachpaesse aus (sie schreiben pro
+//                  Fragment ab Deckung 0,5 Tiefe -> kippender Umschaltpunkt
+//                  mitten in der Blende)
+//   DEMO_TABC=1    SAMPLE_ALPHA_TO_COVERAGE im Kronen+Blatt-Pass (Tiefe folgt der
+//                  abgedeckten Flaeche statt dem Mischwert)
+static int   dbgTreeDepthWrite = 1, dbgTreeDepthPass = 1, dbgTreeA2C = 0;
+
+// DEMO_LODTEST="dStart dEnd step": EIN Baum, sonst nichts. Die Kamera rueckt pro
+// Frame eine FESTE Strecke (Meter, nicht m/s) radial auf den Baum zu, damit das
+// Protokoll eine saubere Funktion der Entfernung ist — zeitabhaengige Fahrten
+// (DEMO_WALK/DEMO_APPROACH mit dt) schoben in der VM bis 6 m pro Frame und
+// uebersprangen dabei ganze Blendenbender (Nutzer: Kamerafahrt viel zu schnell).
+// Pro Frame wird alles geloggt, was die Darstellung dieses Baums bestimmt, am
+// Ende eine Auswertung ueber die Invarianten.
+static int   lodTest = 0, ltFrame = 0, ltTierSeqN = 0, ltBuildsSeen = 0;
+static float ltD0 = 140.0f, ltD1 = 3.0f, ltStep = 0.5f;
+static float ltPrevW[4] = {0,0,0,0}, ltPrevD = 0.0f, ltSlope[4] = {0,0,0,0}, ltHole = 0.0f;
+static int   ltPrevTier = -999, ltPrevVerts = -1, ltPrevCrown = -1, ltPrevLeaf = -1;
+static int   ltTierSeq[16]; static int ltGeomChg = 0, ltGeomChgInBand = 0;   // DEMO_EXIT=1: arbeiten, dann sofort beenden
 static float envShotTimes[16]; static int envShotN = 0, envShotIdx = 0;
 static int   envShotTimes_on = 0;
 static unsigned long frameNo = 0;
@@ -2059,6 +2085,9 @@ int main(int argc, char **argv) {
   if (getenv("DEMO_TREEMASK")) dbgTreeMask = 1;
   { const char *es = getenv("DEMO_SHOT"); if (es) envShotAt = (float)atof(es); }
   envExitWhenDone = getenv("DEMO_EXIT") ? 1 : 0;
+  { const char *e = getenv("DEMO_TDW");     if(e) dbgTreeDepthWrite = atoi(e) ? 1 : 0; }
+  { const char *e = getenv("DEMO_TDPASS");  if(e) dbgTreeDepthPass  = atoi(e) ? 1 : 0; }
+  { const char *e = getenv("DEMO_TABC");    if(e) dbgTreeA2C        = atoi(e) ? 1 : 0; }
   { const char *ss = getenv("DEMO_SHOTS");
     if(ss){ envShotTimes_on = 1;
       const char *q = ss;
@@ -2110,6 +2139,23 @@ int main(int argc, char **argv) {
   envOneTree = getenv("DEMO_ONE") ? atoi(getenv("DEMO_ONE")) : 0;
   if(envOneTree){ treeOneShot = 1; envNoTerrain = 1; reedPassOn = 0; grassMaxDist = 0.5f;
                    envTreeJump = 1; }   // Kamera an den Fokusbaum (DEMO_TREEDIST)
+  // DEMO_LODTEST="dStart dEnd step": Ein Baum, sonst nichts, feste Kamerastufe
+  // pro Frame, volles Protokoll. Wind eingefroren, damit keine Geometrie durch
+  // Blattbewegung wandert.
+  { const char *e = getenv("DEMO_LODTEST");
+    if(e){ float a = 0, b = 0, c = 0;
+      if(sscanf(e, "%f %f %f", &a, &b, &c) == 3 && c > 0.0f && a > b){
+        lodTest = 1; ltD0 = a; ltD1 = b; ltStep = c;
+        envOneTree = 1; treeOneShot = 1; envNoTerrain = 1; reedPassOn = 0;
+        grassMaxDist = 0.5f; envTreeJump = 1; envFreeze = 0.0f;
+        // Der Rahmenbaum liegt bei DEMO_TREEDIST — der Startabstand des Tests
+        // muss dort stehen, sonst startet die Fahrt schon im Bereich der
+        // hoechsten Stufe (gemessen: 3 Frames, nur tier 3).
+        { char eb[32]; snprintf(eb, sizeof eb, "%.1f", ltD0);
+          setenv("DEMO_TREEDIST", eb, 1); }
+        printf("LODTEST: ein Baum, Kamera %.1f m -> %.1f m in %.2f-m-Schritten\n",
+               ltD0, ltD1, ltStep); fflush(stdout);
+      } } }
   { const char *eo = getenv("DEMO_ONETREE");
     if (eo && atoi(eo)) { treeOneShot = 1; envTreeJump = 1; grassMaxDist = 0.5f; } }
   { const char *et = getenv("DEMO_TIER"); if (et) treeForceTier = atoi(et); }
@@ -2245,6 +2291,19 @@ int main(int argc, char **argv) {
         // hoechste Detailstufe wurde nie angefahren (Nutzer: Tests besser planen).
         const char *ea = getenv("DEMO_APPROACH");
         if(ea) appr = (float)atof(ea);
+      }
+      // DEMO_LODTEST: FESTE Stufe pro Frame, radial auf den Baum zu, ohne dt —
+      // in der Software-GL der VM war ein Frame sonst bis 6 m weit, Blendenbender
+      // von 4..12 m Breite wurden uebersprungen (Nutzer: viel zu schnell).
+      if(lodTest && treeFocusValid){
+        float rx = flyMode ? flyPos[0] : camTgt[0], rz = flyMode ? flyPos[2] : camTgt[2];
+        float ax = rx - treeFocus[0], az = rz - treeFocus[2];
+        float al = sqrtf(ax * ax + az * az);
+        if(al > ltD1 && al < 1e6f){
+          float s = ltStep / al;
+          camTgt[0] -= ax * s; camTgt[2] -= az * s;
+          if(flyMode){ flyPos[0] -= ax * s; flyPos[2] -= az * s; }
+        }
       }
       if(appr != 0.0f && treeFocusValid){
         float rx = flyMode ? flyPos[0] : camTgt[0], rz = flyMode ? flyPos[2] : camTgt[2];
@@ -3034,6 +3093,7 @@ int main(int argc, char **argv) {
       // tools/test_tree_lod.c prueft. Eigene Rechnung im Protokoll konnte vom
       // Kern abweichen und haette einen Sprung verdeckt statt gezeigt.
       TreeLod DL; DL.H = 0; DL.R1 = treeDbgR1; DL.R2 = treeDbgR2;
+      DL.bb = treeBillboard0;
       float leafW = treeLodWLeaf(&DL, dCam);
       float cardW = treeLodWCard(&DL, dCam);
       float bbW   = treeLodWBillboard(&DL, dCam);
@@ -3052,6 +3112,88 @@ int main(int argc, char **argv) {
              leafW, cardW, bbW, meshW, treeFadeNew, drawSet, upActive ? 1 : 0,
              treeDbgBucket, treeDbgRepX, treeDbgRepZ);
       fflush(stdout);
+      // EIN-BAUM-LOD-TEST (DEMO_LODTEST): pro Frame die volle Spur — Entfernung,
+      // Stufe, Schaltweiten, Schichtgewichte, Geometrie-Mengen, Existenz-
+      // entscheidungen samt ihrer Schnittweite, Bau-/Satz-Zustand. Am Ende die
+      // Auswertung ueber die Invarianten (kein Bild noetig).
+      if(lodTest){
+        float w[4] = { leafW, cardW, bbW, meshW };
+        printf("LT frame %4d | d %6.2f m | tier %d | R1 %5.1f R2 %6.1f | "
+               "Gewicht Blatt %.3f Karte %.3f Billboard %.3f Geruest %.3f | "
+               "Geruest %6d Karten %5d Blaetter %6d Billboard %d | "
+               "gebaut Blatt %d Aeste %d Netz %d (Schnitte %.1f / %.1f m) | "
+               "Satz neu/alt: Geruest %6d/%6d Karten %5d/%5d Blaetter %6d/%6d | "
+               "Bauten %d Satz %d fade %.2f upload %d\n",
+               ltFrame, dCam, treeDbgTier, treeDbgR1, treeDbgR2,
+               w[0], w[1], w[2], w[3],
+               treeDbgVerts, treeDbgCrown, treeDbgLeaf, treeDbgBB,
+               treeDbgLeafBuilt, treeDbgBranchBuilt, treeDbgMeshFine,
+               treeDbgCutLeaf, treeDbgCutBranch,
+               nTreeVertsCur, nTreeVertsOld, nCrownVertsCur, nCrownVertsOld,
+               nLeafInstCur, nLeafInstOld,
+               treeDbgBuilds, drawSet, treeFadeNew, upActive ? 1 : 0);
+        fflush(stdout);
+        if(ltPrevD > 0.0f){
+          float dd = fabsf(dCam - ltPrevD);
+          if(dd > 1e-4f)
+            for(int k = 0; k < 4; k++){ float s = fabsf(w[k] - ltPrevW[k]) / dd;
+                                        if(s > ltSlope[k]) ltSlope[k] = s; }
+          float hole = fabsf(w[0] + w[1] + w[2] - 1.0f);
+          if(hole > ltHole) ltHole = hole;
+        }
+        if(treeDbgTier != ltPrevTier){
+          if(ltTierSeqN < 16) ltTierSeq[ltTierSeqN++] = treeDbgTier;
+          printf("LT-STUFE frame %d bei d=%.2f m: %d -> %d (R1 %.1f, R2 %.1f m)\n",
+                 ltFrame, dCam, ltPrevTier, treeDbgTier, treeDbgR1, treeDbgR2);
+          fflush(stdout);
+          ltPrevTier = treeDbgTier;
+        }
+        if(treeDbgVerts != ltPrevVerts || treeDbgCrown != ltPrevCrown ||
+           treeDbgLeaf  != ltPrevLeaf){
+          ltGeomChg++;
+          int inBand = 0;
+          if(treeDbgVerts != ltPrevVerts &&
+             dCam >= treeDbgR2 * 0.90f && dCam <= treeDbgR2 * 1.10f) inBand = 1;
+          if(treeDbgLeaf != ltPrevLeaf &&
+             dCam >= treeDbgR1 * 0.90f && dCam <= treeDbgR1 * 1.10f) inBand = 1;
+          if(inBand) ltGeomChgInBand++;
+          printf("LT-GEOMETRIE frame %d bei d=%.2f m: Geruest %d->%d, Karten %d->%d, "
+                 "Blaetter %d->%d | Gewichte dort Blatt %.3f Karte %.3f Billboard %.3f "
+                 "Geruest %.3f | %s\n",
+                 ltFrame, dCam, ltPrevVerts, treeDbgVerts, ltPrevCrown, treeDbgCrown,
+                 ltPrevLeaf, treeDbgLeaf, w[0], w[1], w[2], w[3],
+                 inBand ? "FELLER: innerhalb eines Blendenbands" : "ok: Gewicht 0 bzw. ausserhalb der Blende");
+          fflush(stdout);
+          ltPrevVerts = treeDbgVerts; ltPrevCrown = treeDbgCrown; ltPrevLeaf = treeDbgLeaf;
+        }
+        ltPrevW[0] = w[0]; ltPrevW[1] = w[1]; ltPrevW[2] = w[2]; ltPrevW[3] = w[3];
+        ltPrevD = dCam; ltFrame++;
+        if(dCam <= ltD1 + ltStep){
+          float lim1 = 1.5f / (treeDbgR1 * (LOD_BAND_HI - LOD_BAND_LO));
+          float lim2 = 1.5f / (treeDbgR2 * (LOD_BAND_HI - LOD_BAND_LO));
+          char seq[64]; seq[0] = 0;
+          for(int k = 0; k < ltTierSeqN; k++)
+            snprintf(seq + strlen(seq), sizeof seq - strlen(seq), "%s%d",
+                     k ? " -> " : "", ltTierSeq[k]);
+          printf("LT-SUMME Frames %d, Stufenfolge %s\n", ltFrame, seq);
+          printf("LT-SUMME max |dw/dd| pro m: Blaetter %.3f Karten %.3f Billboard %.3f "
+                 "Geruest %.3f   (Schranken %.3f / %.3f)\n",
+                 ltSlope[0], ltSlope[1], ltSlope[2], ltSlope[3], lim1, lim2);
+          printf("LT-SUMME groesstes Deckungsloch |Blatt+Karte+Billboard-1| = %.4f\n", ltHole);
+          printf("LT-SUMME Geometrie-Wechsel %d, davon innerhalb eines Blendenbands %d\n",
+                 ltGeomChg, ltGeomChgInBand);
+          printf("LT-SUMME Bauten %d\n", treeDbgBuilds);
+          int bad = 0;
+          if(ltHole > 0.01f){ bad = 1; printf("LT-FEHLER Deckungsloch %.4f > 0,01\n", ltHole); }
+          if(ltSlope[0] > lim1 * 1.1f || ltSlope[1] > lim1 * 1.1f){ bad = 1; printf("LT-FEHLER Blatt/Karten-Steigung ueber der Schranke\n"); }
+          if(ltSlope[2] > lim2 * 1.1f || ltSlope[3] > lim2 * 1.1f){ bad = 1; printf("LT-FEHLER Billboard/Geruest-Steigung ueber der Schranke\n"); }
+          if(ltGeomChgInBand > 0){ bad = 1; printf("LT-FEHLER Geometrie verschwindet innerhalb eines Blendenbands\n"); }
+          printf("LT-ERGBNIS %s\n", bad ? "FEHLER" : "OK");
+          fflush(stdout);
+          lodTest = 0;
+          running = 0;
+        }
+      }
     }
     // Baum-Mesh (Stamm/Aeste)
     if (!grassOnly) {
@@ -3206,7 +3348,8 @@ int main(int argc, char **argv) {
       // der erst danach kommt), und danach schreibt ein Farbmaske-aus-Pass die
       // Tiefe derjenige Fragmente, die mindestens halb decken.
       p_glUniform1f(locCDepth, 0.0f);
-      if(treeFadeNew < 1.0f && treeOldSet >= 0) p_glDepthMask(GL_FALSE);
+      if((treeFadeNew < 1.0f && treeOldSet >= 0) || !dbgTreeDepthWrite) p_glDepthMask(GL_FALSE);
+      if(dbgTreeA2C) p_glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE); else p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
       p_glBindVertexArray(vaoCrown[drawSet]);
       p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nCrownVertsCur);
       if(treeFadeNew < 1.0f && treeOldSet >= 0 && nCrownVertsOld > 0){
@@ -3217,7 +3360,7 @@ int main(int argc, char **argv) {
         if(locCOld >= 0) p_glUniform1f(locCOld, 0.0f);
       }
       if(locCFade >= 0) p_glUniform1f(locCFade, 1.0f);
-      if(treeFadeNew < 1.0f && treeOldSet >= 0 && nCrownVertsOld > 0){
+      if(treeFadeNew < 1.0f && treeOldSet >= 0 && nCrownVertsOld > 0 && dbgTreeDepthPass){
         p_glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
         p_glDisable(GL_BLEND);
         p_glDepthMask(GL_TRUE);
@@ -3245,7 +3388,8 @@ int main(int argc, char **argv) {
       p_glEnable(GL_BLEND);
       p_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
       p_glUniform1f(locLDepth, 0.0f);
-      p_glDepthMask(treeFadeNew < 1.0f ? GL_FALSE : GL_TRUE);
+      p_glDepthMask((treeFadeNew < 1.0f || !dbgTreeDepthWrite) ? GL_FALSE : GL_TRUE);
+      if(dbgTreeA2C) p_glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE); else p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
       p_glUseProgram(progLeaf);
       p_glUniformMatrix4fv(locLMVP, 1, GL_FALSE, mvp);
       p_glUniform3f(locLCam, camPos[0], camPos[1], camPos[2]);
@@ -3264,7 +3408,7 @@ int main(int argc, char **argv) {
         if(locLOld >= 0) p_glUniform1f(locLOld, 0.0f);
       }
       if(locLFade >= 0) p_glUniform1f(locLFade, 1.0f);
-      if(treeFadeNew < 1.0f && treeOldSet >= 0 && nLeafInstOld > 0){
+      if(treeFadeNew < 1.0f && treeOldSet >= 0 && nLeafInstOld > 0 && dbgTreeDepthPass){
         p_glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
         p_glDisable(GL_BLEND);
         p_glDepthMask(GL_TRUE);
@@ -3283,6 +3427,7 @@ int main(int argc, char **argv) {
       // "Z-Buffer wird nicht geloescht", Bildschirm flackert).
       p_glDepthMask(GL_TRUE);
       p_glDisable(GL_BLEND);
+      p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
     }
 
     // 3) MSAA-Resolve: fboMS -> fbo (Farbe + Tiefe in einem Blit, Single-Sample)

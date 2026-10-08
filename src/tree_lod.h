@@ -35,6 +35,12 @@ typedef struct {
   float H;         // Wuchshoehe des Baums
   float R1;        // Einzelblaetter -> Karten
   float R2;        // Karten/Geruest -> Ganzbaum-Darstellung
+  int   bb;        // 1 = Ganzbaum-Kacheln liegen im Puffer (treeBillboard0).
+                   // Ohne Kacheln duerfen Karten und Geruest bei R2 NICHT
+                   // ausblenden — sonst hat ein ferner Baum keine Darstellung.
+                   // Das ist keine Shader-Spezialitaet: ohne dieses Feld
+                   // rechnete der Ein-Baum-Test "Billboard 1,000 / Karten 0,000"
+                   // fuer einen Baum, der im Bild sehr wohl stand.
 } TreeLod;
 
 /* Schaltweiten aus der Wuchshoehe; lodScale != 0 ist die Messbank

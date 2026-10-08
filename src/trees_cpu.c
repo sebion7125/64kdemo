@@ -22,6 +22,12 @@ int   treeDbgTier = -1, treeDbgVerts = 0, treeDbgCrown = 0, treeDbgLeaf = 0, tre
 float treeDbgR1 = 0, treeDbgR2 = 0, treeDbgDBuild = 0, treeDbgH = 0;
 float treeDbgX = 0, treeDbgZ = 0, treeDbgY = 0;
 int   treeDbgBucket = -1; float treeDbgRepX = 0, treeDbgRepZ = 0;
+// Existenz-Entscheidungen des letzten Baus DIESES Baums (Ein-Baum-Test
+// DEMO_LODTEST): was liegt innerhalb der Existenz-Schnitte, was nicht. Der
+// Shader blendet nach d; wenn ein Schnitt INS Blendenband faellt, verschwindet
+// Geometrie sichtbar -> Sprung. Der Test protokolliert beides gegeneinander.
+int   treeDbgLeafBuilt = 0, treeDbgBranchBuilt = 0, treeDbgMeshFine = 0, treeDbgBB = 0;
+float treeDbgCutLeaf = 0, treeDbgCutBranch = 0;
 int   treeGenMode = 1;   // 0 = eigener Generator, 1 = EZ-Tree-Port
 int   treeEzPreset = -1;   // DEMO_EZPRESET=0..3: Preset erzwingen (-1 = pro Baum gewuerfelt)
 float treeEzSpread = 1.0f;  // DEMO_EZSPREAD: Laengenfaktor der Kronenlevel (1 = 1:1-Port)
@@ -1332,7 +1338,7 @@ int trees_build_step(int maxTrees){
     // "verschwindende Blattwald". Deshalb jetzt 5x und 15x, absolut begrenzt.
     // ALLE Entfernungs-Entscheidungen stammen aus src/tree_lod.c (Strategie B):
     // dieselben Funktionen, die tools/test_tree_lod.c ohne GL prueft.
-    TreeLod TL; treeLodInit(&TL, H, treeLodScale);
+    TreeLod TL; treeLodInit(&TL, H, treeLodScale); TL.bb = treeBillboard0;
     float R1 = TL.R1, R2 = TL.R2;
     int tier;
     if(treeForceTier >= 0) tier = treeForceTier;
@@ -1440,6 +1446,11 @@ int trees_build_step(int maxTrees){
       treeDbgZ = cand[i].p[2];
       treeDbgBucket = ezBucket;
       treeDbgRepX = impRepD[ezBucket].cx; treeDbgRepZ = impRepD[ezBucket].cz;
+      treeDbgLeafBuilt = ezWantLeaves ? 1 : 0;
+      treeDbgBranchBuilt = (d <= gBranchCut) ? 1 : 0;
+      treeDbgMeshFine = (d <= gMeshFineCut) ? 1 : 0;
+      treeDbgCutLeaf = treeLodLeafCut(&TL); treeDbgCutBranch = treeLodBranchCut(&TL);
+      treeDbgBB = treeBillboard0 ? 1 : 0;
       treeDbgVerts = nTreeVerts - vertBefore; treeDbgCrown = nCrownVerts - quadBefore;
       treeDbgLeaf = nLeafInst - leafBefore; treeDbgBuilds++;
     }
