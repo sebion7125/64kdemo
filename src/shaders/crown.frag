@@ -73,7 +73,11 @@ float shadowAt(vec3 wp, vec3 n){
   for(int y = -1; y <= 1; y++)
   for(int x = -1; x <= 1; x++)
     lit += (z - uShadowBias <= textureLod(uShadow, uv + vec2(float(x), float(y)) * uShadowPx, 0.0).r) ? 1.0 : 0.0;
-  return lit * 0.1111111;
+  lit *= 0.1111111;
+  // Am Rand der Licht-Frustum weich ausblenden: die Karte deckt 45 m um die
+  // Kamera ab, ohne diesen Rand ploppen Schatten und ihre Luecken an der Kante.
+  float edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+  return mix(1.0, lit, smoothstep(0.0, 0.07, edge));
 }
 
 void main(){
