@@ -30,6 +30,7 @@ int   treeDbgBucket = -1; float treeDbgRepX = 0, treeDbgRepZ = 0;
 // Shader blendet nach d; wenn ein Schnitt INS Blendenband faellt, verschwindet
 // Geometrie sichtbar -> Sprung. Der Test protokolliert beides gegeneinander.
 int   treeDbgLeafBuilt = 0, treeDbgBranchBuilt = 0, treeDbgMeshFine = 0, treeDbgBB = 0;
+int   treeDbgPres = 0, treeDbgPresForce = -1;
 float treeDbgCutLeaf = 0, treeDbgCutBranch = 0;
 int   treeGenMode = 1;   // 0 = eigener Generator, 1 = EZ-Tree-Port
 int   treeEzPreset = -1;   // DEMO_EZPRESET=0..3: Preset erzwingen (-1 = pro Baum gewuerfelt)
@@ -1572,6 +1573,22 @@ int trees_build_step(int maxTrees){
     // LOD-Tabelle pro Baum (DEMO_TREETAB): macht Befunde wie "ein Baum verliert
     // seine Blaetter schon nach 10 Einheiten, der kleinere Nachbarbaum in
     // dreifacher Entfernung behaelt sie" messbar.
+    // PRAESENZ DIESES Baums (Nutzer: "wenn ich mich schnell bewege verschwindet
+    // ein LOD und ne halbe sekunde spaeter kommt das richtige"). Gemessen wird
+    // direkt, was im Puffer landet — nicht was der Build wollte. Die Shader
+    // halten dann die abgehende Schicht bei Gewicht 1, bis die kommende wirklich
+    // da ist; ein nachlaufender Build kann kein Loch mehr reißen.
+    {
+      int pres = 0;
+      if(nLeafInst  > leafBefore)  pres |= LOD_PRES_LEAF;
+      if(nCrownVerts > quadBefore) pres |= LOD_PRES_CARD;
+      for(int q = quadBefore; q < nCrownVerts; q++)
+        if(crownVerts[q * CROWN_FLOATS + 6] >= 4.0f) pres |= LOD_PRES_BB;   // Variante 4..7 = Ganzbaum
+      if(treeDbgPresForce >= 0) pres = treeDbgPresForce;   // MESSBANK: Stufe vortaeuschen
+      for(int q = leafBefore;  q < nLeafInst;  q++) leafInst[q * LEAF_FLOATS + 13] = (float)pres;
+      for(int q = quadBefore;  q < nCrownVerts; q++) crownVerts[q * CROWN_FLOATS + 14] = (float)pres;
+      treeDbgPres = pres;
+    }
     if(treeTabDump)
       {   // gemessene Groessen der Instanzen dieses Baums (Gegenprobe zum Hint)
         float lmin = 1e9f, lmax = -1e9f, cmin = 1e9f, cmax = -1e9f;
@@ -1582,10 +1599,10 @@ int trees_build_step(int maxTrees){
         fprintf(stderr, "TREETAB x=%7.2f z=%7.2f y=%6.2f s=%5.3f H=%5.2f hintBlatt=%5.3f "
                         "hintBuschel=%5.3f gemessenBlatt=%.3f..%.3f gemessenBuschel=%.3f..%.3f "
                         "focalpx=%6.0f R1=%6.2f R2=%6.2f tier=%d dbuild=%6.2f "
-                        "blaetter=%5d karten=%4d\n",
+                        "blaetter=%5d karten=%4d pres=%d\n",
                 cand[i].p[0], cand[i].p[2], cand[i].p[1], cand[i].s, H, ezLeafHint, ezCardHint,
                 lmin, lmax, cmin, cmax, gFocalPx, R1, R2, tier, d,
-                nLeafInst - leafBefore, nCrownVerts - quadBefore);
+                nLeafInst - leafBefore, nCrownVerts - quadBefore, treeDbgPres);
       }
     // Sicherheitsnetz: die Budget-Schaetzung oben ist pro Baum nur geschaetzt.
     // Hat der Baum trotzdem ein Cap gerissen, wird er KOMPLETT zurueckgerollt —

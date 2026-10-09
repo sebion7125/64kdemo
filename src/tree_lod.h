@@ -34,6 +34,19 @@
 /* Kein Schnitt: die Geometrie reicht bis an die Bau-Grenze. */
 #define LOD_NO_CUT 1e9f
 
+/* PRAESENZ-BITS (Nutzer 2026-10-09: "wenn ich mich schnell bewege verschwindet
+ * ein LOD und ne halbe sekunde spaeter kommt das richtige. Es sollte also bei
+ * ueberblendungen diese verzoegert werden, wenn die benoetigte stufe gerade
+ * nicht vorhanden ist").
+ * Der Build hinkt der Kamera hinterher (Ausloeser erst ab 12 m, Upload ueber
+ * mehrere Frames). Liegt in der gezeichneten Pufferhaelfte von einem Baum eine
+ * Schicht NICHT vor, darf die vorherige trotzdem nicht ausblenden — sonst steht
+ * der Baum mitten im Band ohne Laub da. Die Bits stehen pro Instanz (pres) und
+ * werden beim Bauen gesetzt; Kern und Shader gate-n die Gewichte daran. */
+#define LOD_PRES_LEAF 1   // Einzelblatt-Instanzen dieses Baums liegen im Puffer
+#define LOD_PRES_CARD 2   // Kronen-Karten dieses Baums liegen im Puffer
+#define LOD_PRES_BB   4   // Ganzbaum-Kachel dieses Baums liegt im Puffer
+
 /* Ast-Aufloesung nach BILDGROESSE statt nach Entfernung.
  * Ein Ast mit Radius r hat die Dicke 2r; projiziert sind das
  *   px = 2*r*focalPx/d
@@ -55,6 +68,8 @@ typedef struct {
                    // Das ist keine Shader-Spezialitaet: ohne dieses Feld
                    // rechnete der Ein-Baum-Test "Billboard 1,000 / Karten 0,000"
                    // fuer einen Baum, der im Bild sehr wohl stand.
+  int   pres;      // LOD_PRES_*: was liegt von DIESEM Baum wirklich im Puffer?
+                   // 0 = unbekannt / alles vorhanden -> Baelen gelten pur.
   float focalPx;  // Brennweite in Pixeln (1,7 * Bildhoehe) — Ast-LOD nach Bildgroesse
 } TreeLod;
 

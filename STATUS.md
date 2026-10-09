@@ -3325,3 +3325,43 @@ Die Karten decken also fast genau dieselbe Flaeche (1,7 % weniger), und die
 Pixel, bei denen nur EINE Stufe deckt, sind 2,5 % der Krone in Flecken von
 1..3 px Kantenlaenge. Vorherige Messung ("ein grosser Fleck 3 365 px") war
 gueltigkeitslos: da lag die Karten-Blende wegen R1 = 116 m hinter der Baukante.
+
+## UMGESETZT 2026-10-09 (Runde 36): Präsenz-Gating — und warum die gemessenen Dellen Messfehler waren
+
+**Präsenz-Gating.** Der Build hinkt der Kamera hinterher (Auslöser erst ab 12 m
+Kameraweg, Upload über mehrere Frames). Lag in der gezeichneten Pufferhälfte von
+einem Baum eine Schicht nicht vor, blendete die vorherige trotzdem aus → der Baum
+stand mitten im Band ohne Laub da. Das ist der Nutzerbefund „verschwindet ein LOD
+und kommt eine halbe Sekunde später". Neu: pro Instanz wird beim Bauen
+aufgeschrieben, was wirklich im Puffer liegt (`pres`, gemessen an den emittierten
+Instanzen, nicht am Bauplan), und Kern (`tree_lod.c`) wie Shader (`lod.glsl`)
+halten die abgehende Schicht bei Gewicht 1, bis die kommende da ist.
+
+Nachweis durch A/B (Ein-Baum-Test, Karten-Schicht abgeschaltet, Präsenz erzwungen
+mit `DEMO_PRESFORCE`):
+
+| Abstand | Präsenz „Karten da" | Präsenz „Karten fehlen" |
+|---|---|---|
+| 40,5 m | 51 px | 459 px |
+| 39,0 m | 59 px | 493 px |
+
+**Der wichtigste Fund dieser Runde ist ein Messfehler in meinem eigenen Test.**
+Die Deckungs-Kurve des Ein-Baum-Tests fiel mit zunehmender Nähe ab (486 px bei
+37 m → 0 px bei 17 m) und die Dellen-Metrik meldete −9,6 %. Ursache war nicht das
+LOD, sondern die Kamerarahmung: der Test zielte auf den **Bodenpunkt** des Baums
+(`midY = treeFocus[1]`), die Krone wanderte bei Nähe über den Bildrand. Nachweis:
+NDC-y des ersten Blatts 0,72 → 0,93, und mit abgeschaltetem Tiefentest änderte
+sich an den Pixelzahlen nichts (also keine Verdeckung), ebenso wenig mit
+abgeschalteter Blattsilhouette (also kein Discard).
+
+Korrigiert: der Test zielt jetzt auf die Kronenmitte
+(`treeFocus[1] + 0,55 · Wuchshöhe`) und legt die Kamerahöhe auf dieselbe Höhe.
+Damit ist die Deckungskurve monoton steigend (Blattanteil 476 px bei 37 m →
+794 px bei 22 m) und die Dellen-Metrik meldet **0,00 %** über die Fahrt
+40 → 20 m. Zusätzlich zählte die Prüfung „Geometrie-Wechsel innerhalb eines
+Blendenbands" den allerersten Build mit (Vorgänger = −1); das ist kein
+Übergang beim Bewegen und wird jetzt ausgeschlossen. Ein-Baum-Test:
+`LT-ERGEBNIS OK`.
+
+Grenze des Tests: bei 180 Bildzeilen passt ein 8,4-m-Baum erst ab ~14 m
+voll ins Bild, deshalb fährt der Test bis 20 m.

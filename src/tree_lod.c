@@ -11,6 +11,7 @@ float treeLodSmoothstep(float a, float b, float x){
 }
 
 void treeLodInitPx(TreeLod *L, float leafM, float cardM, float focalPx, float buildR, float lodScale){
+  L->pres = 0;   // ohne Angabe: keine Praesenz-Filterung
   L->H = 0.0f; L->bb = 1;
   /* R1 = wo ein Einzelblatt LOD_LEAF_PX Bildpunkte fuellt, R2 = wo ein Buschel
    * LOD_CARD_PX fuellt. px = groesse * focalPx / d  ->  d = groesse * focalPx / px.
@@ -40,6 +41,7 @@ void treeLodInitPx(TreeLod *L, float leafM, float cardM, float focalPx, float bu
 }
 
 void treeLodInit(TreeLod *L, float H, float lodScale){
+  L->pres = 0;   // ohne Angabe: keine Praesenz-Filterung
   L->H = H; L->bb = 1;
   /* Schaltweiten: R1 = wo die Einzelblaetter aufhoeren zu decken, R2 = wo die
    * Ganzbaum-Darstellung uebernimmt. 5x/15x Wuchshoehe, absolut begrenzt —
@@ -56,14 +58,24 @@ void treeLodInit(TreeLod *L, float H, float lodScale){
 /* Komplementaere Gewichte (Summe genau 1) — Voraussetzung fuer fizzle in den
  * Shadern (lod.glsl): "n < w" und "n >= 1-w" sind disjunkt und vollstaendig. */
 float treeLodWLeaf(const TreeLod *L, float d){
+  // Gating: die Karten, die hier uebernehmen sollen, liegen nicht im Puffer ->
+  // die Blaetter bleiben voll an (sonst klafft ein Loch bis der naechste Build da ist).
+  if(L->pres && !(L->pres & LOD_PRES_CARD)) return 1.0f;
   return 1.0f - treeLodSmoothstep(L->R1 * LOD_BAND_LO, L->R1 * LOD_BAND_HI, d);
 }
 float treeLodWBillboard(const TreeLod *L, float d){
   if(!L->bb) return 0.0f;
+  // Gating: wenn ausser der Ganzbaum-Kachel nichts im Puffer liegt, muss sie
+  // auch nah voll stehen — sonst hat der Baum gar keine Laubdarstellung.
+  if(L->pres && !(L->pres & (LOD_PRES_LEAF | LOD_PRES_CARD))) return 1.0f;
   return treeLodSmoothstep(L->R2 * LOD_BAND_LO, L->R2 * LOD_BAND_HI, d);
 }
 float treeLodWCard(const TreeLod *L, float d){
-  float in  = treeLodSmoothstep(L->R1 * LOD_BAND_LO, L->R1 * LOD_BAND_HI, d);
+  // Gating: ohne Einzelblaetter muessen die Karten im nahen Band voll stehen
+  // (sonst ist die Krone weg, obwohl der Baum im Puffer liegt).
+  float in  = (L->pres && !(L->pres & LOD_PRES_LEAF))
+                ? 1.0f
+                : treeLodSmoothstep(L->R1 * LOD_BAND_LO, L->R1 * LOD_BAND_HI, d);
   float out = L->bb ? (1.0f - treeLodSmoothstep(L->R2 * LOD_BAND_LO, L->R2 * LOD_BAND_HI, d)) : 1.0f;
   return in * out;
 }

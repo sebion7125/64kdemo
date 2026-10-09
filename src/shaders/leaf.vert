@@ -4,6 +4,7 @@ layout(location=1) in vec3 iPos;    // Blattbasis (Welt)
 layout(location=2) in vec4 iData;   // size, rotY, tilt, lod-Pad
 layout(location=3) in vec3 iCol;
 layout(location=5) in vec2  iAnchor;  // Lotpunkt DIESES Baums — kanonischer LOD-Abstand
+layout(location=6) in float iPres;    // Praesenz-Bits dieses Baums (LOD_PRES_*)
 layout(location=4) in float iLodR;   // Radius, ab dem Karten dieses Baumes die
                                      // Einzelblaetter eretzen (CPU: 10x Wuchshoehe)
 uniform mat4 uMVP;
@@ -50,7 +51,7 @@ void main(){
   // FIZZLE (lod.glsl): die abgehende Schicht behaelt die UNTERE Rauschmenge
   // (n < w). Zusammen mit den Karten (n >= 1-w, gleiches Rauschen, gleiche
   // Zellgroesse) ist die Flaeche durchgehend zu 100 % gedeckt.
-  float keep = lodWLeaf(iLodR, d);
+  float keep = lodWLeaf(iLodR, d, iPres);
   // Ueberblendung beim LOD-Wechsel (Runde 27): der alte Satz lichtet sich pro
   // Blatt aus — gleiche Technik wie der Bande um iLodR, also ohne Alpha-Blend
   // und ohne Abhaengigkeit von der Draw-Reihenfolge.

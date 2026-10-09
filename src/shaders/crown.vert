@@ -7,6 +7,7 @@ layout(location=3) in float iLodR;   // Radius, ab dem diese Karte das Laub dies
 layout(location=4) in vec3 iCol;     // Blattfarbe DIESES Baum
 layout(location=5) in float iLodR2;  // Schaltweite der groebsten Stufe (20x Wuchshoehe)
 layout(location=6) in vec2  aAnchor;  // Lotpunkt DIESES Baums — kanonischer LOD-Abstand
+layout(location=7) in float iPres;    // Praesenz-Bits dieses Baums (LOD_PRES_*)
 uniform mat4 uMVP;
 uniform vec3 uCamPos;
 uniform vec3 uCamTgt;
@@ -128,10 +129,10 @@ void main(){
   float w1, inv1, w2, inv2;
   if(bbq > 0.5){
     w1 = 1.0; inv1 = 0.0;                                        // bei R1 nicht beteiligt
-    w2 = (uLightFace < 0.5) ? lodWBillboard(iLodR2, d, uBBPresent) : 1.0;
+    w2 = (uLightFace < 0.5) ? lodWBillboard(iLodR2, d, uBBPresent, iPres) : 1.0;
     inv2 = 1.0; w2 *= uBillboardOn;                              // kommend bei R2
   } else {
-    w1 = (uLightFace > 0.5) ? 1.0 : lodBandIn(iLodR, d);
+    w1 = (uLightFace > 0.5) ? 1.0 : lodWCardIn(iLodR, d, iPres);
     inv1 = 1.0;                                                  // kommend bei R1
     w2 = (uLightFace < 0.5 && iLodR2 > 0.0) ? lodBandOut(iLodR2, d) : 1.0;
     inv2 = 0.0; w2 *= uCardsOn;                                  // abgehend bei R2

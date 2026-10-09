@@ -22,6 +22,12 @@ uniform float uFizOn = 1.0;
 uniform float uFlut = 1.0;
 
 // 0 auerhalb (nah) -> 1 jenseits des Bands: die kommende Schicht.
+// Praesenz-Gating (Spiegelbild der LOD_PRES_*-Bits in src/tree_lod.h): pres
+// sitzt pro Instanz und sagt, welche Schichten DIESES Baums wirklich im Puffer
+// liegen. Der Build hinkt der Kamera hinterher; fehlt in der gezeichneten
+// Haelfte die uebernehmende Schicht, muss die abgehende voll bleiben — sonst
+// steht der Baum mitten im Blendenband ohne Laub da.
+float lodBit(float pres, float b){ return mod(floor(pres / b), 2.0); }
 float lodBandIn(float R, float d){ return smoothstep(R * 0.90, R * 1.10, d); }
 // 1 bis zum Band -> 0 dahinter: die abgehende Schicht (Komplement zu lodBandIn).
 float lodBandOut(float R, float d){ return 1.0 - smoothstep(R * 0.90, R * 1.10, d); }
@@ -38,9 +44,21 @@ float lodBandOut(float R, float d){ return 1.0 - smoothstep(R * 0.90, R * 1.10, 
 // war ein Krueckstock gegen zwei halbtransparente Folien beim Alpha-Blend und
 // ist nicht mehr noetig — er war ausserdem der Grund, dass die Blende nur ueber
 // 0,70 m Kameraweg sichtbar war (gemessen).
-float lodWLeaf(float R1, float d){ return lodBandOut(R1, d); }
+float lodWLeaf(float R1, float d, float pres){
+  return lodBit(pres, 2.0) > 0.5 ? lodBandOut(R1, d) : 1.0;   // ohne Karten: Blaetter bleiben
+}
+// Karten: ohne Einzelblaetter im Puffer muss das nahe Band voll stehen.
+float lodWCardIn(float R1, float d, float pres){
+  return lodBit(pres, 1.0) > 0.5 ? lodBandIn(R1, d) : 1.0;
+}
 float lodWCard(float R1, float R2, float d, float bb){ return lodBandIn(R1, d) * (bb > 0.5 ? lodBandOut(R2, d) : 1.0); }
-float lodWBillboard(float R2, float d, float bb){ return bb > 0.5 ? lodBandIn(R2, d) : 0.0; }
+float lodWBillboard(float R2, float d, float bb, float pres){
+  if(bb < 0.5) return 0.0;
+  // Gating: liegt ausser der Ganzbaum-Kachel nichts im Puffer, muss sie auch
+  // nah voll stehen — sonst hat der Baum ueberhaupt keine Laubdarstellung.
+  if(pres > 0.5 && lodBit(pres, 1.0) < 0.5 && lodBit(pres, 2.0) < 0.5) return 1.0;
+  return lodBandIn(R2, d);
+}
 float lodWMesh(float R2, float d, float bb){ return bb > 0.5 ? lodBandOut(R2, d) : 1.0; }
 
 

@@ -46,13 +46,14 @@ float c_terrainH(float px, float py);
 // lodR = Radius, ab dem diese Karte die Einzelblaetter dieses Baumes eretzt
 // (blendet um lodR +/- 10 % ein). col = Blattfarbe DIESES Baumes: der Atlas ist
 // farbneutral aufgenommen, die Farbe kommt pro Instanz dazu.
-#define CROWN_FLOATS 14   // pro KARTE: center(3) size rot seed variant lodR col(3) lodR2
-                            // anchorX anchorZ
+#define CROWN_FLOATS 15   // pro KARTE: center(3) size rot seed variant lodR col(3) lodR2
+                            // anchorX anchorZ pres (welche Schichten DIESES Baums
+                            // liegen im Puffer — siehe LOD_PRES_* in tree_lod.h)
 // Einzelblaetter an nahen Baeumen (leaf.vert): iPos(3), iData(4: size, rotY,
 // tilt, aspect), iCol(3), iLodR(1). Grundblatt ist ein statisches Quad.
 // iLodR = Radius, ab dem die Karten dieses Baumes die Blaetter uebernehmen
 // (keep = 1 - smoothstep(0,9*lodR, 1,1*lodR, d)) — Komplement zu lodR oben.
-#define LEAF_FLOATS  13   // plus anchorX anchorZ
+#define LEAF_FLOATS  14   // plus anchorX anchorZ pres
 #define LEAF_CAP     2400000  // Budget erhoeht statt Geometrie zu ueberspringen (Nutzerregel):
                             // Stress-Szenario DEMO_LODRSCALE=2 brauchte 1,60 Mio, 90 Baeume
                             // fielen raus. 2,4 Mio x 40 B x 2 Saetze = 192 MB
@@ -137,6 +138,7 @@ extern int   treeDbgTier, treeDbgVerts, treeDbgCrown, treeDbgLeaf, treeDbgBuilds
 extern float treeDbgR1, treeDbgR2, treeDbgDBuild, treeDbgH, treeDbgX, treeDbgZ, treeDbgY;
 extern int   treeDbgBucket; extern float treeDbgRepX, treeDbgRepZ;
 extern int   treeDbgLeafBuilt, treeDbgBranchBuilt, treeDbgMeshFine, treeDbgBB;
+extern int   treeDbgPres, treeDbgPresForce;   // Praesenz-Bits des letzten gebauten Baums
 extern float treeDbgCutLeaf, treeDbgCutBranch;
 extern int   treeBuildRange;   // Zellen-Radius, in dem Baeume gebaut werden
 extern int treeCardDiv0; extern float treeCardScale0;   // DEMO_CARDT0 (Sweep-Bank)

@@ -115,6 +115,47 @@ int main(void){
            Hs[hi], L.bb, L.R1, L.R2, sumWorst, stepWorst*5.0f);
   }
 
+  /* 2b: PRAESENZ-Gating. Der Build hinkt der Kamera hinterher (Ausloeser ab 12 m,
+   * Upload ueber mehrere Frames). Fehlt in der gezeichneten Haelfte eine Schicht,
+   * darf die abgehende nicht ausblenden — sonst steht der Baum mitten im Band ohne
+   * Laub (Nutzerbefund). Geprueft werden alle Praesenz-Kombinationen: Deckung
+   * 1-(1-L)(1-K)(1-B) muss 1 sein, und eine Schicht ohne Instanzen darf kein
+   * Gewicht haben, das ihr Vorgaengerin fehlt. */
+  for(unsigned hi = 0; hi < sizeof(Hs)/sizeof(Hs[0]); hi++)
+  for(int pres = 1; pres <= 7; pres++){
+    TreeLod L; treeLodInit(&L, Hs[hi], 0.0f);
+    L.pres = pres; L.bb = (pres & LOD_PRES_BB) ? 1 : 0;
+    float worst = 0.0f;
+    for(float d = 0.0f; d <= 1.6f * L.R2; d += 0.1f){
+      float l = treeLodWLeaf(&L, d), c = treeLodWCard(&L, d), b = treeLodWBillboard(&L, d);
+      // Summe NUR ueber die Schichten, die wirklich im Puffer liegen. Regel:
+      // nie unter 1 (Loch), und genau 1 wenn die zwei beteiligten Schichten
+      // vorhanden sind. pres=5 (Blaetter + Ganzbaum, Karten fehlen) darf ueber
+      // 1 gehen — doppelte Deckung ist harmlos, ein Loch nicht.
+      float sum = 0.0f;
+      if(pres & LOD_PRES_LEAF) sum += l;
+      if(pres & LOD_PRES_CARD) sum += c;
+      if(pres & LOD_PRES_BB)   sum += b;
+      if(sum < 1.0f - 1e-4f && 1.0f - sum > worst) worst = 1.0f - sum;
+      if(pres != 5)
+        ok(fabsf(sum - 1.0f) < 1e-4f,
+           "pres=%d d=%.1f: Summe der vorhandenen Schichten = %.4f (erwartet 1)", pres, d, sum);
+      if(!(pres & LOD_PRES_CARD))
+        ok(l > 0.999f, "pres=%d d=%.1f: Karten fehlen -> Blattgewicht %.3f muss 1 sein",
+           pres, d, l);
+      if(!(pres & LOD_PRES_LEAF))
+        ok(fabsf(c - treeLodWMesh(&L, d)) < 1e-4f,
+           "pres=%d d=%.1f: Blaetter fehlen -> Kartengewicht %.3f (erwartet %.3f)",
+           pres, d, c, treeLodWMesh(&L, d));
+      if(!(pres & LOD_PRES_BB))
+        ok(b < 1e-6f, "pres=%d d=%.1f: keine Ganzbaum-Kachel -> Billboard-Gewicht %.3f", pres, d, b);
+    }
+    checks++;
+    ok(worst <= 1e-4f, "pres=%d H=%.0f: Loch in der Deckung (worst %.4f)", pres, Hs[hi], worst);
+  }
+  printf("  Praesenz-Gating: 7 Kombinationen x %d Wuchshoehen, kein Deckungsloch\n",
+         (int)(sizeof(Hs)/sizeof(Hs[0])));
+
   /* 3: Existenz-Raender muessen ausserhalb des aeussersten Bandendes liegen */
   for(unsigned hi = 0; hi < sizeof(Hs)/sizeof(Hs[0]); hi++){
     TreeLod L; treeLodInit(&L, Hs[hi], 0.0f);
@@ -202,6 +243,14 @@ int main(void){
   char lo[32], hi2[32];
   snprintf(lo, sizeof lo, "R * %.2f", (double)LOD_BAND_LO);
   snprintf(hi2, sizeof hi2, "R * %.2f", (double)LOD_BAND_HI);
+  ok(has("src/shaders/lod.glsl", "lodBit(pres, 2.0)"),
+     "lod.glsl gate-t das Blattgewicht nicht an der Karten-Praesenz");
+  ok(has("src/shaders/lod.glsl", "lodBit(pres, 1.0)"),
+     "lod.glsl gate-t das Kartengewicht nicht an der Blatt-Praesenz");
+  ok(has("src/shaders/leaf.vert", "lodWLeaf(iLodR, d, iPres)"),
+     "leaf.vert benutzt die praesenz-abhaengige Blattgewichts-Funktion nicht");
+  ok(has("src/shaders/crown.vert", "lodWCardIn(iLodR, d, iPres)"),
+     "crown.vert benutzt die praesenz-abhaengige Kartengewichts-Funktion nicht");
   ok(has("src/shaders/lod.glsl", lo),  "lod.glsl enthaelt nicht %s", lo);
   ok(has("src/shaders/lod.glsl", hi2), "lod.glsl enthaelt nicht %s", hi2);
   const char *shaders[] = { "src/shaders/leaf.vert", "src/shaders/crown.vert",

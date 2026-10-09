@@ -1202,6 +1202,7 @@ static void build_foliage_atlas(GLuint progLeaf){
 #define UP_BYTES (6u * 1024u * 1024u)   // feine Slices: nur so greift das Zeitbudget
 static struct { const float *src; GLuint vbo; size_t bytes, pos; } upBuf[3];
 static int upActive = 0, upNextSet = 1;
+static const float *leafSetPtr[2] = {0,0};
 // BAUM-ZEIT (DEMO_BUILDTIME): der Nutzer meldet, dass beim schnellen Bewegen ein
 // LOD verschwindet und etwa eine halbe Sekunde spaeter der richtige kommt. Das ist
 // die Zeit vom Ausloesen des Baus bis zum Satz-Wechsel. Gemessen wird in drei
@@ -1239,6 +1240,7 @@ static void upload_begin(const float *tv, const float *cv, const float *lv,
   upBuf[1].src = cv; upBuf[1].vbo = vboCrown[nextSet];
   upBuf[1].bytes = (size_t)ncv * CROWN_FLOATS * sizeof(float);
   upBuf[2].src = lv; upBuf[2].vbo = vboLeaf[nextSet];
+  leafSetPtr[nextSet] = lv;   // DIAGNOSE: Zeiger auf die gezeichneten Instanzen
   upBuf[2].bytes = (size_t)nli * LEAF_FLOATS * sizeof(float);
   for(int i = 0; i < 3; i++){
     upBuf[i].pos = 0;
@@ -1369,6 +1371,9 @@ static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: t
   p_glEnableVertexAttribArray(6);
   p_glVertexAttribPointer(6, 2, GL_FLOAT, GL_FALSE, CROWN_FLOATS * 4, (const void *)48); // Anker
   p_glVertexAttribDivisor(6, 1);
+  p_glEnableVertexAttribArray(7);
+  p_glVertexAttribPointer(7, 1, GL_FLOAT, GL_FALSE, CROWN_FLOATS * 4, (const void *)56); // Praesenz-Bits
+  p_glVertexAttribDivisor(7, 1);
 
   // Einzelblaetter naher Baeume: aBase(2) statisch + iPos(3) iData(4) iCol(3) [instanzen]
   p_glGenVertexArrays(1, &vaoLeaf[k]);
@@ -1392,6 +1397,9 @@ static void build_tree_lines(void){   // VAOs + Grundformen (Geometrie selbst: t
   p_glEnableVertexAttribArray(5);
   p_glVertexAttribPointer(5, 2, GL_FLOAT, GL_FALSE, LEAF_FLOATS * 4, (const void *)44);  // Anker
   p_glVertexAttribDivisor(5, 1);
+  p_glEnableVertexAttribArray(6);
+  p_glVertexAttribPointer(6, 1, GL_FLOAT, GL_FALSE, LEAF_FLOATS * 4, (const void *)52);  // Praesenz-Bits
+  p_glVertexAttribDivisor(6, 1);
   }
 
   // Gras: aBase(2) + iPos(3) iData(4) [instanzen]
@@ -2139,6 +2147,7 @@ int main(int argc, char **argv) {
             layCard = strstr(ly,"card") ? 1 : 0;
             layBB   = strstr(ly,"bb")   ? 1 : 0; } }
   { const char *ef = getenv("DEMO_FREEZE"); if (ef) envFreeze = (float)atof(ef); }
+  { const char *pf = getenv("DEMO_PRESFORCE"); if (pf) treeDbgPresForce = atoi(pf); }
   // DEMO_TREEFADE=<sek>: Ueberblendzeit beim LOD-Satzwechsel (0 = hart schneiden)
   { const char *tf = getenv("DEMO_TREEFADE"); if (tf) treeFadeDur = (double)atof(tf); }
   { const char *ts = getenv("DEMO_TIERSWITCH"); if (ts) treeTierSwitchS = (double)atof(ts); }
@@ -2362,7 +2371,12 @@ int main(int argc, char **argv) {
         // der Startposition stehen, der Baum wandert aus dem Bild und die
         // Deckungs-Messung zaehlt 6 HUD-Pixel statt Baum.
         {
-          float midY = treeFocus[1];   // Zielpunkt des Ein-Baum-Sprungs
+          // Ziel auf KRONENMITTE, nicht auf den Bodenpunkt: bei 15 m Abstand liegt
+          // die Krone eines 8-m-Baums ueber dem Bildrand, die Deckungs-Messung fiel
+          // dann auf 0 zurueck und die Dellen-Metrik mass die Kamerarahmung statt
+          // des LODs (gemessen: NDC y 0.72 -> 0.93 -> Krone halb abgeschnitten).
+          float midY = treeFocus[1] + 0.55f * (treeDbgH > 1.0f ? treeDbgH : 4.0f);
+          flyPos[1] = midY;
           float hx = treeFocus[0] - flyPos[0], hz = treeFocus[2] - flyPos[2];
           flyYaw = atan2f(hx, hz);
           flyPitch = atan2f(midY - flyPos[1], sqrtf(hx * hx + hz * hz));
@@ -3182,7 +3196,7 @@ int main(int argc, char **argv) {
       // tools/test_tree_lod.c prueft. Eigene Rechnung im Protokoll konnte vom
       // Kern abweichen und haette einen Sprung verdeckt statt gezeigt.
       TreeLod DL; DL.H = 0; DL.R1 = treeDbgR1; DL.R2 = treeDbgR2;
-      DL.bb = treeBillboard0;
+      DL.bb = treeBillboard0; DL.pres = treeDbgPres;   // Gating: was liegt wirklich im Puffer?
       float leafW = treeLodWLeaf(&DL, dCam);
       float cardW = treeLodWCard(&DL, dCam);
       float bbW   = treeLodWBillboard(&DL, dCam);
@@ -3251,7 +3265,9 @@ int main(int argc, char **argv) {
           // Deckungs-Delle, nicht ueber ein Band.
           if(treeBillboard0 && treeDbgVerts != ltPrevVerts &&
              dCam >= treeDbgR2 * 0.90f && dCam <= treeDbgR2 * 1.10f) inBand = 1;
-          if(treeDbgLeaf != ltPrevLeaf &&
+          // Der ERSTE Build des Tests hat keinen Vorgaenger (-1). "Nichts -> Baum"
+          // ist kein Uebergang beim Bewegen und darf nicht als Band-Verstoss zaehlen.
+          if(treeDbgLeaf != ltPrevLeaf && ltPrevLeaf >= 0 &&
              dCam >= treeDbgR1 * 0.90f && dCam <= treeDbgR1 * 1.10f) inBand = 1;
           if(inBand) ltGeomChgInBand++;
           printf("LT-GEOMETRIE frame %d bei d=%.2f m: Geruest %d->%d, Karten %d->%d, "
@@ -3477,8 +3493,20 @@ int main(int argc, char **argv) {
       p_glUniform1f(locLMask, (float)envLeafMask);
       if(locLAlb >= 0) p_glUniform1f(locLAlb, 0.0f);
       if(locLFade >= 0) p_glUniform1f(locLFade, treeFadeNew);
+      if(getenv("DEMO_LEAFNODEPTH")) p_glDisable(GL_DEPTH_TEST);   // DIAGNOSE
       p_glBindVertexArray(vaoLeaf[drawSet]);
       p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInstCur);
+      if(getenv("DEMO_LEAFNODEPTH")) p_glEnable(GL_DEPTH_TEST);    // DIAGNOSE
+      if(getenv("DEMO_LEAFDBG")){ static int ldb=0; if(ldb++<3 && leafSetPtr[drawSet]){
+        const float *L0 = leafSetPtr[drawSet];
+        float px=L0[0],py=L0[1],pz=L0[2];
+        float cx=mvp[0]*px+mvp[4]*py+mvp[8]*pz+mvp[12];
+        float cy=mvp[1]*px+mvp[5]*py+mvp[9]*pz+mvp[13];
+        float cw=mvp[3]*px+mvp[7]*py+mvp[11]*pz+mvp[15];
+        printf("LEAFDBG n=%d vao=%u GL 0x%x | Blatt0 pos(%.2f,%.2f,%.2f) size %.3f pres %.0f lodR %.1f"
+               " NDC(%.3f,%.3f) w %.2f | cam(%.1f,%.1f,%.1f)\n",
+               nLeafInstCur, vaoLeaf[drawSet], p_glGetError(), px,py,pz, L0[3], L0[13], L0[10],
+               cw!=0.0f?cx/cw:0.0f, cw!=0.0f?cy/cw:0.0f, cw, camPos[0],camPos[1],camPos[2]); } }
       if(treeFadeNew < 1.0f && treeOldSet >= 0 && nLeafInstOld > 0){
         if(locLFade >= 0) p_glUniform1f(locLFade, 1.0f - treeFadeNew);
         if(locLOld >= 0) p_glUniform1f(locLOld, 1.0f);
