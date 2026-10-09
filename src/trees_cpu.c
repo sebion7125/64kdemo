@@ -1479,7 +1479,8 @@ int trees_build_step(int maxTrees){
     float ezLeafHint = 0.0f, ezCardHint = 0.0f;
     ez_size_hint(cand[i].p[0] * 12.9898f + cand[i].p[2] * 78.233f, cand[i].s,
                  &ezLeafHint, &ezCardHint);
-    TreeLod TL; treeLodInitPx(&TL, ezLeafHint, ezCardHint, gFocalPx, treeLodScale);
+    TreeLod TL; treeLodInitPx(&TL, ezLeafHint, ezCardHint, gFocalPx,
+                           (float)treeBuildRange * TREE_G, treeLodScale);
     TL.bb = treeBillboard0;
     TL.focalPx = gFocalPx; gTL = TL;   // gTL braucht ez_grow fuer den Ast-Schnitt
     float R1 = TL.R1, R2 = TL.R2;

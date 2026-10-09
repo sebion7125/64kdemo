@@ -103,7 +103,7 @@ float treeLodRadCut(const TreeLod *L, float rad);
  * in Pixeln, also aufloesungs- und fenstergerecht. */
 #define LOD_LEAF_PX 2.0f
 #define LOD_CARD_PX 1.5f
-void treeLodInitPx(TreeLod *L, float leafM, float cardM, float focalPx, float lodScale);
+void treeLodInitPx(TreeLod *L, float leafM, float cardM, float focalPx, float buildR, float lodScale);
 float treeLodBranchCut(const TreeLod *L);
 float treeLodMeshCut(const TreeLod *L);
 

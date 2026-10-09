@@ -10,19 +10,32 @@ float treeLodSmoothstep(float a, float b, float x){
   return t * t * (3.0f - 2.0f * t);
 }
 
-void treeLodInitPx(TreeLod *L, float leafM, float cardM, float focalPx, float lodScale){
+void treeLodInitPx(TreeLod *L, float leafM, float cardM, float focalPx, float buildR, float lodScale){
   L->H = 0.0f; L->bb = 1;
   /* R1 = wo ein Einzelblatt LOD_LEAF_PX Bildpunkte fuellt, R2 = wo ein Buschel
    * LOD_CARD_PX fuellt. px = groesse * focalPx / d  ->  d = groesse * focalPx / px.
    * focalPx <= 0 (kein Fenster bekannt) -> sinnvoller Ersatzwert, damit nichts
-   * verschwindet. */
+   * verschwindet.
+   *
+   * buildR (Baukante des Waldes) ist die obere Grenze fuer R1 und die UNTERE fuer
+   * R2. Nutzerbefund 2026-10-09: "dein jetziger stand zeichnet tier3 nun bis zu
+   * so grossen entfernungen, dass tier2 nicht mehr vorkommt. darum verschwindet
+   * die baumkrone einfach, weil du tier1 noch nicht gebaut hast."
+   * Gemessen an einem Baum (Bildhoehe 360 px, Blatt 0,379 m): R1 = 115,98 m,
+   * R2 = 320 m (Klemme) gegen eine Baukante von 180 m - die Karten-Blende lag bei
+   * 104..128 m, dahinter gab es nichts mehr. Solange es keine FERNE-Stufe im
+   * Puffer gibt, muessen die Karten bis zur Baukante durchhalten, also
+   * R2 >= 1,15 x buildR. */
   if(focalPx > 0.0f && leafM > 0.0f) L->R1 = leafM * focalPx / LOD_LEAF_PX;
   else                               L->R1 = 30.0f;
   if(focalPx > 0.0f && cardM > 0.0f) L->R2 = cardM * focalPx / LOD_CARD_PX;
   else                               L->R2 = 3.0f * L->R1;
-  if(L->R1 < 8.0f)   L->R1 = 8.0f;      else if(L->R1 > 160.0f) L->R1 = 160.0f;
+  if(buildR > 0.0f){
+    if(L->R1 > 0.45f * buildR) L->R1 = 0.45f * buildR;   // Stufe 2 muss vorkommen
+    if(L->R2 < 1.15f * buildR) L->R2 = 1.15f * buildR;   // Karten halten bis zur Kante
+  }
+  if(L->R1 < 8.0f)   L->R1 = 8.0f;
   if(L->R2 < 1.5f * L->R1) L->R2 = 1.5f * L->R1;
-  if(L->R2 > 320.0f) L->R2 = 320.0f;
   if(lodScale > 0.0f){ L->R1 *= lodScale; L->R2 *= lodScale; }
 }
 

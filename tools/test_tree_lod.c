@@ -224,14 +224,15 @@ int main(void){
       {0.05f,0.10f,1836.0f},{0.09f,0.18f,1836.0f},{0.14f,0.28f,1836.0f},
       {0.001f,0.001f,1836.0f},{0.09f,0.18f,0.0f} };
     for(int ci = 0; ci < (int)(sizeof(C)/sizeof(C[0])); ci++){
-      TreeLod L; treeLodInitPx(&L, C[ci].leafM, C[ci].cardM, C[ci].focal, 0.0f);
+      TreeLod L; treeLodInitPx(&L, C[ci].leafM, C[ci].cardM, C[ci].focal, 180.0f, 0.0f);
       float w1 = C[ci].leafM * C[ci].focal / LOD_LEAF_PX;
       if(C[ci].focal <= 0.0f) w1 = 30.0f;
-      if(w1 < 8.0f) w1 = 8.0f; else if(w1 > 160.0f) w1 = 160.0f;
+      if(w1 > 0.45f * 180.0f) w1 = 0.45f * 180.0f;   // Stufe 2 muss vor der Baukante liegen
+      if(w1 < 8.0f) w1 = 8.0f;
       ok(fabsf(L.R1 - w1) < 1e-3f, "R1 = %.2f, erwartet %.2f (Blatt %.3f m, focal %.0f px)",
          L.R1, w1, C[ci].leafM, C[ci].focal);
       ok(L.R2 >= 1.5f * L.R1 - 1e-3f, "R2 = %.2f liegt unter dem 1,5-fachen von R1 = %.2f", L.R2, L.R1);
-      ok(L.R2 <= 320.0f + 1e-3f, "R2 = %.2f ueber 320 m", L.R2);
+      ok(L.R2 >= 1.15f * 180.0f - 1e-3f, "R2 = %.2f endet vor der Baukante (Karten verschwinden)", L.R2);
       for(int bi = 0; bi < 2; bi++){
         L.bb = bi;
         float worst = 0.0f, slope = 0.0f, prev = -1.0f;

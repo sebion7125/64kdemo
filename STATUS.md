@@ -3306,3 +3306,22 @@ Nebenbefunde:
    der Verzweigung wachsen lassen (und die Ring-Querschnitte mitdrehen).
  - Das Blaetter-Rascheln ist unnatuerlich stark; natuerlicher waeren kleinere
    Blattbewegung und mehr Zweigbewegung.
+
+## STUFEN WIEDER IN DER WELT (Nutzer: "tier3 bis zu so grossen entfernungen, dass
+## tier2 nicht mehr vorkommt, darum verschwindet die Baumkrone")
+treeLodInitPx bekommt die Baukante buildR = treeBuildRange * TREE_G = 180 m:
+  R1 = min(Bildgroessen-Kriterium, 0,45 * buildR)   -> Stufe 2 kommt sicher vor
+  R2 = max(Bildgroessen-Kriterium, 1,15 * buildR)   -> Karten halten bis zur Baukante
+Gemessen (Bildhoehe 360 px): R1 = 81,0 m (vorher 115,98 m), R2 = 207..547 m.
+648 Baeume, 0 uebersprungen, 0 heruntergestuft, 1 701 080 Blatt-Instanzen (Cap 2,4 Mio).
+
+## SILHOUETTEN-VERGLEICH BLATT vs. KARTEN, 70 m, derselbe Baum, beide Stufen voll
+(Blatt bei DEMO_LODRSCALE=1, Karten bei 0.5 - gleiche Kamera, gleicher Baum, nur
+die Schaltweiten verschoben, damit beide Schichten bei 70 m voll zeichnen)
+  |Blatt| 19 184 px   |Karten| 18 859 px   beide 18 781 px
+  nur Blatt  403 px (2,1 %) auf 108 Flecken, groesster 52 px, 100 Flecken <= 9 px
+  nur Karten  78 px (0,4 %) auf  25 Flecken, groesster 30 px,  24 Flecken <= 9 px
+Die Karten decken also fast genau dieselbe Flaeche (1,7 % weniger), und die
+Pixel, bei denen nur EINE Stufe deckt, sind 2,5 % der Krone in Flecken von
+1..3 px Kantenlaenge. Vorherige Messung ("ein grosser Fleck 3 365 px") war
+gueltigkeitslos: da lag die Karten-Blende wegen R1 = 116 m hinter der Baukante.
