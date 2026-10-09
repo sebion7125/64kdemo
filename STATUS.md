@@ -3367,3 +3367,62 @@ Blendenbands" den allerersten Build mit (Vorgänger = −1); das ist kein
 
 Grenze des Tests: bei 180 Bildzeilen passt ein 8,4-m-Baum erst ab ~14 m
 voll ins Bild, deshalb fährt der Test bis 20 m.
+
+## UMGESETZT 2026-10-09 (Runde 37): Zwei-Puffer-Composite fuer den LOD-Uebergang (Nutzerentwurf)
+
+Der Nutzerentwurf von Runde 81 ist jetzt gebaut: **beide Stufen werden in eigene
+Puffer opak gezeichnet und erst pro Pixel gemischt.** Kein Alpha-Blend, damit
+keine zwei halbtransparenten Folien und keine Reihenfolgenabhaengigkeit.
+
+Ablauf im Frame (`src/main.c`, `DEMO_COMP`, Standard jetzt **an**):
+
+1. Szenen-Tiefe vor den Baeumen in `texDepthS` kopieren (Blit von `fboMS`).
+2. **Phase 1** in `fboMS`: alles ausser der einkommenden Stufe (abgehende Stufe
+   im Band bei Gewicht 1, statische Schichten normal).
+3. MSAA-Resolve nach `fbo`.
+4. **Phase 2** in `fboB` (Tiefe vorher aus `texDepthS` geladen): nur die
+   einkommende Stufe, opak, Gewicht im Alpha-Kanal (`crown.frag`:
+   `O = vec4(col, uCompPhase > 1.5 ? clamp(vCompW,0,1) : 1)`).
+5. Composite-Pass (`src/shaders/comp.vert/frag`) nach `fboC` — Ziel ist ein
+   dritter Puffer, weil `texScene`/`texDepth` gelesen werden (Rueckkopplung
+   sonst undefiniert) — und Blit nach `fbo`.
+
+Composite-Regeln pro Pixel (`covA/covB` = Stufe deckt, erkannt an ihrer Tiefe
+gegen `texDepthS`): beide decken -> `mix(A, B, Gewicht)`; nur eine deckt -> die
+(unveraendert, also kein Loch und kein Durchblick); keine deckt -> Szene.
+Ausgabe-Tiefe = `min(dA, dB)`.
+
+Phasen in den Shadern steuert eine Uniform `uCompPhase` (in `lod.glsl`, also in
+Blatt-, Karten- und Geruest-Shader identisch): 0 = normal, 1 = Basis,
+2 = nur einkommende Stufe. Das Geruest wird in Phase 2 wegucullt (sonst staende
+es zweimal im Bild).
+
+Messung (Ein-Baum-Test, 320x180, Kamerafahrt 40 -> 20 m in 0,5-m-Schritten):
+
+| | ohne Composite | mit Composite |
+|---|---|---|
+| Deckungskurve | 489 ... 983 px, monoton | 510 ... 991 px, monoton |
+| groesste Deckungs-Delle | 0,00 % | 0,00 % |
+| Bildunterschied bei 38 m | — | 705 von 18300 Baumpixeln, max Delta 144 |
+| Phase-2-Deckung bei 39,5 m | — | 297 Pixel, mittleres Gewicht 0,54 |
+
+Zwei Fehler, die der Test gefunden hat (beide gemessen, nicht vermutet):
+
+* Der Composite-Pass zeichnete nichts und der Draw meldete `GL_INVALID_OPERATION
+  (0x502)`, weil ohne Gebietsobjekt gezeichnet wurde. In ES 3.0 ist ein Draw ohne
+  VAO ungueltig — leere `vaoComp` angelegt. Folge vorher: `fboC` blieb schwarz
+  und wurde in die Szene kopiert -> **schwarzes Bild ab dem ersten Satz-Wechsel**.
+* `treeBandCount` (entscheidet, ob der Composite laeuft) wurde in
+  `trees_build_begin` gesetzt, also **vor** der Baum-Schleife — immer ein Build zu
+  spaet bzw. beim Erstbuild 0. Jetzt in `trees_build_finish`.
+
+Kosten: die Baum-Passe laufen in einem Frame mit Band-Baeumen zweimal; der
+Vertex-Durchsatz fuer den ganzen Wald verdoppelt sich (Phasen-Culling passiert im
+Vertex-Shader, nicht als Draw-Range). Host-Messung noetig — in der VM ist die
+Frame-Zeit dafuer wertlos.
+
+Nebenbefund: die Determinismus-Pruefung des Selbsttests schlaegt in diesem
+Szenario auch ohne meine Aenderungen fehl (HEAD 109 703 unterschiedliche Pixel,
+mit Composite 82 426). Ursache ist die bekannte Zeitabhaengigkeit: Build laeuft
+im Thread, Upload in Scheiben, der Screenshot nach Frame 4 erwischt je nach Lauf
+unterschiedliche Geometrie. Pruefung nicht abgeschwaecht.

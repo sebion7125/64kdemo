@@ -20,6 +20,12 @@
 //   uFlut = 0 -> kein Flatter-Rauschen auf der Silhouette (weisses Flimmern).
 uniform float uFizOn = 1.0;
 uniform float uFlut = 1.0;
+// Composite (DEMO_COMP=1): 0 = normal, 1 = Basispass (alles ausser der
+// einkommenden Stufe), 2 = nur die einkommende Stufe (Alpha = Gewicht).
+// Beide Passe werden OPAK mit Alpha-Test gezeichnet, gemischt wird erst im
+// Composite-Pass (src/shaders/comp.frag) - kein Alpha-Blend, keine
+// Reihenfolgenabhaengigkeit, kein Loch wo nur eine Stufe deckt.
+uniform float uCompPhase = 0.0;
 
 // 0 auerhalb (nah) -> 1 jenseits des Bands: die kommende Schicht.
 // Praesenz-Gating (Spiegelbild der LOD_PRES_*-Bits in src/tree_lod.h): pres
@@ -28,6 +34,8 @@ uniform float uFlut = 1.0;
 // Haelfte die uebernehmende Schicht, muss die abgehende voll bleiben — sonst
 // steht der Baum mitten im Blendenband ohne Laub da.
 float lodBit(float pres, float b){ return mod(floor(pres / b), 2.0); }
+// liegt d im Blendenband um R? (dasselbe Band wie lodBandIn/lodBandOut)
+float lodInBand(float R, float d){ return (d > R * 0.90 && d < R * 1.10) ? 1.0 : 0.0; }
 float lodBandIn(float R, float d){ return smoothstep(R * 0.90, R * 1.10, d); }
 // 1 bis zum Band -> 0 dahinter: die abgehende Schicht (Komplement zu lodBandIn).
 float lodBandOut(float R, float d){ return 1.0 - smoothstep(R * 0.90, R * 1.10, d); }

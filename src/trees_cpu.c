@@ -31,6 +31,8 @@ int   treeDbgBucket = -1; float treeDbgRepX = 0, treeDbgRepZ = 0;
 // Geometrie sichtbar -> Sprung. Der Test protokolliert beides gegeneinander.
 int   treeDbgLeafBuilt = 0, treeDbgBranchBuilt = 0, treeDbgMeshFine = 0, treeDbgBB = 0;
 int   treeDbgPres = 0, treeDbgPresForce = -1;
+int   treeBandCount = 0;   // Baeume, die gerade IN einem Blendenband liegen
+static int gBandCnt = 0;
 float treeDbgCutLeaf = 0, treeDbgCutBranch = 0;
 int   treeGenMode = 1;   // 0 = eigener Generator, 1 = EZ-Tree-Port
 int   treeEzPreset = -1;   // DEMO_EZPRESET=0..3: Preset erzwingen (-1 = pro Baum gewuerfelt)
@@ -1527,6 +1529,12 @@ int trees_build_step(int maxTrees){
     // R1 = 20 m also 6 m) fehlten Blaetter, obwohl die Kamera schon innerhalb der
     // Blende war -> Blätter verschwanden schlagartig (Nutzerbefund).
     ezWantLeaves = (d <= treeLodLeafCut(&TL));
+    // Composite-Schalter: liegt dieser Baum in einem Blendenband? Gebaut wird
+    // gegen das Build-Zentrum, die Blende laeuft gegen die Kamera — der Puffer
+    // von LOD_BUILD_LAG deckt den Nachlauf ab, sonst laeuft der Composite-Pass
+    // in einem Frame an und im naechsten aus.
+    if((d > R1 * 0.90f - LOD_BUILD_LAG && d < R1 * 1.10f + LOD_BUILD_LAG) ||
+       (d > R2 * 0.90f - LOD_BUILD_LAG && d < R2 * 1.10f + LOD_BUILD_LAG)) gBandCnt++;
     // Budget: passt ein BAUM nicht mehr in die Puffer, wird er uebersprungen —
     // und nicht mitten im Ast abgebrochen. Ein abgebrochener Baum sieht aus wie
     // ein abgesaegter Stamm ohne Laub (Nutzerbefund; gemessen: 54 Cap-Abbrueche,
@@ -1681,6 +1689,7 @@ static void trees_sort_candidates(void){
 // Tausch Schreib-/Zeichenseite. Von hier an sieht der Main-Thread den fertigen
 // Build (und der Worker kann den naechsten in die jetzt freie Schreibseite bauen).
 void trees_build_finish(void){
+  treeBandCount = gBandCnt;   // Zahl der Baeume in einem Blendenband (Composite)
   pthread_mutex_lock(&treeMu);
   float *tp;
   tp = treeVerts;   treeVerts = treeVertsD;   treeVertsD = tp;

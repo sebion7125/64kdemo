@@ -138,7 +138,8 @@ extern int   treeDbgTier, treeDbgVerts, treeDbgCrown, treeDbgLeaf, treeDbgBuilds
 extern float treeDbgR1, treeDbgR2, treeDbgDBuild, treeDbgH, treeDbgX, treeDbgZ, treeDbgY;
 extern int   treeDbgBucket; extern float treeDbgRepX, treeDbgRepZ;
 extern int   treeDbgLeafBuilt, treeDbgBranchBuilt, treeDbgMeshFine, treeDbgBB;
-extern int   treeDbgPres, treeDbgPresForce;   // Praesenz-Bits des letzten gebauten Baums
+extern int   treeDbgPres, treeDbgPresForce;
+extern int   treeBandCount;   // Baeume in einem Blendenband (Composite noetig?)   // Praesenz-Bits des letzten gebauten Baums
 extern float treeDbgCutLeaf, treeDbgCutBranch;
 extern int   treeBuildRange;   // Zellen-Radius, in dem Baeume gebaut werden
 extern int treeCardDiv0; extern float treeCardScale0;   // DEMO_CARDT0 (Sweep-Bank)

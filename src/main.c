@@ -255,6 +255,8 @@ extern const char TREELINES_FS_SRC[];
 extern const char REED_VS_SRC[];
 extern const char REED_FS_SRC[];
 extern const char TREE_VS_SRC[];
+extern const char COMP_VS_SRC[];
+extern const char COMP_FS_SRC[];
 extern const char TREE_FS_SRC[];
 extern const char GRASS_VS_SRC[];
 extern const char GRASS_FS_SRC[];
@@ -391,6 +393,12 @@ static double now_sec(void) {
 // Farbtextur RGBA16F (HDR, Mesh + Raymarch), Depth-Texture DEPTH_COMPONENT24
 // (Mesh-Pass schreibt Tiefe, Raymarch-Pass compositet dagegen).
 static GLuint fbo = 0, texScene = 0, texDepth = 0;      // Single-Sample (Compositing + Sampling)
+static GLuint fboB = 0, texB = 0, texDepthB = 0;      // Composite: einkommende Stufe
+static GLuint vaoComp = 0;                              // Composite: leere VAO (ES 3.0: ohne VAO ist Draw ungueltig)
+static GLuint fboC = 0, texC = 0, texDepthC = 0;      // Composite: Ziel (texScene/texDepth werden gelesen)
+static GLuint fboS = 0, texDepthS = 0;                // Composite: Szenen-Tiefe vor Baeumen
+static int    envComp = 1;                            // DEMO_COMP=0 schaltet den Composite aus
+static int    dbgCompDepth = 1;                     // DEMO_COMPDEPTH=0: Composite ohne Tiefen-Write
 static GLuint fboMS = 0, rbColorMS = 0, rbDepthMS = 0;   // Multi-Sample (Mesh-Render, MSAA)
 static int fboW = 0, fboH = 0;
 static int useMSAA = 1;   // 1 = MSAA an (M-Taste zum Umschalten: 4x -> 8x -> off)
@@ -545,6 +553,57 @@ static void ensure_fbo(int w, int h) {
   p_glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rbDepthMS);
   if (p_glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
     fprintf(stderr, "FBO-MS unvollstaendig!\n");
+  // COMPOSITE-Puffer (DEMO_COMP=1): Phase 2 zeichnet die einkommende Stufe in
+  // einen eigenen Farb- + Tiefenpuffer; dazu kommt die Szenen-Tiefe VOR den
+  // Baeumen, damit der Composite-Pass fragen kann "deckt diese Stufe hier?".
+  if(envComp && fboB == 0){
+    p_glGenTextures(1, &texB);
+    p_glBindTexture(GL_TEXTURE_2D, texB);
+    p_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, sw, sh, 0, GL_RGBA, GL_HALF_FLOAT, 0);
+    p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    p_glGenTextures(1, &texDepthB);
+    p_glBindTexture(GL_TEXTURE_2D, texDepthB);
+    p_glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, sw, sh, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, 0);
+    p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    p_glGenFramebuffers(1, &fboB);
+    p_glBindFramebuffer(GL_FRAMEBUFFER, fboB);
+    p_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texB, 0);
+    p_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, texDepthB, 0);
+    if(p_glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+      fprintf(stderr, "Composite-FBO B unvollstaendig!\n");
+    p_glGenTextures(1, &texC);
+    p_glBindTexture(GL_TEXTURE_2D, texC);
+    p_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, sw, sh, 0, GL_RGBA, GL_HALF_FLOAT, 0);
+    p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    p_glGenTextures(1, &texDepthC);
+    p_glBindTexture(GL_TEXTURE_2D, texDepthC);
+    p_glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, sw, sh, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, 0);
+    p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    p_glGenVertexArrays(1, &vaoComp);
+    p_glGenFramebuffers(1, &fboC);
+    p_glBindFramebuffer(GL_FRAMEBUFFER, fboC);
+    p_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texC, 0);
+    p_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, texDepthC, 0);
+    if(p_glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+      fprintf(stderr, "Composite-FBO C unvollstaendig!\n");
+    p_glGenTextures(1, &texDepthS);
+    p_glBindTexture(GL_TEXTURE_2D, texDepthS);
+    p_glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, sw, sh, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, 0);
+    p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    p_glGenFramebuffers(1, &fboS);
+    p_glBindFramebuffer(GL_FRAMEBUFFER, fboS);
+    p_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, texDepthS, 0);
+    if(p_glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+      fprintf(stderr, "Composite-FBO S unvollstaendig!\n");
+  }
+  p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
   // Brennweite in Pixeln hier setzen: der Build braucht sie fuer die
   // Bildgroessen-Schaltweiten, und der erste Build laeuft vor dem ersten Frame.
   trees_set_focal_px(1.7f * (float)sh);
@@ -1968,6 +2027,7 @@ int main(int argc, char **argv) {
   GLuint progHud   = make_program(HUD_VS_SRC, HUD_FS_SRC, "hud");
   GLuint progWire  = make_program(TREELINES_VS_SRC, TREELINES_FS_SRC, "wire");
   GLuint progTMesh = make_program(TREE_VS_SRC, TREE_FS_SRC, "tmesh");
+  GLuint progComp  = make_program(COMP_VS_SRC, COMP_FS_SRC, "comp");
   GLuint progGrass = make_program(GRASS_VS_SRC, GRASS_FS_SRC, "grass");
   GLuint progReed = make_program(REED_VS_SRC, REED_FS_SRC, "reed");  // laeuft auch, wenn der Pass aus ist (Taste 2)
   GLint locRMVP = -1, locRCam = -1, locRTime = -1, locRReedH = -1, locRReedD = -1,
@@ -2076,6 +2136,14 @@ int main(int argc, char **argv) {
   GLint locCBB     = p_glGetUniformLocation(progCrown, "uBillboardOn");
   GLint locCBP     = p_glGetUniformLocation(progCrown, "uBBPresent");
   GLint locTBB     = p_glGetUniformLocation(progTMesh, "uBBPresent");
+  GLint locTPhase  = p_glGetUniformLocation(progTMesh, "uCompPhase");
+  GLint locLPhase  = p_glGetUniformLocation(progLeaf,  "uCompPhase");
+  GLint locCPhase  = p_glGetUniformLocation(progCrown, "uCompPhase");
+  GLint locCompTexA = p_glGetUniformLocation(progComp, "uTexA");
+  GLint locCompTexB = p_glGetUniformLocation(progComp, "uTexB");
+  GLint locCompDA   = p_glGetUniformLocation(progComp, "uDepthA");
+  GLint locCompDB   = p_glGetUniformLocation(progComp, "uDepthB");
+  GLint locCompDS   = p_glGetUniformLocation(progComp, "uDepthS");
   GLint locTFocal  = p_glGetUniformLocation(progTMesh, "uFocalPx");
   GLint locCOld    = p_glGetUniformLocation(progCrown, "uTreeOld");
   GLint locCLFace  = p_glGetUniformLocation(progCrown, "uLightFace");
@@ -2148,6 +2216,8 @@ int main(int argc, char **argv) {
             layBB   = strstr(ly,"bb")   ? 1 : 0; } }
   { const char *ef = getenv("DEMO_FREEZE"); if (ef) envFreeze = (float)atof(ef); }
   { const char *pf = getenv("DEMO_PRESFORCE"); if (pf) treeDbgPresForce = atoi(pf); }
+  { const char *ec = getenv("DEMO_COMP"); if (ec) envComp = atoi(ec); }
+  { const char *ecd = getenv("DEMO_COMPDEPTH"); if (ecd) dbgCompDepth = atoi(ecd); }
   // DEMO_TREEFADE=<sek>: Ueberblendzeit beim LOD-Satzwechsel (0 = hart schneiden)
   { const char *tf = getenv("DEMO_TREEFADE"); if (tf) treeFadeDur = (double)atof(tf); }
   { const char *ts = getenv("DEMO_TIERSWITCH"); if (ts) treeTierSwitchS = (double)atof(ts); }
@@ -3338,11 +3408,28 @@ int main(int argc, char **argv) {
         }
       }
     }
+    // COMPOSITE (DEMO_COMP=1): Szenen-Tiefe vor den Baeumen sichern, dann die
+    // Baum-Passe zweimal zeichnen — Phase 1 = Basis (alles ausser der
+    // einkommenden Stufe) im Szenen-Puffer, Phase 2 = nur die einkommende Stufe
+    // im Scratch-Puffer fboB. Gemischt wird nach dem Resolve in comp.frag.
+    int cmpN = (envComp && treeBandCount > 0) ? 2 : 1;
+    if(cmpN == 2)
+      p_glBlitNamedFramebuffer(fboMS, fboS, 0, 0, fboW, fboH, 0, 0, fboW, fboH,
+                               GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+    for(int cmpPhase = 1; cmpPhase <= cmpN; cmpPhase++){
+    if(cmpPhase == 2){
+      // Szenen-Tiefe in den Scratch-Puffer laden, damit Phase 2 gegen dieselbe
+      // Geometrie testet wie Phase 1.
+      p_glBlitNamedFramebuffer(fboS, fboB, 0, 0, fboW, fboH, 0, 0, fboW, fboH,
+                               GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+      p_glBindFramebuffer(GL_FRAMEBUFFER, fboB);
+    }
     // Baum-Mesh (Stamm/Aeste)
     if (!grassOnly) {
       p_glEnable(GL_BLEND);
       p_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
       p_glUseProgram(progTMesh);
+      if(locTPhase >= 0) p_glUniform1f(locTPhase, (float)cmpPhase);
       p_glUniformMatrix4fv(locTMVP, 1, GL_FALSE, mvp);
       p_glUniform3f(locTCam, camPos[0], camPos[1], camPos[2]);
       p_glUniform1f(locTTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
@@ -3483,6 +3570,7 @@ int main(int argc, char **argv) {
       p_glDepthMask(GL_TRUE);
       p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
       p_glUseProgram(progLeaf);
+      if(locLPhase >= 0) p_glUniform1f(locLPhase, (float)cmpPhase);
       if(locLFocal >= 0) p_glUniform1f(locLFocal, 1.7f * (float)fboH);
       if(locLFiz >= 0) p_glUniform1f(locLFiz, dbgFizzle ? 1.0f : 0.0f);
       if(locLFlut >= 0) p_glUniform1f(locLFlut, dbgFlutter ? 1.0f : 0.0f);
@@ -3546,6 +3634,7 @@ int main(int argc, char **argv) {
       p_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
       p_glDepthMask(GL_TRUE);
       p_glUseProgram(progCrown);
+      if(locCPhase >= 0) p_glUniform1f(locCPhase, (float)cmpPhase);
       if(locCFocal >= 0) p_glUniform1f(locCFocal, 1.7f * (float)fboH);
       if(locCFiz >= 0) p_glUniform1f(locCFiz, dbgFizzle ? 1.0f : 0.0f);
       if(locCFlut >= 0) p_glUniform1f(locCFlut, dbgFlutter ? 1.0f : 0.0f);
@@ -3599,12 +3688,87 @@ int main(int argc, char **argv) {
       p_glDepthMask(GL_TRUE);
       p_glDisable(GL_BLEND);
     }
+    if(cmpPhase == 1 && useMSAA){
+      p_glBlitNamedFramebuffer(fboMS, fbo, 0, 0, fboW, fboH, 0, 0, fboW, fboH,
+                               GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+      p_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    }
+    }   // for(cmpPhase)
+
+    // COMPOSITE: beide Stufen liegen in eigenen Puffern, gemischt wird pro Pixel
+    // (comp.frag). Ziel ist fboC, weil texScene/texDepth gelesen werden — ein
+    // direktes Schreiben in fbo waere eine Rueckkopplung (undefiniert).
+    if(cmpN == 2){
+      if(getenv("DEMO_COMPDBG")) printf("COMPDBG-step nach Phase2: GL 0x%x\n", p_glGetError());
+      p_glBindFramebuffer(GL_FRAMEBUFFER, fboC);
+      if(getenv("DEMO_COMPDBG")) printf("COMPDBG-step bind fboC: GL 0x%x status %d\n", p_glGetError(), p_glCheckFramebufferStatus(GL_FRAMEBUFFER));
+      p_glDisable(GL_BLEND);
+      p_glEnable(GL_DEPTH_TEST);
+      p_glDepthFunc(GL_ALWAYS);
+      p_glDepthMask(dbgCompDepth ? GL_TRUE : GL_FALSE);   // DIAGNOSE
+      p_glUseProgram(progComp);
+      p_glActiveTexture(GL_TEXTURE0); p_glBindTexture(GL_TEXTURE_2D, texScene);
+      if(locCompTexA >= 0) p_glUniform1i(locCompTexA, 0);
+      p_glActiveTexture(GL_TEXTURE1); p_glBindTexture(GL_TEXTURE_2D, texDepth);
+      if(locCompDA >= 0) p_glUniform1i(locCompDA, 1);
+      p_glActiveTexture(GL_TEXTURE2); p_glBindTexture(GL_TEXTURE_2D, texB);
+      if(locCompTexB >= 0) p_glUniform1i(locCompTexB, 2);
+      p_glActiveTexture(GL_TEXTURE3); p_glBindTexture(GL_TEXTURE_2D, texDepthB);
+      if(locCompDB >= 0) p_glUniform1i(locCompDB, 3);
+      p_glActiveTexture(GL_TEXTURE4); p_glBindTexture(GL_TEXTURE_2D, texDepthS);
+      if(locCompDS >= 0) p_glUniform1i(locCompDS, 4);
+      if(getenv("DEMO_COMPDBG")){ static int cdbg=0;
+        if(cdbg++ < 4){ float ds=0,da=0,db=0;
+          p_glBindFramebuffer(GL_FRAMEBUFFER, fboS);
+          p_glReadPixels(fboW/2, fboH/2, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &ds);
+          p_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+          p_glReadPixels(fboW/2, fboH/2, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &da);
+          p_glBindFramebuffer(GL_FRAMEBUFFER, fboB);
+          p_glReadPixels(fboW/2, fboH/2, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &db);
+          printf("COMPDBG frame %d: Tiefe Mitte  Szene %.5f  nach Phase1 %.5f  Phase2 %.5f |"
+                 " GL 0x%x  Baum bei %.1f m\n", ltFrame, ds, da, db, p_glGetError(), 0.0f);
+          p_glBindFramebuffer(GL_FRAMEBUFFER, fboC);
+        } }
+      if(getenv("DEMO_COMPDBG")){ static int cdbg3=0;
+        if(cdbg3++ < 3){
+          float *buf = (float*)malloc(sizeof(float)*4*(size_t)fboW*fboH);
+          p_glBindFramebuffer(GL_FRAMEBUFFER, fboB);
+          p_glReadPixels(0, 0, fboW, fboH, GL_RGBA, GL_FLOAT, buf);
+          int nb = 0, na = 0; float sumw = 0;
+          for(int k = 0; k < fboW * fboH; k++)
+            if(buf[4*k+0] + buf[4*k+1] + buf[4*k+2] > 0.05f){ nb++; sumw += buf[4*k+3]; }
+          p_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+          p_glReadPixels(0, 0, fboW, fboH, GL_RGBA, GL_FLOAT, buf);
+          for(int k = 0; k < fboW * fboH; k++)
+            if(buf[4*k+0] + buf[4*k+1] + buf[4*k+2] > 0.05f) na++;
+          printf("COMPDBG3 Phase2-Pixel %d (mittl. Gewicht %.3f)  Phase1-Pixel %d | GL 0x%x\n",
+                 nb, nb?sumw/nb:0.0f, na, p_glGetError());
+          free(buf);
+          p_glBindFramebuffer(GL_FRAMEBUFFER, fboC);
+        } }
+      p_glBindVertexArray(vaoComp);
+      if(getenv("DEMO_COMPDBG")) printf("COMPDBG-step vor Draw: GL 0x%x prog %u\n", p_glGetError(), progComp);
+      p_glDrawArrays(GL_TRIANGLES, 0, 3);
+      if(getenv("DEMO_COMPDBG")) printf("COMPDBG-step nach Draw: GL 0x%x\n", p_glGetError());
+      if(getenv("DEMO_COMPDBG")){ static int cdbg2=0;
+        if(cdbg2++ < 2){ float px[4] = {9,9,9,9}; float dz = 9; GLenum e1;
+          e1 = p_glGetError();
+          p_glReadPixels(fboW/2, fboH/2, 1, 1, GL_RGBA, GL_FLOAT, px);
+          p_glReadPixels(fboW/2, fboH/2, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &dz);
+          printf("COMPDBG2 nach Draw: GL_vorher 0x%x  RGB %.3f %.3f %.3f a %.3f  Tiefe %.5f  GL_nachher 0x%x\n",
+                 e1, px[0], px[1], px[2], px[3], dz, p_glGetError()); } }
+      p_glDepthFunc(GL_LESS);
+      p_glBlitNamedFramebuffer(fboC, fbo, 0, 0, fboW, fboH, 0, 0, fboW, fboH,
+                               GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+      p_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+      p_glActiveTexture(GL_TEXTURE0);
+    }
 
 
     // 3) MSAA-Resolve: fboMS -> fbo (Farbe + Tiefe in einem Blit, Single-Sample)
     //    glBlitNamedFramebuffer (eindeutige 12-Param-Signatur) statt glBlitFramebuffer
     //    (Mesa-GLX liefert fuer letzteren den 10-Param-ARB-Entrypoint -> stille No-Op).
-    if (useMSAA) {
+    if (useMSAA && cmpN == 1) {
       p_glBlitNamedFramebuffer(fboMS, fbo, 0, 0, fboW, fboH, 0, 0, fboW, fboH,
                                GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST);
       p_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
@@ -3656,8 +3820,8 @@ int main(int argc, char **argv) {
           }
         }
       }
-      printf("LT-DECKUNG frame %4d d %6.2f m: %7d helle Pixel (fade %.2f, Satz %d)\n",
-             ltFrame - 1, dCov, lit, treeFadeNew, drawSet);
+      printf("LT-DECKUNG frame %4d d %6.2f m: %7d helle Pixel (fade %.2f, Satz %d, cmp %d, Band %d)\n",
+             ltFrame - 1, dCov, lit, treeFadeNew, drawSet, cmpN, treeBandCount);
       fflush(stdout);
     }
 

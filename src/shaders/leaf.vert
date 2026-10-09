@@ -61,6 +61,12 @@ void main(){
   // einblenden, und das Blending soll nicht gedithert sein"). Der Wert geht als
   // vAlpha ins Fragment und wird dort als echtes Alpha gemischt.
   if(uFizOn < 0.5) keep = (keep >= 0.5) ? 1.0 : 0.0;   // harte Umschaltung
+  // COMPOSITE: Blaetter sind bei R1 die ABGEHENDE Stufe. Phase 1 zeichnet sie
+  // im Band voll, Phase 2 zeichnet sie gar nicht (dort kommt die Kartenstufe).
+  if(uCompPhase > 0.5){
+    if(uCompPhase < 1.5){ if(lodInBand(iLodR, d) > 0.5) keep = 1.0; }
+    else keep = 0.0;
+  }
   vFiz1 = keep; vFizInv1 = 0.0;
   vFizScale = lodFizScale(uFocalPx, d);   // derselbe Anker-Abstand wie crown.vert
   if(keep <= 0.002) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }

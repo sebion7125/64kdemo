@@ -4,6 +4,7 @@ in vec2 vUV;
 in vec3 vPos;
 in float vSeed;
 in float vFade;
+in float vCompW;   // Composite: Gewicht der einkommenden Stufe
 in float vFiz1, vFiz2, vFizInv1, vFizInv2, vFizScale;
 in vec2 vTile;      // Atlas-Kachel (Spalte, Zeile)
 in float vCrown;      // 1 = Ganzbaum-Kachel statt Buschel-Kachel
@@ -173,5 +174,7 @@ void main(){
   // einen Texel kleiner (Nutzerbefund " sprunghaft ein bisschen kleiner, der
   // Texeluebergang wandert um ein Texel"). Eine Blende darf keine Kantenregel
   // wechseln - cov ist bei vFade = 1 dasselbe wie vorher a.
-  O = vec4(col, 1.0);   // Karten sind OPAK (fizzle, kein Alpha-Blend)
+  // Composite-Phase 2: das Gewicht kommt in den Alpha-Kanal, der
+  // Composite-Pass mischt damit (comp.frag). Sonst sind Karten OPAK.
+  O = vec4(col, uCompPhase > 1.5 ? clamp(vCompW, 0.0, 1.0) : 1.0);
 }

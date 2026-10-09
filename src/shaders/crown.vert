@@ -29,6 +29,7 @@ out vec2 vUV;
 out vec3 vPos;
 out float vSeed;
 out float vFade;
+out float vCompW;   // Composite: Gewicht der einkommenden Stufe (Alpha)
 out float vFiz1, vFiz2, vFizInv1, vFizInv2, vFizScale;   // fizzle (lod.glsl)
 out vec2 vTile;      // Atlas-Kachel (Spalte, Zeile)
 out float vCrown;    // 1 = Ganzbaum-Kachel (tier 0) statt Buschel-Kachel
@@ -153,6 +154,20 @@ void main(){
   // die Staemme gingen aber bis ~255 m -> kahle Stummel in der Ferne.
   float far = 1.0 - smoothstep(190.0, 250.0, d3);
   w1 *= far * uTreeFade;  w2 *= far * uTreeFade;
+  // COMPOSITE (DEMO_COMP): Phase 1 = Basis (alles ausser der einkommenden
+  // Stufe), Phase 2 = nur die einkommende Stufe, Alpha = Gewicht (vCompW).
+  vCompW = 0.0;
+  if(uCompPhase > 0.5){
+    float in1 = lodInBand(iLodR, d);
+    float in2 = (iLodR2 > 0.0) ? lodInBand(iLodR2, d) : 0.0;
+    if(bbq > 0.5){                                  // Ganzbaum-Kachel: ein bei R2
+      if(uCompPhase < 1.5) w2 = 0.0;
+      else { w2 = 1.0; vCompW = lodBandIn(iLodR2, d); }
+    } else {                                        // Karten: ein bei R1, aus bei R2
+      if(uCompPhase < 1.5){ if(in1 > 0.5) w1 = 0.0; if(in2 > 0.5) w2 = 1.0; }
+      else { w1 = (in1 > 0.5) ? 1.0 : 0.0; w2 = 1.0; vCompW = lodBandIn(iLodR, d); }
+    }
+  }
   if(uFizOn < 0.5){ w1 = (w1 >= 0.5) ? 1.0 : 0.0; w2 = (w2 >= 0.5) ? 1.0 : 0.0; }
   vFiz1 = w1; vFiz2 = w2; vFizInv1 = inv1; vFizInv2 = inv2;
   // Weltzellen von etwa EINEM Bildpunkt (Anker des Baums, damit Blatt- und

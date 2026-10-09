@@ -85,6 +85,12 @@ void main(){
   // (0,90..1,10 R2): die Gewichte sind komplementaer, Summe immer 1.
   // ohne Billboard im Puffer bleibt das Geruest bis zur Bau-Grenze stehen
   float mf = lodWMesh(aR2, md, uBBPresent);
+  // COMPOSITE Phase 2: das Geruest gehoert zur Basisstufe und wird nur in
+  // Phase 1 gezeichnet — sonst staende es zweimal im Bild.
+  if(uCompPhase > 1.5){ gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  // COMPOSITE Phase 2: das Geruest gehoert zur Basisstufe, es wird nur in
+  // Phase 1 gezeichnet — sonst staende es zweimal im Bild.
+  if(uCompPhase > 1.5){ gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vMeshFade = uMeshFade * mf;
   // Cull am ENTFERNUNGS-Faktor, nicht am multiplizierten: im Schattenwurf-Pass
   // ist uMeshFade = 0, das haette das ganze Geruest aus der Schattenkarte
