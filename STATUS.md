@@ -3215,3 +3215,28 @@ weg, die verbleibende liegt woanders). Kein dunkles Pixel im Szenenlauf
 * tools/selftest.sh: HUD-Ausnahme 48 -> 56 Zeilen (die dritte HUD-Zeile reicht
   bei 640x360 bis y=50; die 19 "nicht deterministischen" Pixel waren HUD-Text),
   Standard-Lauf 20 s -> 35 s (der Lauf braeuchte laenger, die Caps-Zeile fehlte).
+
+## SCHRITT 4: gemeinsamer Laub-Shaderweg (Punkt 2 der Nutzerentscheidung)
+Neu src/shaders/foliage.glsl: hash12/vnoise/fbm, skyColor, shadowAt und die
+Beleuchtung (foliageLight) stecken jetzt EINMAL und werden von leaf.frag und
+crown.frag per #include eingebunden. Vorher je zweimal (hash12 135 + vnoise 236
++ fbm 166 + skyColor 600 + shadowAt 899 Byte = 2 036 Byte doppelt) und an zwei
+Stellen unterschiedlich: fbm 3 vs 4 Oktaven, Transluzenz im Blatt-Shader von der
+Blickrichtung abhaengig, im Kronen-Shader von der Normalen.
+Keine Groessenersparnis: gen_shaders.sh expandiert den Include pro Programm,
+beide Programm-Strings enthalten den Code weiterhin (shaders_gen.c 62 308 ->
+62 417 Byte). Der Gewinn ist, dass die Beleuchtung nicht mehr auseinanderlaufen
+kann.
+
+GEMESSENE FARBLUECKE (ein Baum, Terrain/Gras/Schilf aus, Zeit eingefroren,
+Mittel ueber alle Laubpixel):
+  20 m, nur Einzelblaetter : 7 412 px  (74,121,55)
+  45 m, nur Cluster-Quadate: 3 141 px  (99,166,76)   -> +25 / +45 / +21
+  34 m (Band), nur Karten  : 3 897 px  (87,140,67)
+  34 m (Band), Karten+Blaetter: 3 897 px (88,141,68)  -> Vereinigung = Kartenflaeche
+Dunst ist bei 45 m noch 0 (fog setzt bei 60 m ein), die Differenz ist also echt.
+Ursachen (noch nicht belegt): Kartenskala kmul 1,0 gegen 0,85..1,0 beim Blatt,
+Albedo-Modulation des Einzelblatts (pat, Rippe, Ader, Rand -18 %), andere
+Normalenverteilung (Blatt flach/beliebig, Karte senkrecht), Helligkeit der
+Atlas-Kachel selbst. Naechster Schritt: Mittelwert der Atlas-Kachel gegen die
+Mittel-Albedo der Einzelblaetter messen und die Kartenfarbe darauf abgleichen.
