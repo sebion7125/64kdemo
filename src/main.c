@@ -401,7 +401,8 @@ static GLuint fboC = 0, texC = 0, texDepthC = 0;      // Composite: Ziel (texSce
 static GLuint fboS = 0, texDepthS = 0;                // Composite: Szenen-Tiefe vor Baeumen
 static int    envComp = 1;
 static int    compMixOn = 1;   // DEMO_COMPMIX=0: Mischpass ueberspringen (Messbank)
-static float  csPad = 2.0f;    // DEMO_COMPPAD: Boxrand in px (Messbank)                            // DEMO_COMP=0 schaltet den Composite aus
+static float  csPad = 2.0f;    // DEMO_COMPPAD: Boxrand in px (Messbank)
+static GLint  locCImpDbg = -1; // Messbank DEMO_COMPMIX=3: uImpostor aus                            // DEMO_COMP=0 schaltet den Composite aus
 static int    dbgCompDepth = 1;                     // DEMO_COMPDEPTH=0: Composite ohne Tiefen-Write
                    // DEMO_MIXTOL: Mischen nur bis so viel m Tiefenabstand
 static GLuint fboMS = 0, rbColorMS = 0, rbDepthMS = 0;   // Multi-Sample (Mesh-Render, MSAA)
@@ -3942,7 +3943,7 @@ int main(int argc, char **argv) {
           }
           // Messbank DEMO_COMPMIX=0: die Kopie direkt zurueckkopieren. Damit
           // trennt man "Mischpass zeichnet nichts" von "Rueckblit kaputt".
-          p_glBlitNamedFramebuffer((compMixOn == 1 || compMixOn == 2) ? fboC : fboB, fbo, bx, by, bx + bw, by + bh,
+          p_glBlitNamedFramebuffer((compMixOn >= 1) ? fboC : fboB, fbo, bx, by, bx + bw, by + bh,
                                    bx, by, bx + bw, by + bh, GL_COLOR_BUFFER_BIT, GL_NEAREST);
           p_glEnable(GL_DEPTH_TEST);
           if(getenv("DEMO_COMPDBG")){ static int cd7 = 0;
