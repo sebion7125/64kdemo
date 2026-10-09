@@ -3167,3 +3167,33 @@ Offene Entscheidungen:
    ODER direkt die Huelle (billiger, aber Buschelstruktur weg -> Klumpen).
 2. Wie viele verschiedene Laub-Shaderwege wir fahren (NAH und MITTE/FERN
    koennen sich Textur und Beleuchtung teilen).
+
+## UMGESETZT: opakes Laub + fizzle (2026-10-09, Schritt 1 von 3)
+Nutzerentscheid (Punkte 1-4): Cluster-Quadrate mit fester Orientierung (div 4,
+Cap 1,2 Mio), flaches Billboard bleibt bis zur Huelle, Shaderweg nur im Fragment
+geteilt, Flutter als Schwellen-Rauschen.
+
+Schritt 1 (dieser Commit) — Fundament:
+* lod.glsl/tree_lod.c: HALT ersatzlos gestrichen, Gewichte wieder exakt
+  komplementaer (|Summe-1| = 0, Wirtstest 30 090 Pruefungen, 0 Fehler).
+* Neu in lod.glsl: lodFizScale/lodFizN/lodFizKeep. Regel: abgehend behaelt
+  n < w, kommend behaelt n >= 1-w, gleiches Rauschen -> disjunkt und
+  vollstaendig. Rauschen an WELTZELLEN der Groesse "ein Bildpunkt auf dieser
+  Entfernung" (lodFizScale = focalPx/d), damit das Muster am Baum klebt und
+  nicht mit der Kamera kriecht. Blatt- und Karten-Shader verwenden denselben
+  Anker-Abstand (aAnchor/iAnchor), also auch dieselbe Zellgroesse.
+* crown.frag/leaf.frag: harte Silhouette (a < 0.5 -> discard) + fizzle-Discard,
+  Ausgabe Alpha 1 (opak). Ganzbaum-Kachel bleibt weiche Alpha-Flaeche (bis die
+  Huelle kommt), Blend im Kronen-Pass bleibt deshalb an — fuer Karten ist
+  Alpha 1 ein Blend-No-op.
+* main.c: Blatt-Pass ohne Blend, Tiefenschreiben immer an; uFocalPx (1,7*H) in
+  crown/leaf gesetzt; A2C aus; Tiefen-Nachpass laeuft nicht mehr (an
+  treeFadeNew<1 gebunden, und das ist aus).
+* Pruefungen (Wirtstest und LT im Engine-Protokoll) zurueck auf die
+  Summen-Invariante, denn bei fizzle ist die Vereinigung exakt, nicht die
+  Blend-Formel 1-(1-a)(1-b).
+
+Messung: ganzer Anflug 140->3 m, groesste Deckungs-Delle -2,16 % bei 77,4 m
+(vorher -2,15 % bei 31,2 m — die Delle am Einzelblatt->Karten-Uebergang ist
+weg, die verbleibende liegt woanders). Kein dunkles Pixel im Szenenlauf
+(0,0 % dunkel, Mittel 128-168). Selbsttest: ALLE PRUEFUNGEN OK.

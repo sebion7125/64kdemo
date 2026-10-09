@@ -73,29 +73,24 @@ int main(void){
     for(float d = 0.0f; d <= dmax; d += 0.1f){
       float w[4] = { treeLodWLeaf(&L, d), treeLodWCard(&L, d),
                      treeLodWBillboard(&L, d), treeLodWMesh(&L, d) };
-      // GEPRUEFT WIRD DIE ABDECKUNG, NICHT DIE SUMME DER GEWICHTE.
-      // Die Schichten liegen uebereinander und werden geblendet; was zaehlt, ist,
-      // dass mindestens eine von ihnen deckt:
-      //   cov = 1 - (1-a_Karten)(1-a_Billboard)(1-a_Blaetter)
-      // Eine Summe von 1 (komplementaere Baelen) erfuellt das gerade NICHT: zwei
-      // halbtransparente Folien lassen den Hintergrund durchscheinen
-      // (Nutzerbefund "zwei halb transparente Folien"). Mit dem Halt der
-      // abgehenden Schicht (lodBandOutHold) bleibt cov durchgehend 1.
-      float cov = 1.0f - (1.0f - w[1]) * (1.0f - w[2]) * (1.0f - w[0]);
-      if(fabsf(cov - 1.0f) > sumWorst) sumWorst = fabsf(cov - 1.0f);
-      float covMB = 1.0f - (1.0f - w[3]) * (1.0f - w[2]);
-      ok(covMB >= 0.988f, "H=%.0f d=%.1f: Geruest+Billboard decken nur %.4f", Hs[hi], d, covMB);
+      // FIZZLE-INVARIANTE: die Gewichte muessen sich exakt zu 1 ergaenzen. Dann
+      // sind die Behalt-Mengen "n < w" (abgehend) und "n >= 1-w" (kommend) fuer
+      // dasselbe Rauschen disjunkt und ihre Vereinigung ist die ganze Flaeche —
+      // durchgehend 100 % Deckung, ohne Alpha-Blend, ohne Sortieren.
+      float sum = w[0] + w[1] + w[2];
+      if(fabsf(sum - 1.0f) > sumWorst) sumWorst = fabsf(sum - 1.0f);
+      ok(fabsf(w[3] + w[2] - 1.0f) < 1e-4f,
+         "H=%.0f d=%.1f: Geruest+Billboard = %.4f (erwartet 1)", Hs[hi], d, w[3]+w[2]);
       if(d > 0.0f){
-        // Stetigkeit der ABDECKUNG (nicht der Einzelgewichte: der Halt endet
-        // bewusst mit steilerem Auslauf). Ein 0,5-m-Schritt darf die Abdeckung
-        // nicht um mehr als 2 % aendern.
-        float s = fabsf(cov - pw[0]);
-        if(s > stepWorst) stepWorst = s;
+        for(int k = 0; k < 4; k++){
+          float s = fabsf(w[k] - pw[k]);
+          if(s > stepWorst) stepWorst = s;
+        }
       }
-      pw[0] = cov;
+      for(int k = 0; k < 4; k++) pw[k] = w[k];
     }
     checks++;
-    if(sumWorst > 0.012f){
+    if(sumWorst > 1e-4f){
       fails++;
       printf("  FEHLER: H=%.0f: Laub-Deckung weicht ab, worst |Summe-1| = %.5f\n",
              Hs[hi], sumWorst);
@@ -110,12 +105,14 @@ int main(void){
     ok(band1 >= 4.0f && band2 >= 4.0f,
        "H=%.0f: Blendenband zu schmal (R1-Band %.1f m, R2-Band %.1f m)",
        Hs[hi], band1, band2);
-    ok(sumWorst <= 0.012f, "H=%.0f bb=%d: Abdeckung weicht von 1 ab (worst %.4f)",
+    ok(sumWorst <= 1e-4f, "H=%.0f bb=%d: Gewichte ergaenzen sich nicht zu 1 (worst %.4f)",
        Hs[hi], L.bb, sumWorst);
-    ok(stepWorst <= 0.02f,
-       "H=%.0f bb=%d: Abdeckung springt — max Delta bei 0,5 m = %.4f", Hs[hi], L.bb, stepWorst);
-    printf("  H=%2.0f m  bb=%d  R1=%5.1f R2=%6.1f  |Abdeckung-1|max=%.1e  Sprung/0,5m=%.4f\n",
-           Hs[hi], L.bb, L.R1, L.R2, sumWorst, stepWorst);
+    float lim = 1.5f * 0.5f / (band1 < band2 ? band1 : band2) * 1.02f;
+    ok(stepWorst * 5.0f <= lim,
+       "H=%.0f: Gewichte springen — max Delta bei 0,5 m = %.3f, Grenze %.3f",
+       Hs[hi], stepWorst*5.0f, lim);
+    printf("  H=%2.0f m  bb=%d  R1=%5.1f R2=%6.1f  |Summe-1|max=%.1e  Sprung/0,5m=%.3f\n",
+           Hs[hi], L.bb, L.R1, L.R2, sumWorst, stepWorst*5.0f);
   }
 
   /* 3: Existenz-Raender muessen ausserhalb des aeussersten Bandendes liegen */

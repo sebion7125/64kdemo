@@ -8,6 +8,7 @@ layout(location=4) in float iLodR;   // Radius, ab dem Karten dieses Baumes die
                                      // Einzelblaetter eretzen (CPU: 10x Wuchshoehe)
 uniform mat4 uMVP;
 uniform vec3 uCamPos;
+uniform float uFocalPx = 0.0;   // Brennweite in Pixeln (fizzle-Zellgroesse)
 uniform float uTreeFade = 1.0;   // 0 = dieser Satz verschwindet (Ueberblendung)uniform float uTreeFade = 1.0;   // 0 = dieser Satz verschwindet (Ueberblendung)
 uniform float uTreeOld = 0.0;      // 1 = dieser Satz blendet AUS (der alte)
 uniform vec3 uLodCam;   // Referenzpunkt fuer den Entfernungs-LOD (IMMER die
@@ -18,6 +19,7 @@ out vec3 vNrm;
 out vec3 vPos;
 out vec3 vCol;
 out float vAlpha;
+out float vFiz1, vFizInv1, vFizScale;   // fizzle (lod.glsl)
 out float vT;
 out float vW;      // quer ueber das Blatt (-0.5..0.5) -> Silhouette im Fragment-Shader
 out float vAsp;    // Seitenverhaeltnis Breite/Laenge (Sapling: niemals 1)
@@ -45,7 +47,10 @@ void main(){
   // Ueberblendung OHNE Deckungsloch (Nutzer: "pulsieren"): die abgehende
   // Schicht bleibt bis zum Ende des Bands voll an, die kommende blendet im
   // Band DAVOR hoch. Ueberlappung = beide voll, nie beide halb.
-  float keep = lodWLeaf(iLodR, d);   // Halt: bleibt 1 bis 0,9 des Bands (lod.glsl)
+  // FIZZLE (lod.glsl): die abgehende Schicht behaelt die UNTERE Rauschmenge
+  // (n < w). Zusammen mit den Karten (n >= 1-w, gleiches Rauschen, gleiche
+  // Zellgroesse) ist die Flaeche durchgehend zu 100 % gedeckt.
+  float keep = lodWLeaf(iLodR, d);
   // Ueberblendung beim LOD-Wechsel (Runde 27): der alte Satz lichtet sich pro
   // Blatt aus — gleiche Technik wie der Bande um iLodR, also ohne Alpha-Blend
   // und ohne Abhaengigkeit von der Draw-Reihenfolge.
@@ -54,8 +59,10 @@ void main(){
   // einzeln weg und baut sie neu auf ... alle Blaetter gleichzeitig alpha-
   // einblenden, und das Blending soll nicht gedithert sein"). Der Wert geht als
   // vAlpha ins Fragment und wird dort als echtes Alpha gemischt.
+  vFiz1 = keep; vFizInv1 = 0.0;
+  vFizScale = lodFizScale(uFocalPx, d);   // derselbe Anker-Abstand wie crown.vert
   if(keep <= 0.002) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
-  vAlpha = keep;
+  vAlpha = keep;   // nur noch Diagnose, die Blende laeuft ueber Discard
   // Groessen-Kompensation wie bei EZ-Tree: die uebrigbleibenden Blaetter werden
   // leicht groesser (deren leafScale 1,25 in LOD1), NICHT kleiner. Der alte
   // Faktor (1 - smoothstep(24,30,d)) schrumpfte jedes Blatt bis auf 0 — das war

@@ -21,12 +21,14 @@ uniform float uCardsOn = 1.0;      // Schicht-Schalter (Tasten 4/5/6/7)
 uniform float uBillboardOn = 1.0;
 uniform float uBBPresent = 1.0;   // liegen Ganzbaum-Kacheln im Puffer?
 uniform vec3 uImpJit = vec3(0.0);   // Aufnahme: versetztes Wiederholen der Karten
+uniform float uFocalPx = 0.0;   // Brennweite in Pixeln (fizzle-Zellgroesse)
 uniform float uImpostor = 0.0;   // 1 = Aufnahme in die Impostor-Textur (keine
                                  // Entfernungsblenden, kein Wind, feste Kamera)
 out vec2 vUV;
 out vec3 vPos;
 out float vSeed;
 out float vFade;
+out float vFiz1, vFiz2, vFizInv1, vFizInv2, vFizScale;   // fizzle (lod.glsl)
 out vec2 vTile;      // Atlas-Kachel (Spalte, Zeile)
 out float vCrown;    // 1 = Ganzbaum-Kachel (tier 0) statt Buschel-Kachel
 out vec3 vNrm;      // Billboard-Normale (zeigt zur Kamera)
@@ -109,7 +111,20 @@ void main(){
   // Karten bei R1 vorher rissen, kommt nicht wieder: R1 liegt jetzt bei 5x
   // Wuchshoehe, genau an der Stelle, an der die Einzelblaetter aufhoeren zu
   // decken (gemessen), und die Karten sind dichter (div 3 / scale 2,0).
-  float near = (uLightFace > 0.5) ? 1.0 : lodBandIn(iLodR, d);
+  // FIZZLE (lod.glsl): Uebergang durch Wegwerfen statt Mischen. Pro Uebergang
+  // eine Schwelle; inv = 1 heisst "kommende Schicht" (behaelt n >= 1-w).
+  float bbq = (aData.w >= 4.0) ? 1.0 : 0.0;
+  float w1, inv1, w2, inv2;
+  if(bbq > 0.5){
+    w1 = 1.0; inv1 = 0.0;                                        // bei R1 nicht beteiligt
+    w2 = (uLightFace < 0.5) ? lodWBillboard(iLodR2, d, uBBPresent) : 1.0;
+    inv2 = 1.0; w2 *= uBillboardOn;                              // kommend bei R2
+  } else {
+    w1 = (uLightFace > 0.5) ? 1.0 : lodBandIn(iLodR, d);
+    inv1 = 1.0;                                                  // kommend bei R1
+    w2 = (uLightFace < 0.5 && iLodR2 > 0.0) ? lodBandOut(iLodR2, d) : 1.0;
+    inv2 = 0.0; w2 *= uCardsOn;                                  // abgehend bei R2
+  }
   // Uebergang Karten -> Ganzbaum-Billboard (Runde 29): in Stufe 2 liegen beide im
   // Puffer, das Billboard faellt ab 0,7 R2 ein, die Karten duennen bis 1,1 R2 aus.
   // Laeuft ueber die Entfernung, also kontinuierlich und unabhaengig davon, wann
@@ -117,24 +132,26 @@ void main(){
   if(uLightFace < 0.5 && iLodR2 > 0.0){
     // Karten aus 1.00..1.15 R2, Billboard ein 0.85..1.00 R2 — dasselbe
     // Ueberlappungsprinzip wie bei Blaettern/Karten: nie zwei halbe Schichten
-    if(aData.w >= 4.0) near *= lodWBillboard(iLodR2, d, uBBPresent);
-    else near *= lodBandOutHold(iLodR2, d);   // Karten bleiben opak bis 0,9 des Bands
-    // Schicht einzeln abschaltbar: near = 0 -> vFade = 0 -> Alpha 0 -> discard
-    near *= (aData.w >= 4.0) ? uBillboardOn : uCardsOn;
   }
   // Aufnahme-Pass: keine Entfernungsschwelle, sonst verschwindet genau das,
   // was in die Kachel gehoert.
-  if(uImpostor > 0.5) near = 1.0;
+  if(uImpostor > 0.5){ w1 = 1.0; w2 = 1.0; inv1 = 0.0; inv2 = 0.0; }
   // Build-Rand: Baeume werden bis RANGE=20 Zellen a 9 m gebaut (180 m halbe
   // Kantenlaenge, Ecken ~255 m). Bis 2026-10-07 endete das Blattdach bei 185 m,
   // die Staemme gingen aber bis ~255 m -> kahle Stummel in der Ferne.
   float far = 1.0 - smoothstep(190.0, 250.0, d3);
-  vFade = near * far * uTreeFade;
+  w1 *= far * uTreeFade;  w2 *= far * uTreeFade;
+  vFiz1 = w1; vFiz2 = w2; vFizInv1 = inv1; vFizInv2 = inv2;
+  // Weltzellen von etwa EINEM Bildpunkt (Anker des Baums, damit Blatt- und
+  // Karten-Shader exakt dieselbe Zellgroesse rechnen — sonst passen die
+  // komplementaeren Rauschmengen nicht zusammen).
+  vFizScale = lodFizScale(uFocalPx, d);   // derselbe Anker-Abstand wie leaf.vert
+  vFade = w1 * w2;
   // Beim Ueberblenden den alten Satz durchgaengig ausblenden (uTreeFade) statt
   // ihn unter 30 m hart wegucullen: das war genau bei nahen Baeumen ein Sprung
   // (dort ist der Uebergang am auffaelligsten). Doppeltes Zeichnen kostet nur
   // waehrend der 0,9 s Ueberblendung.
-  if(uLightFace < 0.5 && vFade < 0.002){ gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  if(uLightFace < 0.5 && (w1 < 0.002 || w2 < 0.002)){ gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vUV = aOff * 2.0;
   vPos = p;
   vSeed = aData.z;

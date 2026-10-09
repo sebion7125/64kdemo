@@ -4,6 +4,7 @@ in vec2 vUV;
 in vec3 vPos;
 in float vSeed;
 in float vFade;
+in float vFiz1, vFiz2, vFizInv1, vFizInv2, vFizScale;
 in vec2 vTile;      // Atlas-Kachel (Spalte, Zeile)
 in float vCrown;      // 1 = Ganzbaum-Kachel statt Buschel-Kachel
 in vec3 vNrm;       // Billboard-Normale
@@ -16,6 +17,7 @@ uniform float uImpostor = 0.0;   // 1 = Aufnahme-Pass
 uniform sampler2D uCrownTex;   // 2x2 Ganzbaum-Kronen-Kacheln (tier 0)   // Atlas: 8x8 Kacheln echter Blattwerk-Aufnahmen
 uniform float uCrownMask;   // DEBUG: Kronen-Quads als reines Rot -> exakte Maske
 out vec4 O;
+#include "lod.glsl"   // fizzle — dieselben Funktionen wie in crown.vert
 const vec3 SUN = normalize(vec3(0.55, 0.38, -0.62));
 float hash12(vec2 p){
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -154,7 +156,16 @@ void main(){
   // Die Texturalpha selbst ist die weiche Kante, gemischt wird mit echtem Alpha.
   // Depth-only-Nachpass: Schwelle am SCHICHTGEWICHT vFade, nicht am pro-Pixel
   // cov — sonst kippt die Tiefenwrite mitten in der Blende hart um (Sprung).
-  if(uDepthOnly > 0.5){ if(vFade < 0.5 || a < 0.5) discard; }
+  // OPAK + FIZZLE (lod.glsl): die raumliche Kante ist eine harte Schwelle, der
+  // Uebergang zwischen den Schichten ist Wegwerfen. Kein Alpha-Blend ->
+  // reihenfolge-unabhaengig, schneidende Karten korrekt, Tiefenpuffer stimmt.
+  if(vCrown < 0.5){
+    if(a < 0.5) discard;
+    float n1 = lodFizN(vPos, vFizScale, 0.0);
+    float n2 = lodFizN(vPos, vFizScale, 57.0);
+    if(lodFizKeep(n1, vFiz1, vFizInv1) < 0.5) discard;
+    if(lodFizKeep(n2, vFiz2, vFizInv2) < 0.5) discard;
+  }
   // Schwelle schichtabhaengig: die Karten sind duenn gesäte Buschel und
   // brauchen eine niedrige Schwelle; die Ganzbaum-Kachel hat eine grosse
   // zusammenhaengende Flaeche, bei der ein niedriger Wert die ganze Kachel
@@ -210,5 +221,5 @@ void main(){
   // einen Texel kleiner (Nutzerbefund " sprunghaft ein bisschen kleiner, der
   // Texeluebergang wandert um ein Texel"). Eine Blende darf keine Kantenregel
   // wechseln - cov ist bei vFade = 1 dasselbe wie vorher a.
-  O = vec4(col, cov);
+  O = vec4(col, 1.0);   // Karten sind OPAK (fizzle, kein Alpha-Blend)
 }

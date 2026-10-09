@@ -24,17 +24,10 @@ void treeLodInit(TreeLod *L, float H, float lodScale){
   if(lodScale > 0.0f){ L->R1 *= lodScale; L->R2 *= lodScale; }
 }
 
-/* Abgehende Schicht mit HALT: 1 bis t = 0,9 des Bands, dann auf 0. lod.glsl
- * enthaelt dieselbe Funktion (lodBandOutHold). Grund: zwei halbtransparente
- * Folien uebereinander (abgehend 1-w ueber kommend w) lassen den Hintergrund
- * durchscheinen — die Krone wirkt wie zwei Folien (Nutzerbefund). Mit opakem
- * Grund und linear hochblendender kommender Schicht bleibt die Abdeckung 1. */
-float treeLodBandOutHold(float R, float d){
-  float t = treeLodSmoothstep(R * LOD_BAND_LO, R * LOD_BAND_HI, d);
-  return 1.0f - treeLodSmoothstep(0.97f, 1.0f, t);   // Auslauf = 3 % des Bands
-}
+/* Komplementaere Gewichte (Summe genau 1) — Voraussetzung fuer fizzle in den
+ * Shadern (lod.glsl): "n < w" und "n >= 1-w" sind disjunkt und vollstaendig. */
 float treeLodWLeaf(const TreeLod *L, float d){
-  return treeLodBandOutHold(L->R1, d);
+  return 1.0f - treeLodSmoothstep(L->R1 * LOD_BAND_LO, L->R1 * LOD_BAND_HI, d);
 }
 float treeLodWBillboard(const TreeLod *L, float d){
   if(!L->bb) return 0.0f;
@@ -42,12 +35,12 @@ float treeLodWBillboard(const TreeLod *L, float d){
 }
 float treeLodWCard(const TreeLod *L, float d){
   float in  = treeLodSmoothstep(L->R1 * LOD_BAND_LO, L->R1 * LOD_BAND_HI, d);
-  float out = L->bb ? treeLodBandOutHold(L->R2, d) : 1.0f;
+  float out = L->bb ? (1.0f - treeLodSmoothstep(L->R2 * LOD_BAND_LO, L->R2 * LOD_BAND_HI, d)) : 1.0f;
   return in * out;
 }
 float treeLodWMesh(const TreeLod *L, float d){
   if(!L->bb) return 1.0f;
-  return treeLodBandOutHold(L->R2, d);
+  return 1.0f - treeLodSmoothstep(L->R2 * LOD_BAND_LO, L->R2 * LOD_BAND_HI, d);
 }
 
 float treeLodLeafCut(const TreeLod *L){

@@ -1988,6 +1988,7 @@ int main(int argc, char **argv) {
   GLint locTMeshF  = p_glGetUniformLocation(progTMesh, "uMeshFade");
   GLint locCDepth  = p_glGetUniformLocation(progCrown, "uDepthOnly");
   GLint locLDepth  = p_glGetUniformLocation(progLeaf, "uDepthOnly");
+  GLint locLFocal  = p_glGetUniformLocation(progLeaf, "uFocalPx");
   GLint locGMVP    = p_glGetUniformLocation(progGrass, "uMVP");
   GLint locGCam    = p_glGetUniformLocation(progGrass, "uCamPos");
   GLint locGTime   = p_glGetUniformLocation(progGrass, "uTime");
@@ -2047,6 +2048,7 @@ int main(int argc, char **argv) {
   GLint locCTime   = p_glGetUniformLocation(progCrown, "uTime");
   GLint locCMask   = p_glGetUniformLocation(progCrown, "uCrownMask");
   GLint locCFade   = p_glGetUniformLocation(progCrown, "uTreeFade");
+  GLint locCFocal  = p_glGetUniformLocation(progCrown, "uFocalPx");
   GLint locCImp    = p_glGetUniformLocation(progCrown, "uImpostor");
   GLint locCCards  = p_glGetUniformLocation(progCrown, "uCardsOn");
   GLint locCBB     = p_glGetUniformLocation(progCrown, "uBillboardOn");
@@ -3181,23 +3183,14 @@ int main(int argc, char **argv) {
         fflush(stdout);
         if(ltPrevD > 0.0f){
           float dd = fabsf(dCam - ltPrevD);
-          // Steigung GEPRUEFT WIRD AN DER ABDECKUNG, nicht an Einzelgewichten:
-          // der Halt der abgehenden Schicht faellt bewusst in den letzten 3 % des
-          // Bands steil ab (sonst zwei halbtransparente Folien). Was stetig sein
-          // muss, ist die Abdeckung.
-          if(dd > 1e-4f){
-            float c0 = 1.0f - (1.0f - ltPrevW[1]) * (1.0f - ltPrevW[2]) * (1.0f - ltPrevW[0]);
-            float c1 = 1.0f - (1.0f - w[1]) * (1.0f - w[2]) * (1.0f - w[0]);
-            float scov = fabsf(c1 - c0) / dd;
-            if(scov > ltSlope[0]) ltSlope[0] = scov;
-          }
-          // GEPRUEFT WIRD DIE ABDECKUNG, NICHT DIE SUMME DER GEWICHTE. Die
-          // Schichten werden uebereinander geblendet; zaehl ist, dass mindestens
-          // eine deckt: cov = 1 - (1-Karten)(1-Billboard)(1-Blaetter). Eine Summe
-          // von 1 (komplementaere Baelen) erfuellt das gerade nicht: zwei
-          // halbtransparente Folien lassen den Hintergrund durchscheinen.
-          float covw = 1.0f - (1.0f - w[1]) * (1.0f - w[2]) * (1.0f - w[0]);
-          float hole = fabsf(covw - 1.0f);
+          if(dd > 1e-4f)
+            for(int k = 0; k < 4; k++){ float s = fabsf(w[k] - ltPrevW[k]) / dd;
+                                        if(s > ltSlope[k]) ltSlope[k] = s; }
+          // FIZZLE (lod.glsl): geprueft wird die SUMME der Gewichte. Mit demselben
+          // Rauschen sind "n < w" (abgehend) und "n >= 1-w" (kommend) disjunkt und
+          // ihre Vereinigung ist die ganze Flaeche — bei Summe 1 ist die Krone also
+          // durchgehend zu 100 % gedeckt, ohne Alpha-Blend.
+          float hole = fabsf(w[0] + w[1] + w[2] - 1.0f);
           if(hole > ltHole) ltHole = hole;
         }
         if(treeDbgTier != ltPrevTier){
@@ -3264,9 +3257,10 @@ int main(int argc, char **argv) {
             snprintf(seq + strlen(seq), sizeof seq - strlen(seq), "%s%d",
                      k ? " -> " : "", ltTierSeq[k]);
           printf("LT-SUMME Frames %d, Stufenfolge %s\n", ltFrame, seq);
-          printf("LT-SUMME max |dAbdeckung/dd| pro m: %.3f   (Schranke %.3f)\n",
-                 ltSlope[0], lim1);
-          printf("LT-SUMME groesster Abdeckungsfehler |1-(1-K)(1-B)(1-L)| = %.4f\n", ltHole);
+          printf("LT-SUMME max |dw/dd| pro m: Blaetter %.3f Karten %.3f Billboard %.3f "
+                 "Geruest %.3f   (Schranken %.3f / %.3f)\n",
+                 ltSlope[0], ltSlope[1], ltSlope[2], ltSlope[3], lim1, lim2);
+          printf("LT-SUMME groesstes Deckungsloch |Blatt+Karte+Billboard-1| = %.4f\n", ltHole);
           printf("LT-SUMME Geometrie-Wechsel %d, davon innerhalb eines Blendenbands %d\n",
                  ltGeomChg, ltGeomChgInBand);
           printf("LT-SUMME groesste Deckungs-Delle %.2f %% bei %.1f m (Bildmessung)\n",
@@ -3274,8 +3268,9 @@ int main(int argc, char **argv) {
           printf("LT-SUMME Pump-Frames (Schicht mit Gewicht > 0 unterscheidet sich zwischen Saetzen): %d\n", ltPump);
           printf("LT-SUMME Bauten %d\n", treeDbgBuilds);
           int bad = 0;
-          if(ltHole > 0.012f){ bad = 1; printf("LT-FEHLER Abdeckungsfehler %.4f > 0,012\n", ltHole); }
-          if(ltSlope[0] > lim1 * 1.1f){ bad = 1; printf("LT-FEHLER Abdeckungs-Steigung %.3f ueber der Schranke %.3f\n", ltSlope[0], lim1); }
+          if(ltHole > 1e-4f){ bad = 1; printf("LT-FEHLER Deckungsloch %.4f > 0,0001\n", ltHole); }
+          if(ltSlope[0] > lim1 * 1.1f || ltSlope[1] > lim1 * 1.1f){ bad = 1; printf("LT-FEHLER Blatt/Karten-Steigung ueber der Schranke\n"); }
+          if(ltSlope[2] > lim2 * 1.1f || ltSlope[3] > lim2 * 1.1f){ bad = 1; printf("LT-FEHLER Billboard/Geruest-Steigung ueber der Schranke\n"); }
           if(ltGeomChgInBand > 0){ bad = 1; printf("LT-FEHLER Geometrie verschwindet innerhalb eines Blendenbands\n"); }
           if(ltDipWorst < -8.0f){ bad = 1; printf("LT-FEHLER Deckungs-Delle %.1f %% bei %.1f m\n", ltDipWorst, ltDipAt); }
           if(ltPump > 0){ bad = 1; printf("LT-FEHLER Pumpen: %d Frames mit sichtbarer Satz-Differenz\n", ltPump); }
@@ -3422,12 +3417,16 @@ int main(int argc, char **argv) {
       // gleichzeitig). Beim Mischen kein Depth schreiben — sonst verdeckt ein
       // halb durchsichtiges Blatt den Hintergrund, der erst danach gezeichnet
       // wird (Gras). Ohne laufende Ueberblendung bleibt alles wie vorher.
-      p_glEnable(GL_BLEND);
-      p_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+      // OPAK + FIZZLE (Nutzerentscheid 2026-10-09): die Blende laeuft im Fragment
+      // ueber Wegwerfen (lod.glsl), nicht ueber Mischen. Kein Blend,
+      // Tiefenschreiben immer an -> reihenfolge-unabhaengig, schneidende Quadrate
+      // korrekt, kein Tiefen-Nachpass, kein Sortieren.
+      p_glDisable(GL_BLEND);
       p_glUniform1f(locLDepth, 0.0f);
-      p_glDepthMask((treeFadeNew < 1.0f || !dbgTreeDepthWrite) ? GL_FALSE : GL_TRUE);
-      if(dbgTreeA2C) p_glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE); else p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+      p_glDepthMask(GL_TRUE);
+      p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
       p_glUseProgram(progLeaf);
+      if(locLFocal >= 0) p_glUniform1f(locLFocal, 1.7f * (float)fboH);
       p_glUniformMatrix4fv(locLMVP, 1, GL_FALSE, mvp);
       p_glUniform3f(locLCam, camPos[0], camPos[1], camPos[2]);
       if(locLLod >= 0) p_glUniform3f(locLLod, camPos[0], camPos[1], camPos[2]);
@@ -3470,14 +3469,13 @@ int main(int argc, char **argv) {
     // Dither-Discard), also Depth NICHT schreiben — sonst verdeckt eine halb
     // durchsichtige Karte die dahinterliegende und die Krone wird loechrig.
     if (!grassOnly) {
+      // Karten sind OPAK (fizzle) und mit Alpha 1 ein Blend-No-op; der Blend
+      // bleibt nur fuer die weiche Ganzbaum-Kachel an (bis die Huelle kommt).
       p_glEnable(GL_BLEND);
       p_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-      // Depth schreiben: aus. Ergebnis im Testlauf = durchscheinende Kronen
-      // (Karten mischen sich gegen den Hintergrund, den sie verdecken sollten).
-      // An lassen: die Blenden sind kurz und schmal, der Artefakt-Preis ist
-      // kleiner als der Fehler.
       p_glDepthMask(GL_TRUE);
       p_glUseProgram(progCrown);
+      if(locCFocal >= 0) p_glUniform1f(locCFocal, 1.7f * (float)fboH);
       p_glUniformMatrix4fv(locCMVP, 1, GL_FALSE, mvp);
       p_glUniform3f(locCCam, camPos[0], camPos[1], camPos[2]);
       p_glUniform3f(locCTgt, camTgt[0], camTgt[1], camTgt[2]);

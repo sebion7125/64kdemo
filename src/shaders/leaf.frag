@@ -4,6 +4,7 @@ in vec3 vNrm;
 in vec3 vPos;
 in vec3 vCol;
 in float vAlpha;
+in float vFiz1, vFizInv1, vFizScale;
 in float vT;
 in float vW;
 in float vAsp;
@@ -12,6 +13,7 @@ uniform float uLeafMask;   // DEBUG: Blatt als Maske (reines Rot)
 uniform float uDepthOnly = 0.0;
 uniform float uAlbedoOnly; // Atlas-Kapture: nur Albedo + Abdeckung (keine Beleuchtung)
 out vec4 O;
+#include "lod.glsl"   // fizzle — dieselben Funktionen wie in leaf.vert
 const vec3 SUN = normalize(vec3(0.55, 0.38, -0.62));
 float hash12(vec2 p){
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -93,8 +95,11 @@ void main(){
   // Ueberblendung als echtes Alpha (nicht gedithert): die Silhouette bleibt
   // harte Kante (MSAA), die Ueberblendung multipliziert das Alpha.
   // Depth-only-Nachpass: siehe crown.frag
-  if(uDepthOnly > 0.5){ if(vAlpha < 0.5) discard; }
-  else if(vAlpha < 0.02) discard;
+  // FIZZLE (lod.glsl): Uebergang durch Wegwerfen, nicht durch Mischen.
+  {
+    float n = lodFizN(vPos, vFizScale, 0.0);
+    if(lodFizKeep(n, vFiz1, vFizInv1) < 0.5) discard;
+  }
   if(uLeafMask > 0.5 && uLeafMask < 1.5){ O = vec4(1.0, 0.0, 0.0, 1.0); return; }
   float midrib = 1.0 - smoothstep(0.0, 0.055, abs(vW)); // Mittelrippe
   float vein   = 1.0 - smoothstep(0.0, 0.05,
@@ -137,5 +142,5 @@ void main(){
   // opak bei vAlpha = 1 (sonst wirkt das Laubdach duenn), echtes Alpha nur
   // waehrend der Ueberblendung — und die ist nicht gedithert
   // durchgehend, kein Sprung beim Start der Blende (begruendung wie crown.frag)
-  O = vec4(col, vAlpha);
+  O = vec4(col, 1.0);   // Blätter sind OPAK (fizzle, kein Alpha-Blend)
 }

@@ -21,23 +21,45 @@ float lodBandOut(float R, float d){ return 1.0 - smoothstep(R * 0.90, R * 1.10, 
 // bb = liegen Ganzbaum-Kacheln im Puffer (treeBillboard0). Ohne Kacheln duerfen
 // Karten und Geruest bei R2 nicht ausblenden — sonst hat der ferne Baum gar keine
 // Darstellung mehr (im Bild gemessen: ab ~110 m nichts mehr).
-// Abgehende Schicht mit HALT: sie bleibt opak (1) bis t = 0,9 des Bands und
-// faellt erst im letzten Zehntel auf 0. Grund (Nutzerbefund): zwei
-// halbtransparente Folien uebereinander — abgehend (1-w) ueber kommend (w) —
-// lassen den Hintergrund durchscheinen, die Krone wirkt wie zwei Folien. Mit
-// opakem Grund und linear hochblendender kommender Schicht ist die Abdeckung
-// durchgehend 1 und die Farbe ein linearer Uebergang. Das letzte Zehntel ist
-// noetig, damit die abgehende Schicht nicht hart abschaltet, wenn die kommende
-// schon voll ist; dort ist die kommende aber bereits >= 0,9, also keine Folie.
-float lodBandOutHold(float R, float d){
-  float t = smoothstep(R * 0.90, R * 1.10, d);
-  return 1.0 - smoothstep(0.97, 1.0, t);   // Auslauf = 3 % des Bands
-}
-float lodWLeaf(float R1, float d){ return lodBandOutHold(R1, d); }
+// Gewichte: klassisch komplementaer (Summe genau 1). Das ist die Voraussetzung
+// fuer fizzle (unten): mit demselben Rauschen sind "n < w" und "n >= 1-w"
+// disjunkt und vollstaendig. Der HALT (abgehend bleibt bis 0,97 des Bands 1)
+// war ein Krueckstock gegen zwei halbtransparente Folien beim Alpha-Blend und
+// ist nicht mehr noetig — er war ausserdem der Grund, dass die Blende nur ueber
+// 0,70 m Kameraweg sichtbar war (gemessen).
+float lodWLeaf(float R1, float d){ return lodBandOut(R1, d); }
 float lodWCard(float R1, float R2, float d, float bb){ return lodBandIn(R1, d) * (bb > 0.5 ? lodBandOut(R2, d) : 1.0); }
 float lodWBillboard(float R2, float d, float bb){ return bb > 0.5 ? lodBandIn(R2, d) : 0.0; }
-float lodWMesh(float R2, float d, float bb){ return bb > 0.5 ? lodBandOutHold(R2, d) : 1.0; }
+float lodWMesh(float R2, float d, float bb){ return bb > 0.5 ? lodBandOut(R2, d) : 1.0; }
 
+
+// ---- FIZZLE: Ueberblendung durch Wegwerfen statt Mischen ----
+// Nutzerentscheid 2026-10-09. Referenz: SpeedTree-Renderer, GPU Gems 3 Kap.
+// 4.6.2 "Level-of-Detail Cross-Fading": "The fizzle uses alpha test to produce
+// a cross-fade at the pixel level." Beide Schichten bleiben OPAK und schreiben
+// Tiefe. Damit entfaellt das Folien-Problem (1-(1-w)^2 Deckung), die
+// Zeichenreihenfolge ist egal (pro Pixel gewinnt der Tiefentest), und
+// schneidende Quadrate (tier 2) sowie ueberlappende Baeume sind korrekt — ohne
+// Sortieren und ohne Tiefen-Nachpass.
+// Regel (dasselbe Rauschen n, komplementaere Gewichte w_ab + w_komm = 1):
+//   abgehend:  behalten wo  n <  w
+//   kommend:   behalten wo  n >= 1 - w
+// Die Mengen sind disjunkt und ihre Vereinigung ist die ganze Flaeche.
+float lodHash12(vec2 p){
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+// Zellgroesse = ein Bildpunkt auf dieser Entfernung. Das Muster klebt am Baum
+// (Weltzellen); ein bildschirmfestes Muster wuerde bei Kamerabewegung flimmern.
+float lodFizScale(float focalPx, float d){ return clamp(focalPx / max(d, 0.01), 1.0, 512.0); }
+float lodFizN(vec3 p, float s, float salt){
+  vec2 q = floor(p.xz * s) + floor(p.y * s) * vec2(13.7, 7.3) + vec2(salt, salt * 0.37);
+  return lodHash12(q);
+}
+float lodFizKeep(float n, float w, float inv){
+  return (inv < 0.5) ? ((n < w) ? 1.0 : 0.0) : ((n >= 1.0 - w) ? 1.0 : 0.0);
+}
 // Ast-Aufloesung nach BILDGROESSE — Spiegelbild von treeLodWBranch/treeLodRadCut
 // (Konstanten 0,6/1,6 Pixel; tools/test_tree_lod.c vergleicht beide Seiten).
 float lodBranchW(float rad, float d, float focalPx){
