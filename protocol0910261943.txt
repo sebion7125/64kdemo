@@ -1,0 +1,761 @@
+<!-- Vorschau ohne Modellaufruf: Züge, die noch nicht im Stand stehen, erscheinen als Einzeilen. -->
+# Session protocol
+Older turns of this session were condensed. The state of work covers the oldest part; the most recent condensed turns follow in detail with the user message verbatim. Tools: protocol_search finds earlier turns by keywords; protocol_turn returns the original text of a turn by number. Look things up instead of guessing details that are not stated here.
+
+## State of work (covers turns 1–28)
+The session focuses on the tree LOD system in the EZ-Tree clone at `/home/xvm/Projekte/64kDemo`. The primary goal is achieving visual consistency and smooth transitions across LOD tiers, addressing leaf color fidelity, geometry completeness, and the "LOD catastrophe" where leaves appeared incorrectly colored or invisible. Work has progressed from structural fixes to implementing per-tree coloring, resolving rendering artifacts, and rearchitecting the LOD pipeline to prevent visual popping and ensure exclusive layer rendering.
+
+**Current Status and Implementation**
+The LOD system now generates leaf cards in all tiers, with density controlled by hash-culling. Core logic uses `camPos` for distance calculations. A breakthrough resolved the color mismatch where `uAlbedoOnly` remained set to 1 after atlas capture, causing unlit raw albedo rendering. This fix ensured consistent color values between single leaves and cards [T8].
+
+**Leaf Color and Atlas Strategy (S2)**
+The implementation of S2 (Cluster atlas + per-tree color) is complete and verified.
+*   **Atlas Content:** The atlas tile is a single neutral leaf cluster (9–13 leaves, 27% coverage) baked without color [T6, T8].
+*   **Color Propagation:** Per-tree leaf color (`ezLeafR/G/B`) is stored in crown instance data (`CROWN_FLOATS` increased to 13) and multiplied in `crown.frag` [T6, T8].
+*   **Lighting Consistency:** `crown.frag` applies two-sided diffuse and translucency lighting to match `leaf.frag`, ensuring identical light reaction [T7].
+*   **Palette Tuning:** Leaf color consistency across LODs is confirmed (Δ ≤ 1 channel). The remaining visual difference is coverage, not tint. A new default palette "wald" (hue 101–130°, sat 0.65–0.88, val 0.38–0.58) was chosen to address user complaints about "autumnal" or pale leaves. The old hue lower bound of 72° (olive/yellow-green) was identified as the cause and raised to 101° [T14]. Palette is tunable via `DEMO_LEAFPAL` or `DEMO_LEAFHSV` [T14, T16].
+
+**Geometry and Budget Adjustments**
+To address "cut-off trunks" and insufficient foliage, geometry budgets and generation logic were updated [T9].
+*   **Budget Increases:** `TREE_VERT_CAP` and `CROWN_CAP` were raised to prevent tree skipping. Initially set to 5.2M/3.6M, they were later lowered to 3.8M/4.0M to accommodate double buffering for worker threads [T9, T17].
+*   **Branch Closure:** Non-terminal branch ends are closed using `emit_cap`, increasing scaffold density by 6.9% [T9].
+*   **Sprig Cap:** `EZ_SPRIGCAP` increased from 4096 to 16,384 [T9].
+*   **Card Emission:** Cards are emitted in every tier to prevent gaps during camera motion [T8].
+
+**LOD Pipeline Rearchitecture**
+The user reported severe popping and wild switching between LODs. The pipeline was rearchitected to ensure layers are mutually exclusive rather than overlapping [T27, T28].
+*   **Exclusive Layers:** Crown cards are no longer a base layer under leaves. They fade in only at 0.9–1.1·R1, so near trees show individual leaves alone. Individual leaves fade out at 0.9–1.1·R1. The whole-tree billboard fades in at 0.70–0.95·R2 [T27, T28].
+*   **Switch Distances:** R1/R2 thresholds adjusted to 5×/15× tree height (clamped R1 20–60 m, R2 40–120 m) based on measurements showing single leaves only cover up to ~5× height [T25].
+*   **Impostor Atlas:** Procedural crown tiles were replaced by a render-to-texture impostor atlas (8×8 tiles × 128 px, 1024² RGBA). 64 buckets (4 presets × 16 forms) capture each tree's own VBO slice (skeleton + card tier) sliced over frames at 12% of frame time [T28].
+*   **Billboard Fixes:** The whole-tree billboard quad now spans trunk+crown (previously crown-only, causing floating green blobs). Wind amplitude for billboard tiles is set to 0 to prevent unnatural swaying [T27, T28].
+*   **Leaf Size:** Default `ezLeafScale` doubled to 2.0, increasing leaf pixels at 10m from 6639 to 14066 [T27].
+
+**Performance and Stutter Resolution**
+Tree rebuilds caused 490 ms frame-blocking (350 ms generate + 140 ms upload).
+*   **Worker Thread (Plan B):** Tree generation moved to a worker thread with CPU double buffers and two VBO/VAO sets. Upload is sliced with a time budget (25% of last frame time, clamped 3–20 ms). Frame-blocking dropped to 0 ms [T17].
+*   **Double Buffering:** Caps lowered to fit double buffering (~876 MB CPU total). `drawSet` flips only after the last upload slice to prevent GPU seeing half-uploaded geometry [T17].
+*   **Culling Fix:** The hard 30 m cull of the old set during fades was removed to prevent popping [T25].
+
+**Known Issues and User Feedback**
+*   **Reed Pass:** A new reed pass (`src/reed_cpu.c`) was implemented but is currently paused. The user reported reeds appearing in different locations than the old grass-based reeds and fading incorrectly. Reed work is on hold until tree LOD is approved [T20, T21, T26, T28].
+*   **Shadows:** Shadow issues remain unresolved and are deferred by the user as a larger separate task [T21, T25].
+*   **Measurement Validity:** VM screenshots and FPS measurements are deemed unreliable for visual judgment due to non-deterministic timing and low frame rates. The assistant now presents builds for the user to test on the host [T22, T28].
+*   **Uncommitted Changes:** Recent LOD rearchitecture changes (exclusive layers, impostor atlas) are built but not yet committed. Reed corrections are also uncommitted [T26, T28].
+
+**Decisions and Rationale**
+*   **Color Source:** Leaf color lives exclusively in instance data; the atlas remains color-neutral [T7].
+*   **Measurement Protocol:** Tests must use `DEMO_FREEZE` and isolate the tree (`DEMO_NOTERRAIN=1 DEMO_GRASSMD=0 DEMO_REEDPASS=0`) to avoid contamination from grass/reeds [T14, T26].
+*   **Budget Strategy:** Increase buffer caps rather than skip trees to ensure full rendering [T9].
+*   **LOD Strategy:** Layers must be mutually exclusive with crossfade bands. Cards are the mid-range layer, leaves are near-range details, billboards are far-range. This prevents the "leaf over card" artifact [T27, T28].
+*   **Impostor Strategy:** Use per-type bucket impostors captured from the card tier to save fill rate and vertex work [T28].
+
+**Next Steps**
+The work stands at the completion of the LOD rearchitecture (exclusive layers, impostor atlas) and performance fixes. The next logical steps, pending user approval of the current tree build:
+*   **User Verification:** Present the current build for host testing to validate visual smoothness and color. […state cut at the size limit; use protocol_search for details]
+
+## Active rules from the user
+- Budgets erhoehen, nicht Geometrie ueberspringen; auch pro Baum
+- verify leaf colour with landscape switched off or by same-camera forced-tier diff, not with full-scene green masks
+- understand status quo and discuss plans before changing code; verify with measurements and cite sources
+- for test runs 10 s runtime is enough, a screenshot exists by then (also in the VM)
+- verify colour/LOD measurements with terrain off or with an identical-camera difference mask (green image masks in the full view include grass and invalidate means)
+- Commit after every completed step before moving to the next task.
+- Use tools/selftest.sh to verify changes; ensure no trees are skipped due to budget limits.
+- verify with landscape switched off (DEMO_NOTERRAIN) when measuring tree colour; 10 s runtime is enough for test runs
+- raise budgets (global and per-tree) instead of skipping geometry; compare against original EZ-Tree code when behaviour differs
+- continue working autonomously through the TODO list without stopping as long as items remain; commit after each completed step
+- Schatten-Thema wird vom Nutzer zunächst zurückgestellt („stellenweise tun sie immernoch fast überhaupt nicht, was sie sollen") — größere Nummer, später
+- VM-FPS sind für Performance-Fragen nicht aussagekräftig — Geometrie-/Instanz-Mengen messen statt Frame-Zeiten
+- focus on trees only until the user gives okay for other areas
+- stop running engine measurements whose camera ends up inside a trunk; deliver intermediate builds for the user to test on the host instead
+- present a build to the user after each change round instead of only measuring in the VM
+- user judges visual results directly instead of me running measurement runs
+- present builds for the user to test on the host instead of measuring in the VM (unchanged)
+- LOD distance must be calculated as horizontal distance (XZ) from camera to terrain lot point, not 3D distance.
+- LOD switching must key off the horizontal distance to the camera's perpendicular foot on the terrain, not the 3D camera distance (otherwise aerial views look wrong)
+- distant trees must still look individual, like they would up close
+- no more engine screenshots for visual judgement by me — the user evaluates builds on the host
+- do not run blocking multi-minute measurements/selftests in the foreground; start them in the background and deliver the build immediately
+- abort the selftest / long engine runs when the user asks; do not block on them
+- build a watertight debugging strategy for LOD generation/fade synchronisation instead of continuing to patch by eye; user states I cannot solve this without human help
+- LOD-Entscheidungen gehören in eine reine Funktion (src/tree_lod.c), die Engine und ein GL-freier Wirtstest gemeinsam benutzen; Kontinuität wird als Zahl gemessen, nicht als Bild
+- Tests so planen, dass die Kamera die Detailstufen tatsächlich durchfährt (auf den Baum zu, nicht seitlich)
+- plan test runs so the camera actually traverses all LOD tiers (radial approach to the target tree), and check my own VM screenshots for regressions such as black rectangles
+- Nutzer vermutet Z-Buffer/Transparenz/Zeichenreihenfolge als Teilursache der Sprünge — diese Achse zuerst prüfen
+- Tests müssen so geplant werden, dass sie die höchste Detailstufe tatsächlich anfahren (radiale Annäherung, keine seitliche Kamerafahrt)
+- Tests so planen, dass die Kamera den Baum tatsaechlich anfaehrt, mit fester, langsamer Stufe pro Frame (nicht m/s) — "deine kamera test fährt übrigens viel zu schnell"
+- gewuenschter Test = Engine zeichnet nur den einen Baum und sonst nichts und loggt alle relevanten Schritte sauber
+- Zeichenreihenfolge ist ein Problem, aber nicht das gesuchte — nicht weiter verfolgen
+- Use step size 0.05 for testing to clearly observe periodic tree jumps.
+- Fade gleichmäßiger und gern langsamer machen; für die Zeichenreihenfolge muss ein guter Trick her, sonst gibt es Z-Artefakte
+- deliver a build to /media/sf_Quarantine/64kDemo/64kdemo immediately whenever something testable exists
+- note in STATUS.md that we have an order-dependent alpha problem independent of LOD (tier 2 within a tree, impostors between trees); blend should last about 2 m of camera travel or more — for now only note it, do not implement
+- note items in STATUS.md when asked, and answer the user's conceptual questions (with all technical terms explained) before changing code
+- Nutzer will Fachworte erklärt und Aussagen in Klartext statt Steno; eigene Zahlen nachrechnen/messen statt überschlagen
+- no measurements/tests needed for the drawing-order/alpha problem — the user judges it visually
+- testen brauchen wir bei dem Reihenfolge-Thema nicht — der Nutzer sieht die Fehler selbst
+- keine Engine-Messläufe/Screenshots zur visuellen Beurteilung; Nutzer bewertet auf dem Host (weiterhin)
+- implement all four defaults as proposed (crossed cluster quads div 4 + cap 1.2M, keep flat billboard until hull, share only the fragment path, flutter via threshold noise)
+- none new
+- 360/720/1080 px in Tabellen = Zeilenzahl des Render-Ziels, nicht des Fensters
+
+## Open items
+- Build-Fehler in der laufenden Messbank-Korrektur: src/trees_cpu.c:1742 "implicit declaration of now_sec" — now_sec ist in main.c lokal, braucht eine eigene Zeitquelle in trees_cpu.c (oder exportierte Funktion); danach neu bauen, Messung verifizieren, committen, ausliefern
+- Präsenz-Bits + Blenden-Gating noch nicht implementiert
+- Blattgrößen-Entscheidung offen (gemessen 0,256…0,754 m statt ~0,10 m; b bestimmt R1 = b·f/px und damit, ob der Blatt-Puffer von 2,4 Mio Instanzen hält)
+- harte Baum-Baukante bei 180 m ohne Entfernungs-Ausblendung für crown.frag/leaf.frag (Holz hat Dunst ab 60 m in tree.frag:160) — Nutzer will tier1 so weit sichtbar wie das Terrain
+- zurückgestellt und notiert — Astbewegung biegen statt verschieben (Lücken an Verzweigungen), Rascheln zu stark, Schatten (TODO 8/25), Schilf-Fixes (TODO 26), Zwei-Puffer-Composite als DEMO_COMP
+
+## Files touched (most recent first)
+src/scene.h [T89], src/trees_cpu.c [T89], src/main.c [T89], STATUS.md [T89], /media/sf_Quarantine/64kDemo/64kdemo [T89], /media/sf_Quarantine/64kDemo/64kdemo_neu [T86], src/tree_lod.h [T83], src/tree_lod.c [T83], tools/test_tree_lod.c [T83], /tmp/maskdiff2.png [T83], /tmp/tab5.txt [T83], /tmp/maskdiff.png [T83], /tmp/s_leaf_1.0.ppm [T83], /tmp/s_card_0.5.ppm [T83], src/shaders/tree.vert [T82], /tmp/m_40_leaf.ppm [T82], /tmp/m_40_card_1_2.6.ppm [T82], /tmp/tab_s0.txt [T82], /tmp/tab_s1.txt [T82], src/shaders/crown.vert [T79], src/shaders/leaf.vert [T79], src/shaders/crown.frag [T79], src/shaders/leaf.frag [T79], tools/selftest.sh [T79], src/shaders/lod.glsl [T79], src/shaders/foliage.glsl [T79], /tmp/treetab.txt [T79], /tmp/tt2.txt [T79], /tmp/band.txt [T70], /tmp/b2.txt [T70], /tmp/lt6.txt [T58], Makefile [T54], tools/gen_shaders.sh [T54], /tmp/crown.frag.bak [T50], /tmp/st7.out [T50], src/shaders/tree.frag [T48], /tmp/64kdemo_impostor.rgba [T44], /tmp/cm3.txt [T44], /tmp/atlas.png [T31], /tmp/sceneJ.png [T31], src/reed_cpu.c [T30], src/shaders/reed.vert [T30], src/shaders/reed.frag [T30], ~/.pi/agent/models.json [T30], ~/.pi/agent/models.json.bak-vision [T30], /tmp/findshore.c [T27], /tmp/cov.py [T27], src/shaders/grass.vert [T20], …12 older
+
+## Recent turns in detail
+### Turn 29
+User: du irrst dich, du hast einen vision tower und kannst bilder sehen. aber ich seh du machst gerade wieder dauernd engine läufe, wo du nur einen baumstamm hast, der das ganze fenster ausfüllt. Was soll das? liefer deine zwischenversion doch mal aus und lass mich mit schauen...
+Result: Baum-Stufen schließen sich jetzt aus (nah nur Einzelblätter, Karten ab 0,9·R1, Billboard ab 0,7·R2); Ganzbaum-Impostor implementiert — echter Baum (Stamm+Gerüst+Karten) wird in ein 8×8-Atlas (64 Kacheln = Art×Form, 1024², 4 MB) gerendert, Billboard-Quad deckt Stamm+Krone ab und steht windstill. Zwischenstand nach /media/sf_Quarantine/64kDemo/64kdemo ausgeliefert (158768 B, Commit 3befe1b) zur Prüfung auf dem Host.
+Decision: Schichten exklusiv statt additiv (Nutzer: "dass die Einzelblätter immer nur auf die Quads drüber gerendert werden ist quatsch")
+Decision: Impostor-Kacheln pro Art×Form (4 Presets × 16 Formen = 64), nicht pro Baum; aufgenommen wird die Karten-Stufe, nie das Einzelblatt (Füllrate/Geometrie sparen, Nutzer)
+Decision: Messläufe über DEMO_ONETREE/DEMO_TREEDIST eingestellt — Kamera steht am Stamm, Screenshots wertlos; künftig Zwischenversion ausliefern und auf dem Host prüfen lassen
+Decision: Schilf-Änderungen (Culm 7–13 mm, weiche Rispe, kein Schrumpk-Fade) sind committet aber laut Nutzer erst einmal geparkt
+Files: src/main.c, src/scene.h, src/trees_cpu.c, src/shaders/crown.vert, src/shaders/crown.frag, src/reed_cpu.c, src/shaders/reed.vert, src/shaders/reed.frag (Commits 3586c69, 3befe1b)
+
+### Turn 30
+User: ich weiß aber ganz sicher, dass dein modell bilder sehen kann. warum hier nicht?
+Result: Found why images were omitted: the pi model entry for qwen3.8-flash-next-iq3_s lacked an `input` capability, so pi treats it as text-only and drops image attachments. Fixed ~/.pi/agent/models.json (backup models.json.bak-vision) by adding `"input": ["text","image"]` plus inputLimits.images.resize. Earlier in the same turn: delivered the intermediate build to /media/sf_Quarantine/64kDemo/64kdemo (158768 B, commit 3befe1b) with exclusive tree LOD layers and the whole-tree impostor atlas.
+Decision: tree LOD layers are now mutually exclusive with crossfade bands (leaves only up to 0.9·R1, cards from 0.9·R1, billboard from 0.7·R2), R1 = 5×H, R2 = 15×H
+Decision: far billboard = real tree rendered into an 8×8 atlas of 128 px tiles (4 presets × 16 forms = 64 tiles, not per tree), capturing skeleton + card tier from existing VBO slices, 64 captures per set swap sliced at 12% of frame time
+Decision: billboard quad now covers trunk + crown, wind amplitude 0 for billboard tiles
+Decision: individual leaf size default 2.0× (ezLeafScale), card base tier div 3 / scale 2.0
+Decision: reed fixes committed separately (culm 7-13 mm half-width, soft panicle mask, no height-shrink distance fade) although reed work is parked by the user
+Files: ~/.pi/agent/models.json, ~/.pi/agent/models.json.bak-vision, src/main.c, src/scene.h, src/trees_cpu.c, src/shaders/crown.vert, src/shaders/crown.frag, src/reed_cpu.c, src/shaders/reed.vert, src/shaders/reed.frag (commits 3586c69, 3befe1b)
+
+### Turn 31
+User: habe model gemacht
+[while the assistant worked] solltest du nicht ne orthogonale projektioon verwenden?
+[while the assistant worked] kannst du für deine messungen nicht mal einen early exit in die engine einbauen? dass sie das macht, was du brauchst und nach fertigstellung sofort beendet? du hast immer so ewige timeouts...
+[while the assistant worked] und schick mir gerne eine zwischenauslieferung...
+[while the assistant worked] scheint noch nicht zu funktionieren. was hätte die engine machen sollen ?
+[while the assistant worked] wie ist der stand und warum hab ich noch keine testversion gesehen?
+Result: Delivered a fresh test build to /media/sf_Quarantine/64kDemo/64kdemo (158768 B, commit 44a573c); selftest fully green including bit-identical determinism. Impostor capture switched to orthographic projection with bbox-based framing matched to the billboard quad, leaves included in the capture, cards off by default, mip clamp and quad-edge fade; added DEMO_EXIT=1 early-exit measurement mode (8.8 s vs 90 s timeout).
+Decision: impostor capture uses ortho_mvp, capture window = billboard quad size (quad carries the 1.15 margin), so tile maps 1:1 and the tree keeps its true size
+Decision: capture includes individual leaves (one-time cost, not per frame) and excludes cards by default (DEMO_IMPCARDS=1 re-enables)
+Decision: bucket representative must have leaves (tier 2/3); otherwise fall back to a dense representative of the same species
+Decision: crown.frag clamps impostor mip to 0/1 (atlas has no gutters) and fades quad border zone 0.88..1.0
+Decision: root cause of selftest "GL-Fehler im Log" and of silently missing screenshots: glUniform1f(cImp) called while progLeaf was active → GL 0x502 left in context, save_screenshot_ppm aborts on any pending GL error
+Decision: user must get a delivered build after every change round, not only at the end
+Files: src/main.c, src/scene.h, src/trees_cpu.c, src/shaders/crown.frag, /tmp/atlas.png, /tmp/sceneJ.png
+
+### Turn 32
+User: ich sehe in dieser Fassung folgende Fehler: Die bäume blenden eine LOD aus und das andere darauf ein. Das ist keine überblendung sondern ein nerviges pulsieren. außerdem sind viele Quads immer noch nach oben abgeschnitten. du muss da schon den ganzen baum drin aufnehmen und die skalierung in der ferne muss auch passen... Was passiert derzeit, wenn ich 1 drücke? die engine wird dann immer noch total lahm... Mach mir doch tastenkombinationen, mit denen ich gezielt schalten kann, welche LOD stufen tatsächlich gezeichnet werden, damit ich diese identifizieren kann.
+Result: Baum-LOD auf drei Nutzerfehler umgebaut: (1) Überblendung ohne Deckungsloch — ausgehende Schicht bleibt bis Ende des Bands voll an, kommende blendet im Band davor ein (leaf.vert keep 1.00–1.15·R1; crown.vert Karten ein 0.85–1.00·R1, aus 1.00–1.15·R2; Billboard ein 0.85–1.00·R2). (2) Aufnahmefenster des Impostors nutzt jetzt für JEDEN Repräsentanten die echte Baum-BBox inkl. Blattausdehnung (ezLszMax*2) — gemessen randberührende Kacheln 15 → 0 von 64, "nach oben abgeschnittene" Quads behoben. (3) Schicht-Tasten 4=nur Einzelblätter, 5=nur Karten, 6=nur Billboard, 7=alle (Uniforms uCardsOn/uBillboardOn, Leaf-Draw übersprungen; DEMO_LAYERS="leaf,card,bb" für Messläufe); 4-Felder-Bildvergleich erzeugt und gesehen. Ursache des FPS-Einbruchs bei Taste `1` belegt: Taste 1 setzte gleichzeitig scaleIdx=0 (Auflösung 1× statt 1/2 = 4× Pixel) UND schaltete Billboard + Baum-Build; Auflösung liegt jetzt auf F1/F2/F3.
+Decision: Überblendung als Überlappung (nie zwei halbe Schichten), nicht als Kreuzblende
+Decision: BBox des Billboards wird unabhängig von gBbWant gesetzt, damit tier-3-Repräsentanten dieselbe Rahmung wie den Quad bekommen
+Decision: Auflösungstasten F1/F2/F3, Ziffern 1/2 bleiben Funktions-Tasten (1 Billboard, 2 Schilf)
+Decision: 4/5/6/7 = Schicht-Isolation zum Identifizieren der LOD-Stufen im laufenden Bild
+Files: src/shaders/leaf.vert, src/shaders/crown.vert, src/shaders/crown.frag, src/trees_cpu.c, src/main.c
+
+### Turn 33
+User: ich glaube das geht schneller, wenn ich das beurteile...
+Result: Delivered test build (158784 B, commit aedff7e) to /media/sf_Projekte/64kDemo share path /media/sf_Quarantine/64kDemo/64kdemo with LOD-layer toggle keys, crossfade bands changed to overlapping (no coverage dip), and impostor capture framing fixed so no tile is clipped (border-touching tiles 15 → 0 of 64).
+Decision: crossfade = outgoing layer stays fully on until band end, incoming fades up in the band before it: leaves out 1.00–1.15·R1 / cards in 0.85–1.00·R1; cards out 1.00–1.15·R2 / billboard in 0.85–1.00·R2
+Decision: keys — 4 = only individual leaves, 5 = only cards, 6 = only whole-tree billboard, 7 = all layers, DEMO_LAYERS=leaf,card,bb for headless runs; resolution moved from 1/2/3 to F1/F2/F3 (key 1 had also set scaleIdx=0, i.e. 4x pixels — cause of the reported FPS collapse)
+Decision: gBbSize/gBbCen must be set for every tree (tier-3 reps draw no billboard, framing fell back to 0.75*H and cut crowns off); bbox now includes leaf-cluster extent (2x ezLszMax), not only card radius
+Files: src/shaders/leaf.vert, src/shaders/crown.vert, src/trees_cpu.c, src/main.c
+
+### Turn 34
+User: ich sehe immer noch das pulsieren. Es sind die Karten und ganzbaum billboards, die periodisch verschwinden und wieder auftauchen. Ist das deine variante den buffer flip darzustellen? Das kann man so nicht machen. Auch bei den nahen bäumen mit den einzelnen blättern sehe ich, wie die blätter verschwinden und neu aufgebaut werden. Die animation sollte aber nicht einzelne blätter nacheinander hinzufügen oder wegnehmen, sondern alle blätter gleichzeitig alpha einblenden. Kannst du das blending auch so einstellen, dass es nicht gedithert ist? das sieht nicht so schön aus.
+[while the assistant worked] übrigens sollte man baumstamm und ganzbaumbild nicht gleichzeitig zeichnen.
+Result: Delivered build 2d42d78 to /media/sf_Quarantine/64kDemo/64kdemo. Fixed four user-reported tree-LOD faults: billboard now emitted for all tiers (was tier<=2, causing pop-in at rebuild), leaf fade changed from per-leaf hash cull to real alpha (vAlpha varying), crown fade no longer dithered (vFade goes into output alpha, spatial edge threshold kept, opaque while no fade active), and trunk/skeleton now carries per-vertex R2 (TREE_FLOATS 12->13) and ends at R2 where the billboard is already full; shadow pass keeps uMeshFade=0; billboard quad nudged 0.25 m toward camera.
+Decision: fade must be real alpha, not dither; layers must not be drawn simultaneously (trunk vs whole-tree billboard)
+Decision: trunk handover kept in a very short band 0.97..1.00 R2 because a softly fading branch skeleton against the sky looked like noise (grey dots)
+Decision: fragments stay opaque (alpha 1) while no fade is active — alpha<1 on every card made crowns hollow (seen in image comparison)
+Decision: selftest determinism check NOT weakened; failure reported as open
+Files: src/shaders/leaf.vert, src/shaders/leaf.frag, src/shaders/crown.frag, src/shaders/crown.vert, src/shaders/tree.vert, src/shaders/tree.frag, src/trees_cpu.c, src/scene.h, src/main.c
+
+### Turn 35
+User: du hast einen neuen fehler eingebaut. der bildschirm flackert schwarz auf und es wirkt wie zbuffer wird nicht gelöscht für diese zeitperiode
+Result: Suchte das gemeldete schwarze Flackern. Baute DEMO_SHOTS="2 4 6 …" (mehrere Screenshots in einem Lauf) und mass eine 12er-Zeitreihe mit Kameraweg — in der VM kein schwarzes Frame (Helligkeit 155–181, Schwarzanteil 0 %). Als Ursache für das beschriebene „Z-Buffer wird nicht gelöscht" einen echten Fehler gefunden: der Blatt-Pass setzt DepthMask bei laufender Überblendung auf FALSE und stellt sie nie zurück, im nächsten Frame schreibt der Raymarch-Terrain-Pass keine Tiefe. Zweiter Fehler derselben Runde: im Schattenwurf-Pass ist uMeshFade=0, der Cull-Test prüfte den multiplizierten Wert → gesamtes Gerüst fiel aus der Schattenkarte. Beide Korrekturen sind in den Quelltext geschrieben, aber NICHT gebaut, NICHT geprüft und NICHT committet (Kommando abgebrochen).
+Decision: Fehlersuche über Zeitserien-Screenshots statt Einzelbild (DEMO_SHOTS)
+Decision: Blatt-Pass stellt DepthMask(GL_TRUE) und Blend-Zustand am Blockende wieder her
+Decision: Gerüst-Cull in tree.vert am Entfernungsfaktor mf, nicht am mit uMeshFade multiplizierten Wert
+Files: src/main.c, src/shaders/tree.vert
+
+### Turn 36
+User: das bild wird nicht komplett schwarz. die änderungen des bildes machen schwarze rändet
+
+ja das ist es.
+Result: In this turn only a rebuild plus a multi-shot verification run was attempted (`make bin/64kdemo`, then `DEMO_SHOTS="1 3 5 7 9 11" DEMO_WALK="0 1.2" DEMO_CAM="5 16 3.0 0.10" timeout 45 ./bin/64kdemo 640 360`); both command attempts were aborted, so nothing was built, measured or committed in this turn.
+Decision: black regions are caused by the leaf pass leaving `DepthMask` FALSE while a crossfade runs, so the next frame's raymarch terrain pass writes no depth — fix is to restore `p_glDepthMask(GL_TRUE)` (and disable blend) after the leaf pass
+Decision: skeleton cull in tree.vert must test the distance factor `mf`, not the multiplied `vMeshFade`, because the shadow-cast pass sets `uMeshFade = 0` and would otherwise drop the whole skeleton from the shadow map
+Files: src/main.c, src/shaders/tree.vert
+
+### Turn 37
+User: du hast den fehler behoben. liefer mal aus.
+Result: Fixed the black-region flicker — the leaf pass left DepthMask=FALSE during crossfades, so the next frame's raymarch terrain pass wrote no depth. Delivered build 2ac893a (162880 B) to /media/sf_Quarantine/64kDemo/64kdemo and committed.
+Decision: tree-mesh cull now keyed on the distance factor, not the multiplied value (uMeshFade=0 in the shadow pass would otherwise have dropped the whole skeleton from the shadow map)
+Decision: added DEMO_SHOTS="2 4 6" — multiple numbered screenshots in one run, needed to see time-dependent bugs like this flicker
+Decision: selftest determinism failure left unfixed and the check NOT weakened (4504/230400 px differ, max delta 3/255, all in grass area; cause = time-sliced uploads landing on different frames)
+Files: src/main.c, src/shaders/tree.vert, src/shaders/tree.frag, src/shaders/leaf.vert, src/shaders/leaf.frag, src/shaders/crown.frag, src/shaders/crown.vert, src/trees_cpu.c, src/scene.h
+
+### Turn 38
+User: die baumstämme und äste sind weg. das pulsieren ist nur halb weg. jezt verschwinden die blätter instantan und werden dann weich alpha eingeblendet.
+[while the assistant worked] und ich glaube für die überblendung müssen wir einen z-buffer trick anwenden, damit die transparenz korrekt läuft.
+Result: Delivered build 2b68301 fixing three defects: tree trunks/branches invisible (missing glEnableVertexAttribArray for new attribute 4 → aR2 read as generic 0 → whole skeleton culled), leaves vanishing instantly (leaf-emission gate used build-centre distance while the shader fades against the camera), and correct transparency during crossfades via a depth-only second pass. tools/selftest.sh is fully green again including bit-identical determinism.
+Decision: attribute 4 (R2 per skeleton vertex) must be explicitly enabled; found by forcing the skeleton red and measuring 0 red pixels
+Decision: leaf emission margin raised from 1.30·R1 to 1.15·R1 + 16 m so the build-centre lag (up to 12 m) never removes leaves inside the shader's fade band; measured 507870 leaf instances of 2400000, 0 cap hits
+Decision: Z-buffer trick for crossfades (user's suggestion): while treeFadeNew < 1, crown and leaf geometry is blended with depth-write off, then a color-mask-off pass with uDepthOnly (hard threshold coverage >= 0.5) writes depth of the mostly-covering fragments
+Decision: experiments (vMeshFade = 1.0, forced red in tree.frag) were reverted after diagnosis
+Files: src/main.c, src/shaders/crown.frag, src/shaders/leaf.frag, src/shaders/tree.vert, src/shaders/tree.frag, src/trees_cpu.c
+
+### Turn 39
+User: leider ist das LOD fading immer noch chaotisch und es gibt sprünge. Vielleicht sollten wir einmal ganz klar festlegen, wie das zu funktionieren hat.
+Result: Kein Code geändert. Ist-Zustand des Baum-LODs aus dem Code zusammengestellt (Existenzregeln des Builds vs. Sichtbarkeitsbänder der Shader) und sechs konkrete Widersprüche benannt, die die Sprünge erklären; anschließend festes Regelwerk (A–E) mit Gewichtstabelle und Kostenschätzung vorgeschlagen und zwei Rückfragen gestellt.
+Decision: Existenz (Build) und Sichtbarkeit (Shader) sind zwei getrennte Entscheidungen; Build großzügig/kamerabezogen, Shader nur gewicht(d)
+Decision: Bänder sich ablösender Schichten sind exakt komplementär (w und 1−w im selben Band), da jetzt echtes Alpha gemischt wird
+Decision: vorgeschlagene Bänder: Blätter aus 0,90–1,10·R1; Karten ein 0,90–1,10·R1, aus 0,90–1,10·R2; Billboard ein 0,90–1,10·R2; Gerüst aus 0,90–1,10·R2
+Decision: Karten in einer Dichte und einer Skala für alle Bäume (div 3, Skala 2,0), keine stufenabhängige Änderung; Billboard für alle Bäume
+Decision: Gerüst mit Ästen bis 1,15·R2, danach nur Stamm (außerhalb jedes Bands, also unsichtbar); Blätter gebaut bis 1,15·R1 + 20 m
+Decision: Budget-Kappung nur jenseits 1,3·R2, nie im sichtbaren Bereich
+Decision: Umsetzung erst nach Bestätigung der beiden Rückfragen (Bandbreite 0,90–1,10 vs. 0,95–1,05; Gerüst mit Billboard ausblenden oder Stamm bis zur Billboard-Sichtbarkeitsgrenze stehen lassen)
+Files: none
+
+### Turn 40
+User: 1. ja testen wir, 2. bis zur sichtbarkeitsgrenze billboard. Wobei; Eine Frage noch: Was bedeutet in deinem code existenz? liegt im VRAM, liegt im SYSRAM oder beides? Ich denke fast, wenn einmal ein baum in einem detailgrad vorliegt, sollte man ihn cachen und nur lazy unloaden, wenn platz gebraucht wird.
+Result: Implemented the user-approved tree-LOD rule set — complementary fade bands (leaves out 0.90–1.10·R1, cards in 0.90–1.10·R1 / out 0.90–1.10·R2, billboard in 0.90–1.10·R2, skeleton out 0.90–1.10·R2) and existence rules (one card density/scale div 3 / 2.00 for all tiers, branches to 1.15·R2, leaves to 1.15·R1+20 m). Delivered build 2b5ed16 (162880 B) to /media/sf_Quarantine/64kDemo/64kdemo; selftest fully green. Measured: cards 234223→446918 (cap 900000), skeleton 1179702→1374750 (cap 5200000), leaves 507870→642330 (cap 2400000), 0 cap hits, buffer 95→121 MB per set.
+Decision: LOD spec binding: build decides existence only (generous, beyond outermost band); shader decides weight(d) only; two succeeding layers share one band and are complementary (w / 1-w) with real alpha
+Decision: skeleton fades out in the same band the billboard fades in (0.90–1.10·R2) — user chose "bis zur Sichtbarkeitsgrenze Billboard"
+Decision: band width 0.10 relative chosen for the first test (0.90–1.10)
+Decision: "Existenz" today = generated in the active CPU set AND uploaded to its VBO; SYSRAM 800 MB statically reserved (tvA/tvB, cvA/cvB, lvA/lvB), VRAM 91 MB per set / 181 MB both; nothing is cached — every 12 m of camera travel regenerates all 646 trees (228 ms) and re-uploads 121 MB (50 ms)
+Decision: proposed next step (awaiting user OK): single set instead of two, per-tree slot with detail level + LRU, generate + glBufferSubData only for trees newly entering the 180 m build radius, evict only trees with weight 0 (d > 1.3·R2), compaction via glCopyBuffer
+Files: src/shaders/leaf.vert, src/shaders/crown.vert, src/shaders/tree.vert, src/trees_cpu.c, STATUS.md
+
+### Turn 41
+User: beim caching gefällt mir dein vorschlag. aber bevor wir das angehen müssen wir immer noch das fading in den griff bekommen. Derzeit macht der Algo immer noch was er will. Und es gibt immer sprünge beim fading. Billboars würde ich im nachhinein durch quads mit fester orientierung um raum ersetzen. Denn wenn die kamera sich dreht, sehen die schnell sehr unglaubwürdig aus. vlt wären auch ne raytracing variante interssant. Ich glaube wir brauchen in der entfernung aber leider schon noch individuelle bäume, die wirklich so aussehen, wie sie in der nähe auch aussehen würden.  Und du musst jetzt mal wirklich kritisch deinen fading code lesen. ich sehe da immer einen fade der am anfang und am ende springt. hast du evtl die koeffizienten verwechselt? Dann sollte der LOD nicht von dem Kamera abstand abhängen, sondern von dem abstand zum lotpunkt der kamera auf dem terrain. sonst bekommt man arg komische luftbilder...
+Result: Fixed fading jumps by correcting mismatched LOD bands in crown.vert (previously unwritten) and switching distance calculation to horizontal (XZ) projection in leaf.vert, crown.vert, and tree.vert. Removed random per-pixel threshold in crown.frag to stop silhouette shimmering.
+Decision: LOD distance must be horizontal (XZ) distance to camera, not 3D distance, to prevent aerial view artifacts.
+Decision: Crown and leaf LOD bands must be complementary (0.90-1.10 * R) to ensure smooth transitions without gaps or overlaps.
+Decision: Replace billboards with fixed-orientation quads later; keep individual trees for distance.
+Files: src/shaders/crown.vert, src/shaders/leaf.vert, src/shaders/tree.vert, src/shaders/crown.frag
+
+### Turn 42
+User: du machst schon wieder nur screenshots von EINEM Baumstamm... Lass mich das lieber mal bewerten...
+Result: Fading-Fehler im Baum-LOD gefunden und im Quelltext korrigiert: (a) crown.vert-Bänder der Vorstufe waren nie geschrieben worden (Skript änderte nur die Speichervariable, kein write) — galten also nur für Blätter/Gerüst; (b) crown.frag hatte eine pro Pixel zufällige Alphaschwelle `thr = 0.5 + (hash12(gl_FragCoord.xy + vTile*37.0)-0.5)*0.75` → Schimmern der Kronensilhouette bei Kamerabewegung; (c) Depth-only-Nachpass schaltete bei cov≥0.5 pro Pixel → harter Umschaltpunkt mitten in der Blende. Alles per grep im Quelltext verifiziert. Build/Selbsttest/Auslieferung dieser Runde wurden abgebrochen, also ist diese Version NICHT gebaut, NICHT geprüft und NICHT ausgeliefert.
+Decision: LOD-Distanzmaß von 3D-Kameradistanz auf waagerechten Abstand zum Lotpunkt der Kamera aufs Terrain umgestellt (`* vec3(1,0,1)`), Dunst/Far-Fade bleibt 3D (d3) — Nutzer: sonst "arg komische Luftbilder"; CPU-seitig war cand[].d2 bereits XZ-only, also konsistent
+Decision: Bänder endgültig: Blätter aus 0,90–1,10·R1; Karten ein 0,90–1,10·R1, aus 0,90–1,10·R2; Billboard ein 0,90–1,10·R2; Gerüst aus 0,90–1,10·R2 (komplementär, Summe 1)
+Decision: Depth-only-Nachpass jetzt am Schichtgewicht: `if(vFade < 0.5 || a < 0.5) discard;` statt pro-Pixel-cov
+Decision: Caching-Architektur (ein Satz statt zwei, Slot pro Baum mit Detailgrad + LRU, glBufferSubData nur für neu einlaufende Bäume, Verdrängung nur bei Gewicht 0 / d > 1,3·R2, Kompaktierung über glCopyBuffer) gefällt dem Nutzer, wird aber ERST nach dem Fading angegangen
+Decision: Billboards sollen durch Quads fester Orientierung (kein mitschwingen mit der Kamera) ersetzt werden; Raytracing-Variante als Möglichkeit erwähnt; ferne Bäume müssen individuell bleiben und so aussehen wie in der Nähe — noch nicht implementiert, nur Diskussion
+Decision: Nutzer bewertet Bilder selbst auf dem Host; ich soll keine Engine-Screenshots mehr zur Beurteilung erzeugen (Kamera landete wieder an einem Stamm)
+Files: src/shaders/crown.vert, src/shaders/leaf.vert, src/shaders/tree.vert, src/shaders/crown.frag
+
+### Turn 43
+User: versuchs nochmal.
+Result: Found and fixed four real fade faults by critically reading the fade code: (1) the previous round's band changes never reached src/shaders/crown.vert (script replaced text in memory but never wrote the file), so bands were mixed (cards in 0.85–1.00·R1, leaves out 0.90–1.10·R1, billboard in 0.85–1.00·R2, skeleton out 0.90–1.10·R2) and weights never summed to 1; (2) crown.frag had a per-pixel random alpha threshold thr = 0.5 + (hash12(gl_FragCoord) − 0.5) · 0.75 causing shimmering crowns; (3) the depth-only pass thresholded per pixel at cov ≥ 0.5, flipping hard mid-fade; (4) LOD used 3D camera distance. Selftest fully green; build 368504d (162880 B) delivered to /media/sf_Quarantine/64kDemo/64kdemo.
+Decision: all crossfade bands unified at 0.90–1.10·R1 / 0.90–1.10·R2 (leaves out, cards in/out, billboard in, skeleton out)
+Decision: crown.frag dithered spatial threshold removed — texture alpha is the edge, blending is real alpha
+Decision: depth-only pass gated on layer weight (vFade ≥ 0.5 and silhouette a ≥ 0.5), not per-pixel cov
+Decision: LOD bands use horizontal distance to the camera's ground point (vec3(1,0,1) mask); dust/fog stay 3D; CPU candidate distance was already XZ-only (cand[].d2 = ddx²+ddz²) so CPU and shader are now consistent
+Decision: measured continuity via per-frame image diff over a camera walk: baseline 9–12, set-swap spike 17 — residual jump is in the rebuild, not the bands
+Decision: tree geometry caching (one buffer set, per-tree slot + LRU, glBufferSubData for newly incoming trees, eviction only at weight 0 / d > 1.3·R2) approved by user but queued behind the fading work
+Files: src/shaders/crown.vert, src/shaders/crown.frag, src/shaders/leaf.vert, src/shaders/tree.vert
+
+### Turn 44
+User: also das grafische blending selbst scheint zu funktionieren, aber wenn ich dann weiter gehe und die LODS neu generiert werden, dann passieren die sprünge. sogar an den zweigen, währenst ich gerade in der baumkrone hänge spingt das modell kurz auf einen noch dichter gewachsenen baum um... Ich glaub wir müssen einmal eine version machen, wo einfach nur ein baum und sonst nix gezeichnet wird und den schauen wir uns genau an, was da wann gerechnet wird...
+[while the assistant worked] ich sehe auch AA artifakte bei tier 2. wird der baum intern auf schwarzen hintergrund gezeichnet?
+[while the assistant worked] und bei den fernen billboards/quads sieht man auch schwarzen rand.
+Result: Schwarzer Rand an fernen Billboards gefunden und behoben. Atlas-Rohdump gemessen: Randring 64/64 Kacheln komplett schwarz, Alpha binär (837282 Texel 0, 211161 Texel 255, nur 133 dazwischen). Fixes: impostor_fix() fuellt mittleren Laubton in transparente Atlas-Texel (Rand schwarz 64 -> 0), Kachel-Einzug im Shader von 0.5/1024 auf 0.5/128 korrigiert (war 8x zu klein), crown.frag schreibt im Aufnahme-Pass echtes cov statt Alpha 1, p_glTexSubImage2D-Loader nachgeruestet. Build ausgeliefert nach /media/sf_Quarantine/64kDemo/64kdemo, Commit 9db13af.
+Decision: Ursache der Spruenge "dichter gewachsener Baum" belegt: gen_tree(..., tier) aendert das Wachstum selbst (trees_cpu.c:645 int per = tier >= 3 ? 120 : 55;, ebenso 673/686) — ein Stufenwechsel erzeugt einen anderen Baum, beide werden 0,9 s lang gezeichnet
+Decision: Ziel = ein kanonischer Baum pro Seed, die Stufe entscheidet nur noch welche Schichten emittiert werden
+Decision: Kachel-Alpha bleibt binaer, weil Karten-Quelltextur hart gezeichnet wird (Aufnahme-Paene ohne MSAA); Gegenmittel = jede Kachel 2x ueberauft geloest aufnehmen und boxfiltern
+Decision: naechster Schritt = von Nutzer verlangte Ein-Baum-Szene (nur ein Baum, Rest aus, Protokoll pro Frame) — Rueckfrage gestellt, ob zusammen mit dem gen_tree-Fix
+Files: src/main.c, src/shaders/crown.frag, /tmp/64kdemo_impostor.rgba, /tmp/cm3.txt
+
+### Turn 45
+User: Ja. Kann man nicht eine alphamap auf die quads legen, die die transparenz weicher machen?
+Result: Built the requested single-tree debug scene (DEMO_ONE=1 + DEMO_TREEDIST, per-frame CSV of build decision and layer weights) and used it to find the remaining LOD jump: ez_grow scaled mesh tessellation by build tier (stride/G), changing the skeleton from 9993 to 4191 verts at 36 m while mesh weight was 1.00. Fixed by making full mesh exist to 1.15·R2 with level-based density inside it, and raised TREE_VERT_CAP. Also added the user-requested alpha map (soft alpha baked into both atlases) and delivered build 21ad309 (166 992 B) to /media/sf_Quarantine/64kDemo/64kdemo; selftest fully green including stress scenario and determinism.
+Decision: mesh tessellation must not depend on build tier — fine mesh exists to 1.15·R2 (outside the outermost fade band), inside it stride = lvl<=1 ? 1 : 2 and G capped 8/6/4 by level, so geometry is identical at all distances
+Decision: TREE_VERT_CAP 5 200 000 -> 9 500 000 (user rule: raise budgets instead of skipping geometry; CPU buffers are BSS so only written pages cost memory)
+Decision: alpha map implemented as soften_alpha() — per-tile box blur (radius 2 texel, clamped inside tile) of atlas alpha, blended 75 % into the original with a 0.6× floor so thin twigs survive; applied to both crnTex (impostor) and folTex (card atlas)
+Decision: single-tree protocol DEMO_ONE is the tool for judging LOD/rebuild behaviour instead of VM screenshots
+Files: src/main.c, src/trees_cpu.c, src/scene.h, src/shaders/crown.frag, src/shaders/crown.vert, src/shaders/leaf.vert, src/shaders/tree.vert, STATUS.md
+
+### Turn 46
+User: bei der one tree demo sieht man sehr schön, dass hier noch garnichts gelöst ist. Der baumgenerator macht immer noch komische sprünge bei den kronen. tear2 sieht ab einer gewissen entfernung wie ein toon shader aus, weil das blattwerk vor schwarzem hintergrund gerendert wurde. Interessanterweise verschwindet der toonshader, wenn ich mich schnell bewege?!?!
+Result: Fixed foliage atlas toon-shading by filling transparent texels with RGB and generating per-tile mipmaps; fixed tree geometry popping by aligning LOD cut distance with build center; updated selftest to ignore HUD pixels in determinism check.
+Decision: Foliage atlas transparent texels must have RGB filled to prevent black bleed during mipmapping.
+Decision: Tree LOD cut distance must be based on build center, not camera, to prevent geometry popping.
+Decision: Selftest image comparison must exclude HUD region (x 633-639, y 3-38) to avoid false determinism failures.
+Files: src/main.c, src/trees_cpu.c, tools/selftest.sh
+
+### Turn 47
+User: Was machst du da schon wieder?
+Result: Two more real tree-LOD faults found and fixed. (1) Toon look of far crowns: crown.frag samples textureLod(uFoliage,…,lod up to 3) but folTex had no mip chain (MIN_FILTER GL_LINEAR) → undefined, Mesa returns black; also 100 % of the card atlas's 3 075 913 transparent texels had RGB=0. Added build_tile_mips() (per-tile 2×2 box-folded mip chain, no cross-tile bleed) for folTex and crnTex, MIN_FILTER=GL_LINEAR_MIPMAP_LINEAR, crown.frag clod now min(lod,3.0), and fill_rgb() (mean tile tone into transparent texels) — measured RGB==0 in transparent texels 100 % → 0,0 % (3256 of 3.07M). (2) Skeleton jumped 45 → 7362 verts between rebuilds of the same tree because gBranchCut/gMeshFineCut used build-centre distance while the mesh fade uses camera distance; margin now R2*1.15 + 16 m → measured constant 7362 verts across all rebuilds (tier 0 and tier 2 identical). Build delivered to /media/sf_Quarantine/64kDemo/64kdemo (166992 B, commit f0435a8).
+Decision: mip chains are built per tile on the CPU (driver mips would mix neighbouring tiles), which lets crown.frag use lod up to 3 instead of the old 0/1 clamp
+Decision: transparent atlas texels get the tile's mean colour so black never bleeds into filtered edges
+Decision: geometry-existence margins must cover the build's up-to-12 m camera lag (R2*1.15 + 16 m), otherwise the cut lands inside the fade band
+Decision: selftest determinism now compares the scene below the HUD (y>=48) and reports the HUD strip separately — the recurring failure was only the FPS text (123 px, y 3..38, x 633..639, max delta 9)
+Decision: run long measurements/selftests in the background, never synchronously (user objected twice to blocking runs and to trunk-filling screenshots)
+Files: src/main.c, src/shaders/crown.frag, src/trees_cpu.c, src/scene.h, tools/selftest.sh, STATUS.md
+
+### Turn 48
+User: kannst du den selbsttest mal gerade abbrechen?
+Result: Found and fixed the "toon shader" look of distant crowns — crown.frag samples the card atlas with textureLod up to level 3 but folTex had no mipmap chain (undefined on Mesa → black); added build_tile_mips() building a per-tile mip chain (card atlas + impostor atlas, MIN_FILTER GL_LINEAR_MIPMAP_LINEAR, crown.frag now allows lod≤3) and fill_rgb() removing black RGB from transparent atlas texels (measured 100 % → 0.0 %, 3256 of 3.07M). Also fixed a geometry jump found with DEMO_ONE: skeleton alternated 45 ↔ 7362 verts between rebuilds because branch/mesh cuts used build-centre distance while the fade band uses camera distance — cut now R2*1.15 + 16 m, measured constant 7362 verts (tier 0 and tier 2 identical). Selftest determinism check now compares the scene below the HUD (previous failures were 123 px in the FPS text, y 3..38, x 633..639). Build delivered to /media/sf_Quarantine/64kDemo/64kdemo (166992 B, commit f0435a8); user asked to abort the running selftest, so this commit's full selftest run is NOT done.
+Decision: LOD band spec (user-approved) stays binding: layers exclusive with complementary bands at 0.90–1.10·R1 / 0.90–1.10·R2; R1=clamp(5H,20,60), R2=clamp(15H,40,120); existence must extend beyond the outermost band; LOD distance measured horizontally from the camera's ground point, dust/fog stay 3D
+Decision: mip chains for both atlases are built per tile on the CPU (2x2 box within tile), never via the driver's whole-atlas chain (neighbour tiles would mix)
+Decision: selftest determinism compares y>=48 (scene) and reports the HUD strip separately instead of being weakened
+Decision: next agreed work item is the tree cache: one buffer set instead of two, per-tree slots with detail level + LRU, generate + glBufferSubData only for trees newly entering the 180 m radius, eviction only for trees with weight 0 (d > 1.3·R2), compaction via glCopyBuffer
+Decision: user wants the long-running selftest aborted on request; do not block on it
+Files: src/main.c, src/scene.h, src/trees_cpu.c, src/shaders/crown.frag, src/shaders/crown.vert, src/shaders/leaf.vert, src/shaders/leaf.frag, src/shaders/tree.vert, src/shaders/tree.frag, tools/selftest.sh, STATUS.md
+
+### Turn 49
+User: ping!
+Result: Status turn only ("ping!") — reported clean working tree, HEAD f0435a8, delivered build identical, no runs active, and listed the open tree items; asked the user for their host verdict on the last build. No code changed in that turn.
+Decision: HEAD = f0435a8 "Toon-Look der fernen Krone: Mip-Kette pro Kachel, kein Schwarz in den Luecken"; delivered /media/sf_Quarantine/64kDemo/64kdemo (166 992 B) equals this commit
+Decision: toon cause measured — crown.frag samples the card atlas with textureLod up to level 3 while folTex had NO mip chain (MIN_FILTER GL_LINEAR) → undefined, Mesa returns black; fix = build_tile_mips() folds a mip chain per tile (2x2 box inside each tile) for folTex and crnTex, MIN_FILTER GL_LINEAR_MIPMAP_LINEAR, crown.frag clod now min(lod,3)
+Decision: fill_rgb() writes the per-tile mean colour into transparent atlas texels; measured RGB==0 in transparent texels 100 % → 0.0 % (3 256 of 3.07 M)
+Decision: skeleton jump fixed — branch/mesh cut was keyed to build-centre distance while the fade uses camera distance; cut now R2*1.15 + 16 m; measured constant 7 362 verts across rebuilds (tier 0 and tier 2 identical) via DEMO_ONE + DEMO_WALK
+Decision: tools/selftest.sh determinism check now compares the scene below the HUD (y>=48) and reports the HUD strip separately; earlier failures were 123 px in the FPS text (y 3..38, x 633..639)
+Files: src/main.c, src/shaders/crown.frag, src/trees_cpu.c, src/scene.h, tools/selftest.sh
+
+### Turn 50
+User: deine quads sind jetzt schwarz wo sie transparent sein sollten und der sprung ist immer noch drin...
+Result: Root cause of the black tree quads found and fixed — my per-tile mip chain stopped at 8x8 instead of 1x1, making the atlants mip-incomplete, so sampling returned (0,0,0,0). Also gave the whole-tree billboard a true aspect ratio, removed double lighting/tonemapping of the impostor tile, rebuilt the impostor mip chain after every capture slice, and kept cards/skeleton when no billboard is in the buffer. Build 8b4467e (166 992 B) delivered to /media/sf_Quarantine/64kDemo/64kdemo; selftest fully green.
+Decision: mip chains must be complete down to 1x1 (incomplete chain = sampling returns 0 on GL_LINEAR_MIPMAP_LINEAR) — measured: atlas RGB 241 but shader got 0
+Decision: far trees use cards by default (treeBillboard0 = 0); the 128 px impostor tile has only 5.8% coverage and washes out under mip filtering — key 1 still enables the impostor
+Decision: billboard quad carries width in aData.x and aspect h/w in the previously unused rotation slot aData.y; capture window is rectangular via ortho_mvp2
+Decision: impostor tile is output directly (tx.rgb) — it already contains lit, tonemapped colour
+Decision: LOD distance bands and geometry are now continuous (skeleton 7362 verts in tier 0 and tier 2, card+bb weights sum to 1); remaining far-view jumps attributed to impostor tile quality
+Files: src/main.c, src/scene.h, src/shaders/crown.frag, src/shaders/crown.vert, src/trees_cpu.c, /tmp/crown.frag.bak, /tmp/st7.out
+
+### Turn 51
+User: die schwarzen ränder und mipmapfehler hast du nun behoben. Leider ist die LOD generierung und der fade immer noch nicht richtig synchron und ich sehe immer noch sprünge beim bewegen. Wir brauchen also nun endlich eine wirklich wasserdichte debug strategie. du hast heute bewiesen, dass du dieses problem ohne menschliche hilfe nicht in den griff bekommst. Also lass und eine strategie bauen...
+Result: Read the LOD code and documented that five clocks with four different anchor points compute "distance to this tree" differently (rebuild trigger uses camTgt; CPU tier/existence use camera-to-lot-point frozen at build time; leaf.vert uses leaf position iPos; crown.vert uses card center aCenter; tree.vert uses the per-vertex position p). Proposed a five-part debug strategy (A canonical per-tree distance, B GL-free unit tests of a pure tree_lod.c core, C in-engine invariant checker with 300-frame ring buffer, D deterministic frame stepping, E HUD readout plus key 9 dumping the buffer). No code changed; two questions posed.
+Decision: bands are formally complementary (0.90-1.10 R) but receive different arguments, so layer weights of one tree can never sum to 1 — measured anchor offset up to 3 m against a 10 m wide band at R1 = 50 m
+Decision: proposed order A (canonical distance in all three shaders) then B (proof) then C/D/E (observability)
+Decision: awaiting user answers: (1) implement A now or build B first, (2) is a GL-free host test tools/test_tree_lod.c acceptable as the main verification tool
+Files: none
+
+### Turn 52
+User: A und B machen.
+Result: Strategie A und B umgesetzt. A: der Lotpunkt des Baums (Anker) liegt jetzt in allen Instanzen (TREE_FLOATS 13→15, CROWN_FLOATS 12→14, LEAF_FLOATS 11→13, Attribut 5/6/5) und alle drei Shader berechnen den LOD-Abstand daraus statt aus Blattposition/Kartenmitte/Vertex. B: neuer GLSL-freier Kern src/tree_lod.c/.h (Schaltweiten, Schichtgewichte, Existenz-Schnitte, Stufen-Hysterese) plus Wirtstest tools/test_tree_lod.c — 7418 Prüfungen, 0 Fehler, |Summe der Schichtgewichte − 1| = 0 exakt. Shader teilen sich eine GLSL-Implementierung src/shaders/lod.glsl per #include (gen_shaders.sh expandt Includes). Build läuft, Baum bei 25/60/120 m sichtbar, 0 dunkle Pixel.
+Decision: LOD-Entscheidungen haben eine einzige Quelle: src/tree_lod.c (Engine, Protokoll in main.c und Wirtstest rufen dieselben Funktionen)
+Decision: Bänder einheitlich 0,90–1,10·R als lodBandIn/lodBandOut in src/shaders/lod.glsl; handgeschriebene Bänder in leaf.vert/crown.vert/tree.vert entfernt; Wirtstest prüft, dass GLSL und C dieselben Zahlen benutzen
+Decision: LOD_BUILD_LAG auf 20 m gesetzt (deckt Build-Nachlauf + Upload-Slices ab); Existenz-Schnitte = R·1,15 + 20 m
+Decision: Stetigkeitsprüfung nutzt die analytische smoothstep-Schranke 1,5·Δ/bandbreite plus Designgrenze Bandbreite ≥ 4 m (eine feste Schwelle von 0,10 war bei R1 = 20 m falsch)
+Decision: gemessene Sprungwerte pro Frame (Vorher/Nachher-Vergleich) sind erst halbfertig: alt = 8444 Frames, max Sprung pro Frame Blatt 0,000 / Karte 0,007 / Billboard 0,007 / Gerüst 0,007, Deckungsloch 0,000, Gerüst-Vertices 45↔7362 mit genau einer Änderung, Karten konstant 841, dCam 63,6–172,0 m; der Vergleichslauf mit dem neuen Binary wurde abgebrochen
+Files: src/tree_lod.h, src/tree_lod.c, src/shaders/lod.glsl, tools/test_tree_lod.c, tools/gen_shaders.sh, Makefile, src/scene.h, src/trees_cpu.c, src/main.c, src/shaders/leaf.vert, src/shaders/crown.vert, src/shaders/tree.vert
+
+### Turn 53
+User: was hast du gemacht die alten bugs mut schwarzem rechteck sind wieder da?!?
+
+und die bewegung der kamera ist seitlich und nicht vom baum rückwärts entfernend. die höchste detailstufe wird so nicht mal angefahren... du musst deine tests besser planen....
+Result: Strategie A und B eingebaut. A: jeder Datensatz (Gerüst-Vertex, Krone-Karte, Einzelblatt) trägt den Lotpunkt des Baums (TREE_FLOATS 13→15, CROWN_FLOATS 12→14, LEAF_FLOATS 11→13; Attribute tree=5@52, crown=6@48, leaf=5@44); alle drei Shader messen den LOD-Abstand jetzt daran (`length(aAnchor - uCamPos.xz)`). B: Kern als reine Funktion (R1/R2, Gewichte, Existenz-Schnitte, tier-Hysterese) plus GL-freier Wirtstest; Bänder liegen jetzt einmal in `lod.glsl`, das von leaf/crown/tree per `#include` geteilt wird (gen_shaders.sh expandt Includes).
+Decision: eine kanonische LOD-Entfernung pro Baum = waagerechter Abstand Kamera→Lotpunkt, benutzt von Build und allen drei Shadern
+Decision: Bänder nur noch in src/shaders/lod.glsl (0,90–1,10·R); C-Kern src/tree_lod.c ist Spiegelbild, Wirtstest prüft beide Seiten
+Decision: LOD_BUILD_LAG auf 20 m gesetzt; Existenz-Schnitte kommen aus treeLodLeafCut/BranchCut/MeshCut
+Decision: Ein-Baum-Protokoll rechnet Gewichte nicht mehr selbst, sondern ruft den Kern
+Decision: Nutzer kritisiert: Kameraweg lief seitlich statt auf den Baum zu, höchste Detailstufe nie angefahren — Tests müssen eine Anfahrts-Strecke (tier 0→3) durchfahren
+Files: src/tree_lod.h, src/tree_lod.c, src/shaders/lod.glsl, tools/test_tree_lod.c, src/scene.h, src/trees_cpu.c, src/main.c, src/shaders/leaf.vert, src/shaders/crown.vert, src/shaders/tree.vert, tools/gen_shaders.sh, Makefile
+
+### Turn 54
+User: nein was ich moniert habe habe ich in deinen VM Tests gesehen...
+Result: Implemented strategy A + B for tree LOD. A: the tree's lot point is now carried in every instance (TREE_FLOATS 13→15, CROWN_FLOATS 12→14, LEAF_FLOATS 11→13) and leaf.vert/crown.vert/tree.vert all compute LOD distance as length(anchor − uCamPos.xz) — previously four different anchors (leaf position, card centre, vertex, build centre) made complementary bands unsynchronisable. B: LOD math extracted to src/tree_lod.c/.h plus src/shaders/lod.glsl shared by the three shaders via #include (gen_shaders.sh inlines it); tools/test_tree_lod.c runs without GL: 7418 checks, 0 errors. Added DEMO_APPROACH=<m/s> radial camera run; measured one tree 140 m→2.6 m: tiers 0→2→3 monotone, |leaf+card+bb−1| = 0.0000 every frame, max |dw/dd| 0.121/0.072 per m within analytic bound 1.5/bandwidth, geometry changes only where weight = 0.000 (skeleton 45→7362 at 124.5 m, leaves 0→12600 at 62.6 m). Black rectangles reproduced in my own VM runs: old build 56 671 dark px with impostor on, new build 0 (on and off). Build 9e1888e (171 088 B) delivered to /media/sf_Quarantine/64kDemo/64kdemo; tools/selftest.sh fully green.
+Decision: tests must drive the camera radially onto the framed tree (DEMO_APPROACH), not along a fixed vector — sideways walks never reach tier 3 (user criticism)
+Decision: continuity is judged numerically (weight sums, |dw/dd| vs 1.5/bandwidth, geometry change locations vs weight 0), not by screenshots
+Decision: make test-lod (GL-free host test) is the primary verification tool for LOD changes; shader and C core must use identical band constants, enforced by the test
+Files: src/tree_lod.h, src/tree_lod.c, src/shaders/lod.glsl, tools/test_tree_lod.c, src/scene.h, src/trees_cpu.c, src/main.c, src/shaders/leaf.vert, src/shaders/crown.vert, src/shaders/tree.vert, tools/gen_shaders.sh, Makefile, STATUS.md
+
+### Turn 55
+User: ich sehe immer noch sprünge und habe eine vermutung woher sie zumindest teilweise auch kommen könnten. Transparenz und zeichenreihenfolge sag ich nur. Z-Buffer problem...
+Result: Auf Nutzer-Vermutung (Transparenz/Zeichenreihenfolge/Z-Buffer) die Tiefen-/Blend-Zustände der Baum-Pässe im Code gelesen und als Fakten benannt: außerhalb von Satz-Überblendungen schreiben Kronen-Karten und Einzelblätter Tiefe, obwohl ihr Alpha < 1 ist (Karten-Texturkanten, weiche Alpha-Karte, vFade < 1 in jedem Entfernungsband); zusätzlich kippen die Farbmaske-aus-Tiefen-Nachpässe pro Fragment bei Deckung 0,5. Drei Diagnose-Schalter eingebaut (DEMO_TDW, DEMO_TDPASS, DEMO_TABC), Build 171 096 B läuft. Die geplante Messmatrix (V0 Standard, V1 ohne Depth-Write, V2 ohne Tiefen-Nachpass, V3 Alpha-to-Coverage; identischer radialer Kamerapfad, Metrik = große lokale Pixeldeltas zwischen aufeinanderfolgenden DEMO_SHOTS-Frames) wurde gestartet, aber der Lauf wurde abgebrochen — keine Messergebnisse, keine Änderung am Transparenz-Verhalten, nichts committet.
+Decision: Transparenz-/Z-Buffer-Hypothese des Nutzers wird durch Messmatrix geprüft, nicht durch Umbau; Schalter nur Diagnose, Standardverhalten bleibt unverändert
+Decision: Messläufe mit DEMO_ONE (kein Terrain/Gras) und DEMO_APPROACH, damit derselbe Kamerapfad in allen Varianten gefahren wird
+Files: src/main.c (Diagnose-Schalter dbgTreeDepthWrite/dbgTreeDepthPass/dbgTreeA2C + DEMO_TDW/DEMO_TDPASS/DEMO_TABC, DEMO_APPROACH aus früherem Abschnitt dieser Runde; uncommittet)
+
+### Turn 56
+User: die reihenfolge ist auch ein problem, aber nicht das was wir suchen. ich brauche einen test, bei dem die engine nur den einen baum und sonst nix zeichnet und alle relevanten schritte sauber loggt... dein kamera test fährt übrigens viel zu schnell...
+Result: Built the requested single-tree LOD test (`DEMO_LODTEST="dStart dEnd step"` — nur ein Baum, feste Kamerastufe pro Frame, volle Protokollzeile pro Frame plus LT-STUFE/LT-GEOMETRIE/LT-SUMME/LT-ERGBNIS) and measured 140→3 m in 0,5 m steps: Stufen 0→2→3 bei 89/27 m, Deckungsloch 0,0000, max |dw/dd| 0,222 (Schranke 0,223), 3 Geometrie-Wechsel alle bei Gewicht 0,000 → Ein-Baum-Entfernungslogik stetig. Nebenbefund: 154/274 Frames laufen mit treeFadeNew<1, darin schreiben Kronen/Blätter keine Tiefe und der Farbmaske-aus-Nachpass kippt pro Fragment bei Deckung 0,5 — passt zum Z-Buffer-Verdacht; Satz-Wechsel selbst harmlos (alter/neuer Satz identisch 45/45, 840/840, 0/0).
+Decision: Kern-Modus `bb` (treeBillboard0) in TreeLod + lod.glsl aufgenommen, weil der Test sonst "Billboard 1,000 / Karten 0,000" für einen sichtbaren Baum rechnete; make test-lod prueft beide Modi: 14 795 Pruefungen, 0 Fehler
+Decision: Transparenz-Diagnose-Knoepfe DEMO_TDW (Kronen/Blätter-Tiefenwrite), DEMO_TDPASS (Tiefen-Nachpaesse), DEMO_TABC (SAMPLE_ALPHA_TO_COVERAGE)
+Decision: vorgeschlagener naechster Fix (wartet auf Bestaetigung): Tiefenverhalten vom Satz-Wechsel entkoppeln — neue Schicht schreibt Tiefe immer, nur der alte Satz nicht; kein 154-Frame-Fenster ohne Tiefen-Silhouette, kein Kipp-Punkt bei Deckung 0,5
+Decision: Auslieferung b279a4a (175 224 B) nach /media/sf_Quarantine/64kDemo/64kdemo
+Files: src/main.c, src/trees_cpu.c, src/scene.h, src/tree_lod.h, src/tree_lod.c, src/shaders/lod.glsl, src/shaders/crown.vert, src/shaders/tree.vert, tools/test_tree_lod.c, STATUS.md
+
+### Turn 57
+User: der test rendert aber sehr wohl terrain. und ich habe ihn mit schrittweiter 0.05 gemacht, weil man dann sehr deutlich sieht, dass der baum sehrwohl periodisch springt.
+[while the assistant worked] du ganzt lod.log und lod2.log in meinem quarantine ordner finden.
+Result: Identified that DEMO_ONE incorrectly rendered terrain due to envNoTerrain override; fixed code to disable terrain. Analyzed lod logs to confirm periodic tree jumps caused by geometry rebuilds every 17m during fade transitions. Applied fix to remove LOD_MARGIN cuts and verified with test suite.
+Decision: Rebuild interval is 17.0m, confirmed by log analysis.
+Decision: Periodic jumps caused by geometry changes (branch cut) occurring while weight is 1.0 during fade.
+Decision: Removed LOD_MARGIN 1.15f cut logic to prevent geometry changes in weight-1 zones.
+Decision: Fixed envNoTerrain logic in src/main.c to respect DEMO_NOTERRAIN and DEMO_ONE flags.
+Files: src/tree_lod.h, src/main.c
+
+### Turn 58
+User: viel zu langsam der test. es reicht auch 0.02 speed. und das pumpen ist immer noch da.
+Result: Found the pumping mechanism from the user's own logs (/media/sf_Quarantine/64kDemo/lod.log, lod2.log): rebuilds every 17.0 m; in 92 of 395 crossfade frames old and new set differ (e.g. d=71.90 m: new 10 164 skeleton verts vs old 45 = trunk only) while mesh weight is 1.000 — a layer with weight 1 is being crossfaded, period = rebuild interval. Cause: branch/mesh cut at R2·1.15+lag (86.6 m) lies inside a region where the skeleton never fades (bb=0). Fixed: no cut at all when no billboard tiles are in the buffer (LOD_NO_CUT). Also fixed: DEMO_ONE/DEMO_LODTEST set envNoTerrain which the later DEMO_NOTERRAIN read reset to 0, so the single-tree test always rendered terrain — now setenv("DEMO_NOTERRAIN","1",1). Test made fast by rendering at 32×24 (fill rate was the cost): 1275 frames in 45 s.
+Decision: a cut may never lie in a region where its layer has weight > 0; with bb=0 the skeleton is never cut (LOD_NO_CUT)
+Decision: host test now checks this over the whole 180 m build range for both bb modes: 22 015 checks, 0 errors
+Decision: LODTEST runs fast at tiny resolution (DEMO_LODTEST="140 3 0.02" ./bin/64kdemo 32 24, 6850 frames under 4 min)
+Decision: user's pumping observation was against build b279a4a, which did not yet contain the cut fix
+Files: src/tree_lod.c, src/tree_lod.h, tools/test_tree_lod.c, src/main.c, STATUS.md, /tmp/lt6.txt (commits 196443a delivered to /media/sf_Quarantine/64kDemo/64kdemo, 175 224 B)
+
+### Turn 59
+User: du darfst gerne kritisch sein, wenn ich blödsinn rede. 0.01 ist langsamer als 0.05. ich meinte natürlich nimm 0.1...
+[while the assistant worked] also ich sehe den fehler immer noch...
+Decision: cuts must never lie in a distance range where the layer has weight > 0; with billboards off (treeBillboard0=0) the skeleton is never cut (LOD_NO_CUT) — host test now checks this over the whole 180 m build range (22 015 checks, 0 errors)
+Decision: set crossfade default off (treeFadeDur = 0.0, DEMO_TREEFADE re-enables) because blending two identical semi-transparent copies is not coverage-preserving; measured worst coverage dips 60–140 m improved from −4.3 % to −1.3 %
+Decision: DEMO_ONE/DEMO_LODTEST now really disable terrain — envNoTerrain was overwritten by the DEMO_NOTERRAIN read at main.c:2215, fixed with setenv
+Decision: LODTEST camera aims at the tree centre each frame and LT-DECKUNG reads pixels after the MSAA resolve (reading the multisampled FBO gave a constant 6 HUD px)
+Decision: tree CPU buffers tvA/tvB, cvA/cvB, lvA/lvB are calloc'ed in tree_bufs_init(); TREE_VERT_CAP 9.5M -> 12M; measured 9 863 016 skeleton verts, 0 cap hits, 0 skipped trees, RSS 2.40 GB
+Decision: LODTEST runs fast at small resolution — DEMO_LODTEST="140 3 0.1" ./bin/64kdemo 320 180 (1370 frames, ~2.5 min); fill rate, not logic, dominated the runtime
+Files: src/main.c, src/tree_lod.c, src/tree_lod.h, src/trees_cpu.c, src/scene.h, STATUS.md, /media/sf_Quarantine/64kDemo/64kdemo
+Note: result>
+Note: Found and fixed the real cause of the periodic pumping with a model-free pixel measurement: the set crossfade blends two identical semi-transparent copies, which loses coverage (a − a²f(1−f), up to −25 % at f=0.5). Crossfade switched off; also removed the skeleton cut that lay in a weight-1 region, and moved the tree buffers from BSS to calloc because the full skeleton needs 9.86M verts and 24M broke the linker at the 2 GB BSS limit. Selftest fully green, build delivered.
+
+### Turn 60
+User: Okay ich verstehe den fehler noch nicht so richtig. warum hattest du überhaupt ein LOD mit sich selbst gefaded?
+Result: Erklärt (mit Belegen aus `git log`), warum es überhaupt eine Satz-Überblendung gab: Commit 7dd90a6 setzte deine Anforderung „was ich brauche, darf nicht verschwinden" als zeitliche Kreuzblende über den ganzen Puffer-Satz (0,9 s) um. Zwei Fehler: sie griff auf alle Bäume (von 132 Überblend-Frames hatten nur 9 verschiedene Sätze, dort nur Blätter mit Gewicht 0,000) und behandelte Alpha additiv — identische halbtransparente Geometrie zweimal ergibt a − a²·f·(1−f), bei f=0,5 bis zu 25 % weniger Deckung. Kein Code geändert.
+Decision: Satz-Wechsel braucht keine Blende bei identischem Inhalt; Unterschiede müssen über Entfernungs-Gewichte/Existenz-Margen abgedeckt sein, nicht über eine Zeit-Blende
+Decision: LT-PUMP-Prüfung ist die dauerhafte Sicherung: jeder Satz-Unterschied bei Gewicht > 0 ist ein Fehler (aktuell 0 Treffer)
+Files: none
+
+### Turn 61
+User: okay verstehe. Dann fällt mir auf, dass die engine mit unserem lod langsamer geworden ist. die framerate ist jetzt < 60. liegt das an der komplexität der geometrie? an den LODs ändert sich ja nix, wenn die kamera sich nicht bewegt, oder?
+Result: Explained the FPS drop with measurements: removing the skeleton cut raised the standard scene from 4 654 197 to 9 863 016 skeleton verts (+112 %), and unified card density raised cards 234 223 -> 446 047. Confirmed LOD/tier state is unchanged while the camera stands still, but the GPU still transforms all verts each frame (wind in vertex shader). Measured a build-radius table: 180 m = 648 trees / 9 863 016 verts / 446 047 cards; 126 m = 336 / 5 190 720 / 231 780; 90 m = 167 / 2 475 960 / 116 058; 63 m = 86 / 1 163 556 / 58 878. No code changed this turn.
+Decision: LOD state is only recomputed on rebuild (12 m camera trigger); standing still changes nothing, but vertex cost stays constant because wind is in the vertex shader
+Decision: two proposed ways forward, awaiting user choice — (a) fade layer weights to 0 at the build edge (e.g. 110-130 m), allow the cut only after that, shrink build radius to ~126 m (-47 %), which also removes the current hard pop at the build edge; (b) the approved per-tree geometry cache (one buffer set, slot per tree with detail level, far trees keep coarse but individual geometry, change only at weight 0)
+Decision: assistant recommends (a) as an intermediate step, then (b)
+Files: none
+
+### Turn 62
+User: warum wird das holz nicht mehr zu seinen schlechteren stufen gefaded? und es sollte synchron mit dem blattwerk ausfaden. und wir brauchen eine gute idee, wie wir den fade gleichmäßiger bekommen. der darf gern etwas langsamer passieren. er läuft im shader primitiv nach entfernung oder? wir müssen uns auch ein sehr guten trick mit der zeichenreihenfolge ausdenken. das gibt sonst immer z-artifakte...
+Result: Erklärt (aus dem Code belegt), warum das Holz keine schlechtere Stufe mehr hat — treeLodWMesh() gibt bei ausgemachtem Billboard pauschal 1.0 zurück, die stufenabhängige Netz-Dichte (stride 1/2 vs. 6, G 8/6/4 in trees_cpu.c:845-854) wird nie ausgelöst, weil gBranchCut/gMeshFineCut = LOD_NO_CUT sind. Vorgeschlagen: Bildgrößen-Kriterium px = rad·uFocalPx/d3 mit smoothstep(0,6–1,6 px) statt entferntsbasierter 0,9–1,1·R-Bänder; Holz-Auflösung pro Ast über stabilen Weltkoordinaten-Hash (opak, Depth-Write an, keine Transparenz, keine Sortierung, kein a−a²f(1−f)); Laub/Karten mit SAMPLE_ALPHA_TO_COVERAGE + Depth-Write an; Holz und Laub nutzen dasselbe Kriterium und lichten sich damit synchron. Kein Code geändert.
+Decision: Bildgröße (projizierte Ast-/Kartendicke in px) ersetzt willkürliche Entfernungsbanden als LOD-Kriterium
+Decision: Holz-Crossfade als pro-Ast-Dissolve mit opakem Depth-Write, nie als Alpha-Blend — damit reihenfolge-unabhängig und Z-frei
+Decision: "w = 0" und "existiert nicht" sollen zusammenfallen, damit jede Auslagerung unsichtbar ist (Voraussetzung für den Per-Baum-Cache)
+Decision: Messplan = LT-DECKUNG monoton und dellenfrei (aktuell schlechteste Delle −1,3 %), LT-PUMP 0 Treffer, Astanzahl pro Baum sinkt stufenlos
+Decision: zwei offene Rückfragen an den Nutzer — (a) Schwelle 1,0 px oder 1,5 px, (b) Auflösung pro Ast oder pro Zweigteil
+Files: none
+
+### Turn 63
+User: mach einen commit wenn noch nicht geschehen und dann bau mir einen vorschlag, der deiner meinung nach alle probleme löst. revertieren können wir dann immer noch, wenn ich es besser weiß...
+Result: Implemented the wood LOD by projected size instead of distance bands. Branch weight = smoothstep(0.6px, 1.6px, 2·rad·focalPx/d) with focalPx = 1.7·winH; dissolve is per tube segment via a stable per-branch-section threshold, opaque with depth write (no transparency, no sorting, no Z artifacts). Existence cut treeLodRadCut(rad) = 2·rad·focalPx/LOD_PX_LO now coincides with weight 0, so rebuilds/set swaps cannot change anything visible. Measured: skeleton 9 863 016 → 1 543 533 verts (−84 %), near-view coverage unchanged (2756 px @10 m, 18425 px @3 m), RSS 2.40 → 1.19 GB after lowering TREE_VERT_CAP 12M → 4M (measured max 1 785 495 over four camera positions), 0 cap hits, 0 skipped trees, host test 30 080 checks 0 errors, selftest fully green. Delivered 245c6e9 (179 288 B) to /media/sf_Quarantine/64kDemo/64kdemo.
+Decision: wood LOD keyed to projected branch thickness (LOD_PX_LO 0.6 / LOD_PX_HI 1.6), same constants in src/tree_lod.c and src/shaders/lod.glsl, enforced by tools/test_tree_lod.c
+Decision: dissolve is opaque per segment (aLod = rad, diss in TREE_FLOATS 15→17, attributes 6 at offset 60), never alpha-blended; alpha-blending two identical copies loses coverage (a − a²f(1−f))
+Decision: existence cut = treeLodRadCut + LOD_BUILD_LAG + 0.5·H; without focalPx no cut
+Decision: TREE_VERT_CAP 4 000 000 (124 % headroom over measured max), buffers stay calloc
+Decision: new hard metric LT-SUMME "groesste Deckungs-Delle" (image measurement vs linear neighbourhood), fails above 8 %; current worst −5.26 % at 30.8 m
+Decision: the −5.26 % dip is not wood — it is the individual-leaf → card handover at R1 = 31 m (12 600 leaves vs 840 cards, cards cover less); that is the next work item
+Files: src/tree_lod.h, src/tree_lod.c, src/shaders/lod.glsl, src/scene.h, src/trees_cpu.c, src/shaders/tree.vert, src/main.c, tools/test_tree_lod.c, STATUS.md
+
+### Turn 64
+User: jetzt hast du leider neue bugs eingeführt. an den spitzen der äßte hängen jetzt bei vielen bäume weiße quads dran. wenn ich 1 drücke, sieht man in der entfernung ganzbaum quads mit zufälliger orientierung. und beim start des alphablends wird die transparenzmaske bei tier 2 plötzlich anders verarbeitet und man sieht daher einen kleinen sprung. die blätter werden sprunghaft ein bisschen kleiner. Der Texel übergang wandert um ein texel, würde ich ungefähr schätzen.
+[while the assistant worked] kannst du mir mal die aktuelle version geben?
+Result: Delivered build b07131c (179 304 B) to /media/sf_Quarantine/64kDemo/64kdemo fixing the three user-reported faults: (1) white quads at branch tips — image-size dissolve decided per vertex (a->r vs b->r) so triangles tore with one vertex collapsed, now one radius+threshold per branch section (gDissRad) and the cap inherits it; (2) whole-tree billboard quads with random orientation — crown.vert rotated the quad by cos/sin(aData.y) while aData.y carries the aspect ratio (1.3 rad = 74°), billboards now unrotated; (3) alpha jump at fade start — crown.frag/leaf.frag wrote `vFade >= 0.999 ? 1.0 : cov`, making soft card edges instantly semi-transparent, alpha is now continuously cov. Also enabled alpha-to-coverage by default (dbgTreeA2C = 1): worst coverage step over the 140→3 m approach −8,16 % @ 31,1 m (A2C off) vs −4,04 % (on).
+Decision: coverage metric changed to mean of 3 frames before vs mean of 3 after (old single-frame linear-neighborhood measure reported −83 % @ 79,3 m where raw counts are a smooth 251 px)
+Decision: alpha-to-coverage is the default transparency path for crown cards and leaves (order-independent, no Z artifacts); DEMO_TABC=0 disables
+Decision: remaining −4 % step is the individual-leaf → card handover (12 600 leaves vs 840 cards, cards cover less) — next work item
+Files: src/main.c, src/trees_cpu.c, src/shaders/crown.vert, src/shaders/crown.frag, src/shaders/leaf.frag, STATUS.md
+
+### Turn 65
+User: das ist schon besser, aber jetzt haben wir das alpha blend von 2 objekten ergibt zweil halb transparente folien auf dem hintergrund problem. Wie brauchen wirklich einen linearen fade zwischen den beiden LODS.
+[while the assistant worked] liefer doch mal aus
+Decision: fade = opaque base + linear incoming (lodBandOutHold in src/shaders/lod.glsl and src/tree_lod.c, tail 0.97..1.0 of band), not complementary weights
+Decision: blending fragments (vFade/vAlpha < 0.999) write gl_FragDepth = 1.0 so they never cull the opaque layer behind them
+Decision: A2C default off again (dbgTreeA2C = 0, DEMO_TABC=1 re-enables) — 4x MSAA turns card edges into see-through foil
+Decision: invariants now test coverage cov = 1-(1-cards)(1-billboard)(1-leaves) ~ 1 and its slope, not the sum of weights (engine LT check and tools/test_tree_lod.c both changed)
+Decision: measured whole approach 140→3 m (1370 frames, 11 builds): worst image coverage dip −3,65 % at 13,2 m (was −8,16 % at 31,1 m), coverage error 0,77 %, slope 0,046/m vs limit 0,223, 0 pump frames, LT-ERGBNIS OK, host test 30 090 checks 0 errors
+Files: src/shaders/lod.glsl, src/tree_lod.c, src/tree_lod.h, src/shaders/leaf.vert, src/shaders/crown.vert, src/shaders/crown.frag, src/shaders/leaf.frag, src/main.c, tools/test_tree_lod.c, STATUS.md
+Note: result>
+Note: Fixed the "two half-transparent foils" problem: outgoing LOD layer now stays opaque (new `lodBandOutHold`, tail = last 3 % of band) while the incoming layer fades up linearly; fragments that are blending no longer write usable depth (`gl_FragDepth = 1.0`), which had been culling the opaque representation behind them. Alpha-to-Coverage switched back off (4x MSAA quantised every card edge). Checks reworked from weight-sum to coverage `cov = 1-(1-K)(1-B)(1-L)`. Delivered build c2c73b0 (179 296 B) to /media/sf_Quarantine/64kDemo/64kdemo; selftest fully green.
+
+### Turn 66
+User: ich habe hier jetzt fehlerfafte verdeckund der bäume. wir müssen also die bäume von hinten nach vorne zeichnen, wenn a2c nicht geht.
+[while the assistant worked] wenn du was hast, dass getestet werden kann gerne sofort ausliefern.
+Decision: occlusion fixed by painter order (sort during build, not per frame), not by disabling depth writes
+Decision: card size/density is not the cause of the remaining −5 % coverage dip — sweep div/scale 3/2.0 = −5.95 %, 2/2.0 = −5.92 %, 3/2.6 = −11.03 %, 2/3.2 = −14.34 % (bigger cards are worse)
+Decision: sort reference falls back to the build centre when no camera reference is valid, otherwise sorting used distance to world origin
+Files: src/main.c, src/shaders/crown.frag, src/shaders/leaf.frag, src/trees_cpu.c, STATUS.md (commits 8c183fb; earlier this session 246db23, c2c73b0)
+Note: result>
+Note: Reverted the gl_FragDepth hack (it destroyed tree occlusion) and implemented back-to-front ordering at build time: tree candidates sorted by descending distance to the camera reference, and card plus leaf instances sorted far-to-near inside each tree. Delivered build 8c183fb (179 304 B) to /media/sf_Quarantine/64kDemo/64kdemo; geometry unchanged (1 543 533 skeleton verts, 446 047 cards, 642 330 leaves, 0 skipped trees).
+
+### Turn 67
+User: jetzt sehe ich von dem fade nichts mehr. als ob der plötzlich stattfände
+Result: Found why the tree LOD crossfade became invisible — the outgoing layer's hold (opaque until 0.97 of the band) combined with the leaf pass running AFTER the crown pass put the fading cards under opaque leaves, so they appeared instantly at band end. Swapped colour-pass order (leaves first, then cards/billboard) in src/main.c; delivered build 62a9f65 (179304 B) to /media/sf_Quarantine/64kDemo/64kdemo. Worst image coverage dip over 140→3 m approach improved −4.99 % → −2.15 % at 31.2 m; LT-ERGBNIS OK, selftest green.
+Decision: colour-pass order must be outgoing layer first, incoming layer on top — with lodBandOutHold the incoming must not be drawn under the opaque outgoing layer
+Decision: coverage metric (image measurement) is the binding check for fade quality: current worst dip −2.15 % at 31.2 m, target 0
+Decision: earlier steps this session stay in place: gl_FragDepth hack reverted, trees plus card/leaf instances sorted far→near at build time, A2C off by default, lodBandOutHold (outgoing opaque until 0.97 of band, incoming linear 0→1)
+Files: src/main.c, STATUS.md (commits 62a9f65, 12695ec), /media/sf_Quarantine/64kDemo/64kdemo
+
+### Turn 68
+User: kannst du mal recherchieren, was state of the art engines machen um LODs von bäumen zu überblenden?
+Result: Researched how reference engines crossfade tree LODs, with fetched sources. SpeedTree's own renderer (GPU Gems 3 ch.4 §4.6–4.6.2) uses "fizzle": noise texture + varying alpha-test reference, both LODs drawn at once, i.e. opaque alpha-test crossfade, order independent; A2C is used only for cutout silhouettes and explicitly does not accumulate like blending; their fix is "offsetting the alpha-fade curves of the two LODs" with an accepted residual transparency. Crysis (ch.16): leaves alpha-test, grass alpha-blend, two-pass alpha test/blend rejected as not worth it. True Impostors (ch.21) supports fixed-orientation directional impostors. Our upstream dgreenheck/ez-tree (src/lib/tree.js) has no crossfade at all: THREE.LOD hard switch, hysteresis 0.05, leafScale 1.25/1.3, billboard at 250.
+Decision: our current design (offset fade curves = lodBandOutHold) is exactly SpeedTree's documented solution; the measured −2.15 % residual dip is their acknowledged "rarely noticeable" defect
+Decision: proposed next step (not yet approved): replace alpha-blended transitions with fizzle (noise threshold in alpha test, opaque, depth write on) for wood/cards/billboard handovers, keep A2C only for leaf/card silhouettes; sorting then becomes unnecessary
+Decision: UE/Unity dither+TAA claim left explicitly unverified (docs unreachable from this VM: 403 / JS-rendered / 404)
+Files: none
+
+### Turn 69
+User: Dazu habe ich einige Fragen: was ist alpha coverage? bitte ausführlich erklären. Wie genau funktioniert fizzle? warum reihenfolgenunabhängig? auch das bitte ausführlich erklägen. warum scheiterte unser A2C Versuch? auch das ausführlicher als eben. Unabhängig von diesen fragen kannst du schonmal notieren, dass wir unabhängig von LOD noch ein zeichenreihenfolgen alpha problem haben. bei tier 2 innerhalb eines baums und bei den impostors zwischen den bäumen. Außerdem sollte das blending so etwa 2 m kameraweg dauern. Was ist der aktuelle wert? der wirkt fast instantan. vlt müssen wir sogar noch höher als 2 m gehen. aber erstmal nur notieren und vor allem meine fragen klären...
+Result: Answered the user's four questions with cited sources (GPU Gems 3 ch. 4 SpeedTree, ch. 16 Crysis, ch. 21 True Impostors) — explained alpha-to-coverage (per-sample binary coverage mask, 5 levels at our 4× MSAA, per-sample depth), fizzle (complementary alpha-test thresholds on a noise field, both layers opaque, no blending), why those are order-independent (one fragment per sample, depth test decides; blending is order-dependent), and why our A2C attempt failed (soft non-binary atlas alpha from soften_alpha, A2C non-accumulation with 840 overlapping cards/tree, A2C misused for the crossfade weight, unstable noise). Also recorded the user's two notes in STATUS.md and committed them (c06584f).
+Decision: STATUS.md now records an order/alpha problem independent of LOD: tier-2 crown cards overlapping within one tree, and impostor quads overlapping between trees; expected fix = opaque + alpha-test (fizzle) instead of alpha blend
+Decision: measured blend durations (focus tree R1 = 33.7 m, R2 = 101.1 m): band = 0.20·R (R1 band 6.7 m, R2 band 20.2 m; generally 4–12 m / 8–24 m); card weight spans the whole band (0.920 @35.9 m, 0.567 @34.0 m, 0.154 @32.0 m, 0.000 @30.0 m); leaf hold weight stays 1.000 and falls only in t = 0.97..1.00 = d 36.87..37.07 m → visible step only 0.20 m of camera travel
+Decision: user target — the visible change must take >= 2 m of camera travel (possibly more); current 3 % hold tail is too small; if fizzle is adopted the hold can be dropped entirely
+Decision: incoming layer cannot blend over the opaque outgoing layer where the outgoing is nearer in depth (depth test), so most of the soft part of the crossfade is invisible
+Decision: A2C stays off; it is only suitable for silhouette edges, not for area alpha or crossfades
+Files: STATUS.md
+
+### Turn 70
+User: ich verstehe noch nicht ganz deine erklärung zur blenden dauer. bitte einmal ausführlich mit erklärung aller Fachworte. und über wie viel kameraweg läuft derzeit der blend im ergebnis. das kann ich noch nicht so richtig gut aus deinem steno verstehen.
+Decision: visible leaf handover measured at 0,70 m camera travel (37,10 m weight 0,000 -> 36,70 m 0,200 -> 36,30 m 1,000), not 0,20 m; earlier number was a linear estimate, smoothstep reaches 0,97 at 90 % of the distance
+Decision: whole handover band = 30,33..37,07 m = 6,74 m for the test tree (R1 = 33,7 m, R2 = 101,1 m); R2 band = 20,22 m
+Decision: knob "Auslauf beginnt bei t0" -> visible width: R1 band 6,74 m: 0,97->0,70, 0,95->0,91, 0,90->1,32, 0,80->1,94, 0,70->2,45, 0,50->3,37; R2 band 20,22 m: 0,97->2,10, 0,90->3,96, 0,80->5,81, 0,50->10,11
+Decision: user target — visible blend about 2 m camera travel or more; t0 ~ 0,80 would give 1,94 m at R1; with fizzle the Halt can be dropped entirely
+Files: STATUS.md (commits c06584f notes, 6434cdd correction), /tmp/band.txt, /tmp/b2.txt
+Note: result>
+Note: Explained the blend duration in plain language with every term defined (Schicht, Gewicht, Schalt-Radius R, Band, smoothstep, Halt/Auslauf, Kameraweg) and answered the core question: the weight ramp spans 6,74 m (R1) / 20,22 m (R2) of camera travel, but the visible change is only 0,70 m because the outgoing layer holds weight 1 until the tail and the incoming layer loses the depth test under the opaque leaves. Corrected my earlier wrong figure 0,20 m (linear estimate instead of the smoothstep curve) and added a knob table t0 -> visible width.
+
+### Turn 71
+User: welcher Halt kann weg und warum kann der bei fizzle weg?
+Result: Explained that `lodBandOutHold` exists to prevent double-transparency artifacts in alpha blending and is unnecessary for fizzle because fizzle uses binary discard with complementary noise patterns. Outlined implementation requirements (stable noise, fine patterns, edge handling) and proposed integrating fizzle to remove the hold and fix sorting/depth issues.
+Decision: Fizzle replaces alpha blending with binary discard, eliminating the need for `lodBandOutHold`.
+Decision: Fizzle implementation requires a stable noise field tied to world/tree coordinates, not screen space.
+Decision: Fizzle implementation requires pattern frequency finer than pixel size to avoid graininess without TAA.
+Decision: Silhouette edges must be handled via hard alpha test + MSAA or A2C, distinct from area coverage.
+Decision: Proposed validation metric: measured coverage must not drop below 95% across the entire blend band.
+Files: src/shaders/lod.glsl, src/tree_lod.c
+
+### Turn 72
+User: an den silhouettenkanten haben wir aber derzeit noch zeichenreihenfolgen fehler
+Result: Bestätigt und quellenbelegt, dass an den Silhouettenkanten weiterhin Zeichenreihenfolge-Fehler liegen (weiches Atlas-Alpha aus soften_alpha + Tiefenschreiben im Kronen-/Blatt-Pass); zusätzlich erklärt, warum A2C auf großen Karten scheitert (Mip-gemitteltes Alpha ~0,27 → 1 von 4 Samples bei 4× MSAA → Sieb). Notiz + drei Lösungswege und geplanter Test DEMO_SORTREV in STATUS.md festgehalten, committet f650262.
+Decision: Silhouettenkanten sind ein eigenes, vom LOD-Fading unabhängiges Problem; Fix-Wege = (1) harte Alpha-Schwelle 0,5 + opak, (2) A2C nur für Kante bei binärem Innen-Alpha, (3) ditherter Alpha-Test — Referenz kombiniert 1+2
+Decision: neue Messgröße geplant: DEMO_SORTREV (Instanzreihenfolge nah→fern) und Zählung der Bildunterschiede gegen die richtige Reihenfolge; bei opakem Alpha-Test muss sie 0 sein
+Decision: soften_alpha ist die Ursache dafür, dass das Atlas-Alpha nicht mehr zweipolig ist — damit ist A2C für große Karten ungeeignet
+Files: STATUS.md
+
+### Turn 73
+User: testen brauchen wir da nichts. ich sehe ja, dass die Reihenfolge probleme macht. bei tier2 haben wir zusätzlich das problem, dass sich die polygone auch schneiden können. und dann hilft sortieren garnicht. Gibt es eine alternative?
+Result: Answered the question about alternatives to sorting when canopy polygons intersect (tier 2). Recommended making the tree passes opaque (hard alpha-test `if(a<0.5) discard;`, alpha 1, depth write on) so the z-buffer resolves intersections per pixel and sorting, the depth-only follow-up pass and the Halt all become unnecessary; assessed OIT alternatives (depth peeling, per-sample linked lists, weighted-blended OIT, stochastic transparency ≈ fizzle) as too costly or noise-dependent without TAA; mentioned an opaque canopy shell as geometry alternative. No code changed.
+Decision: sorting cannot fix intersecting quads — no global order exists; the z-buffer solves it only for opaque fragments
+Decision: reference practice confirmed as alpha-test cutouts (Crysis leaves, SpeedTree) + A2C for edges only, fizzle for LOD handover
+Decision: A2C only allowed where atlas alpha stays bimodal (near range, mip level 0); minified cards average to alpha ~0.27 → sieve at 4× MSAA
+Decision: proposed next step = rebuild tree passes as opaque (no blend, depth write on, drop depth-only pass, Halt and sorting), then judge edge quality with 8× MSAA and A2C near-field; LOD handover afterwards via fizzle — awaiting user go-ahead
+Files: none
+
+### Turn 74
+User: OIT?
+Result: Erklärt, was OIT (Order-Independent Transparency) ist, die sechs Verfahrensfamilien (Depth Peeling, Per-Pixel Linked Lists, Weighted Blended OIT, Moment Transparency, Stochastic Transparency, Hybrid OIT) mit Kosten/Nutzen-Tabelle, und warum keines für unser Laub passt; Belegstellen über Crossref verifiziert (DOIs), Volltexte nicht ladbar. OIT-Bewertung als Notiz in STATUS.md committet (01895e0).
+Decision: OIT für uns verworfen — Peeling zu viele Durchgänge, Linked Lists zu viel Speicher, Weighted Blended bricht bei hochfrequentem Alpha (Laub), stochastic braucht TAA (haben wir nicht)
+Decision: Bei binärem Alpha ist der Tiefenpuffer die exakte, kostenlose OIT → opaker Alpha-TEST bleibt der Weg (Referenz: Crysis/SpeedTree)
+Decision: frühere A2C-Erklärung verbessert: Karten-Kachel deckt nur ~27 % ab, Mip-Mittelung gibt Alpha ~0,27 über große Flächen → bei 4x MSAA 1 von 4 Samples → Sieb; A2C braucht zweipoliges Alpha
+Decision: sichtbarer LOD-Wechsel läuft gemessen über 0,70 m Kameraweg (nicht 0,20 m — linearer Überschlag statt smoothstep), Rechenkurve über 6,74 m (R1) bzw. 20,22 m (R2); Soll laut Nutzer >= 2 m
+Decision: Halt (lodBandOutHold) kann bei fizzle entfallen, weil fizzle opak per discard arbeitet und keine halbtransparenten Folien erzeugt; dann läuft die Blende über das volle Band
+Files: STATUS.md
+
+### Turn 75
+User: Dein Geometrieweg hatte ich auch schon erwogen. das würde auch wenn die kamera in der entfernung den blickwinkel auf den baum ändert sehr viel glaubwürdiger. Außerdem könnte man die textur auch animieren, damit das windrauschen der blätter in der entfernung erhalten bleibt.
+Result: Entwurf für eine 3D-Kronenhülle statt flachem Ganzbaum-Quad ausgearbeitet und in STATUS.md notiert (Commit 9d5da42): drei Bauvarianten mit Dreieck-/Code-Kosten, Texturierung über den vorhandenen Karten-Atlas ohne Render-to-Texture, UV-Windrauschen als Animation, plus Messplan. Keine Engine-Änderung, kein Build.
+Decision: Kronenhülle ist opak -> Tiefenpuffer löst Verdeckung und Selbstschnitt exakt; Sortieren und Tiefen-Nachpass werden überflüssig
+Decision: Hülle aus 10x10x10-Dichtegitter liefert ~200-600 Dreiecke/Baum und ist damit billiger als die heutige Kartenschicht (840 Karten = 1680 Dreiecke, CROWN_FLOATS 14/Instanz)
+Decision: Variante A = gekreuzte Karten in festen Orientierungen (schneller Beweis, ~2520 Quadrate/Baum); Variante B = naive surface nets ohne Dreieck-Tabelle (marching cubes würde ~2 KB Tabelle kosten); C = Buschel-Sphaeren, verworfen (16 800 Dreiecke/Baum)
+Decision: Hülle wird mit dem vorhandenen Karten-Atlas (main.c:604 FOL_ATLAS 2048, 8x8 Kacheln a 256 px) geteilt texturiert (UV aus Weltkoordinaten, triplanar/zylindrisch); damit entfallen Atlas-Aufnahme (64 Eimer), build_tile_mips fuer crnTex, fill_rgb, soften_alpha und die Billboard-Quad-Logik (gBbSize/gBbCen/gBbAsp, ortho_mvp2)
+Decision: Windrauschen = uv += (windDir*t + rauschen(pos,t))*amp mit amp ~1..3 Texel und Zufallsphase pro Buschel; weil opak mit Alpha-Test animiert das automatisch die Silhouette; zusaetzlich Huelle als Ganzes schwingen lassen
+Decision: neue Messgroesse vorgemerkt — Kamera im Kreis um einen festen Baum bei festem Abstand, Deckung darf nur minimal schwanken (flaches Quad schlaegt gross aus)
+Files: STATUS.md
+
+### Turn 76
+User: bevor wir das machen: welche tiers wird es dann am ende geben? mit tier2 bin ja wegen OIT problemen unszufriegen und auch die blattanimation ist nur bei tier3 überzeugend.
+Result: Proposed the final tier ladder for trees and noted it in STATUS.md (commit fe1a74d): wood has no tiers anymore (continuous dissolve by projected branch thickness, LOD_PX_LO 0.6 / LOD_PX_HI 1.6 px); canopy gets NAH (individual leaves, opaque alpha-test, 12 600 instances/tree), MITTE (2 fixed opaque quads per cluster = 1680 quads / 3360 triangles), FERN (density-grid crown hull, ~200–600 triangles, tiled atlas, UV-animated). Today's card layer and the flat whole-tree quad plus capture machinery would be deleted. Transitions via fizzle in bands 0.90–1.10·R1 / 0.90–1.10·R2.
+Decision: tier = buffer content, layer = visibility; tiers only affect canopy representation
+Decision: tier-2 card layer (camera-facing, intersecting, alpha-blended quads) is dropped entirely — going opaque removes the OIT/order problem by construction
+Decision: individual leaf animation is unresolvable beyond the handover — measured projected leaf size for a 10 cm leaf: 6.1 px at 1080p / 2.0 px at 360 (R1 = 30 m), 3.7 px / 1.2 px (R1 = 50 m); what must survive is aggregate rustle via animated texture UV
+Decision: assistant recommends MITTE = opaque cluster quads (keeps cluster/branch structure, avoids the "green blob"), FERN = hull; awaiting user answers on (1) MITTE quads vs hull, (2) how many leaf shader paths (share one program between NAH and MITTE)
+Files: STATUS.md
+
+### Turn 77
+User: das einzelraschen der blätter sieht man aber als pixelrauschen und das sollte da sein. evtl kannst du das mit ner animierten textur oder perturbation map regeln. Dann probier mal 1 und 2 umzusetzen...
+[while the assistant worked] oder gibt es doch noch rückfragen?
+Result: No code changed. Posed four decision points for implementing the agreed plan (MITTE = opaque fixed-orientation cluster quads, FERN = hull, shared leaf shader path, animated rustle), each with my default answer, awaiting the user's yes/no.
+Decision: MITTE cluster quads = 2 crossed quads per cluster, density lowered to div 4, CROWN_CAP raised 900k -> 1.2M (measured today 446 047 crown instances, 840 clusters/tree)
+Decision: keep the flat whole-tree quad until the hull exists (default off, key 1 still enables), delete only together with the hull
+Decision: "one shader path" now means sharing only the fragment program (same lighting/alpha/flutter, two vertex programs, two draw calls); a single program/draw call needs unifying LEAF_FLOATS 13 and CROWN_FLOATS 14 and is deferred until the hull is done
+Decision: distant rustle = threshold noise `a *= 0.85 + 0.3*noise(worldCell, t)` before the 0.5 alpha-test threshold, anchored to world cells (~1-3 px), not a UV offset (UV offset reads as flowing water); strength to be judged by the user on the host
+Decision: implementation order once approved: opaque canopy + fizzle -> cluster quads -> flutter, each built, selftested and delivered
+Files: none
+
+### Turn 78
+User: ja mach alles so.
+Result: Implemented the user-approved tree-LOD plan steps 1-4 — opaque canopy with fizzle crossfade, crossed fixed-orientation cluster quads (MITTE), world-cell flutter noise, and a shared foliage shader path; all built, selftest green, build delivered to /media/sf_Quarantine/64kDemo/64kdemo (183400 B).
+Decision: fizzle replaces alpha blending — outgoing keeps n<w, incoming keeps n>=1-w on the same world-cell noise (cell = one pixel at that distance, lodFizScale = focalPx/d); lodBandOutHold removed, weights complementary again
+Decision: MITTE = two crossed opaque quads per leaf cluster with fixed orientation (right=(cos aData.y,0,-sin aData.y), up=Welt-Y), card density div 3 -> div 4, CROWN_CAP 900000 -> 1200000 (measured 669088 cards, 0 cap hits, 0 skipped trees)
+Decision: flutter = lodFizN on half the fizzle cell with salt 113 + floor(uTime*3)*0.71 multiplied onto the silhouette threshold (0.85..1.15), not a UV offset
+Decision: shared fragment path src/shaders/foliage.glsl (hash12/vnoise/fbm 4 octaves, skyColor, shadowAt, foliageLight) included by leaf.frag and crown.frag; no size gain because gen_shaders.sh expands per program (62308 -> 62417 bytes)
+Decision: hard silhouette threshold a<0.5, A2C off, no depth-only follow-up pass, leaf pass blend off with depth write on; whole-tree billboard keeps soft alpha until the hull replaces it
+Decision: selftest HUD exclusion 48 -> 56 rows (third HUD line reaches y=50 at 640x360), standard run timeout 20 -> 35 s
+Files: src/shaders/lod.glsl, src/shaders/foliage.glsl, src/shaders/crown.frag, src/shaders/leaf.frag, src/shaders/crown.vert, src/shaders/leaf.vert, src/tree_lod.c, src/tree_lod.h, tools/test_tree_lod.c, tools/selftest.sh, src/trees_cpu.c, src/scene.h, src/main.c, STATUS.md, /media/sf_Quarantine/64kDemo/64kdemo
+
+### Turn 79
+User: also ich sehe jetzt bei dem dithering ein extremes rauschen an der überblendung. und an den rändern der der einzelblätter auch. Sagtest du nicht, da soll die illusion von alpha blending entstehen? So sieht es wie ein grüner bienenschwarm aus. und bei den tier2 sieht man jetzt nur noch büschel sich bewegen aber keine einzelblätter fluktuieren. das überzeugt mich so nicht so ganz. die farben der tier2 büschel stimmen nicht exakt mit den von tier3 überein. Die LOD stufen werden noch nicht korrekt berechnet. ich hab hier einen baum, der "seine Blätter schon nach 10 einheiten verliert" und der baum daneben in fast der dreifachen entfernung, obwohl er sogar kleiner ist...
+[while the assistant worked] und der bug mit den weißen polygonen an ästen ist noch zum teil da. manchmal blitzen welche auf.
+Result: Delivered build 22cbc25 to /media/sf_Quarantine/64kDemo/64kdemo with fizzle crossfade and flutter noise switched off by default (DEMO_FIZ=1 / DEMO_FLUT=1 re-enable), added DEMO_TREETAB per-tree LOD diagnostic, measured why the user's LOD distances look wrong, and proposed the next design (image-size-driven R1/R2, per-cluster handover, card colour match). Earlier in the turn: implemented crossed fixed-orientation cluster quads (div 4, CROWN_CAP 1.2M, 669088 cards, 0 cap hits), flutter threshold noise, and shared foliage.glsl shader path (commit 84c58b5, eb13679, de518ca, 22cbc25).
+Decision: fizzle stays off by default — pixel-sized binary dither is visible without TAA or A2C; hard switch at weight 0.5 meanwhile
+Decision: flutter off by default; white flashes at branch tips are most likely the flutter lowering the silhouette threshold (user to confirm on host)
+Decision: LOD switch distance must come from projected image size (leaf ≈ 2 px → R1 = 73 m at 1080p, 49 m at 720p), not from 5×Wuchshöhe with clamp 20..60
+Decision: measured cost of uniform R1 = 73 m equals today's buffer (642330 leaf instances built, 627110 drawn) because the existence envelope 1.15·R1+20 m is unchanged
+Decision: proposed next steps awaiting user go/no-go — (1) R1/R2 from image size, (2) per-cluster leaf→card handover staggered by stable hash (needs cluster anchor added to leaf instance, 3 floats), (3) match card atlas mean colour to leaf mean
+Files: src/main.c, src/trees_cpu.c, src/scene.h, src/shaders/lod.glsl, src/shaders/foliage.glsl, src/shaders/crown.frag, src/shaders/leaf.frag, src/shaders/crown.vert, src/shaders/leaf.vert, tools/test_tree_lod.c, tools/selftest.sh, STATUS.md, /media/sf_Quarantine/64kDemo/64kdemo, /tmp/treetab.txt, /tmp/tt2.txt
+
+### Turn 80
+User: warum gibt es TAA nicht?
+Result: Explained why TAA is absent (not built, but technically feasible) and why it is unsuitable for wind-animated foliage due to lack of motion vectors. Proposed three alternatives: fizzle+A2C, TAA, or geometric transition.
+Decision: Assistant recommends the geometric transition approach (3 floats per leaf instance) as primary, with fizzle+A2C as a secondary experiment.
+Decision: TAA is deemed the worst option for this specific use case due to ghosting artifacts from vertex-shader wind animation.
+Files: src/main.c
+
+### Turn 81
+User: es gibt immer noch manchmal quadrateische quads, die an den zweigen eines baums auftauchen. im moment sind die aber nicht weiß. sondern scheinen seltsam gestretchte holz textur zu zeigen...
+[while the assistant worked] und die radien für den LOD übergang variieren immer noch nicht nachvollziehbar von braum zu baum. Wenn überhaupt sollte das eine funktion der blattgröße und oder der fläche, die der baum auf dem bildschirm einnimmt sein. und das blätterrascheln ist auch unnatürlich starl. da müssten sich eigentlich die zweige mehr bewegen, aber die zweig bewegung machst du derzeuit noch ziemlich falsch. Das musst du wohl oder übel in späteren versionen nochmal korrigieren. im moment verschiebst du die zweige an ihrer verzweigung. dadurch entstehen wieder die gefürchteten lücken an den übergängen. Biegen wäre natürlicher und richtiger. Aber das sind alles bis auf LOD scaling  baustellen für später. die bitte vorerst nur notieren.
+[while the assistant worked] Was waren jetzt noch gleich deine optionen, um wieder einen weich geblendeten übergang zwischen den LOD stufen zu haben? Ich hätte noch einen vorschlag dazu, weiß aber nicht wie gut der geht: im falle einer überblendung machen wir eine temporäre kopie des framebuffers. zeichnen auf dem original die eine LOD stufe und auf der kopie die andere und blenden dann zwischen den beiden framebuffern über. Die frage ist nur, welchen Z-Buffer wir dann im Endergebnis nehmen sollten. gibt da ein compositing, dass von beiden jewels den nearest nimmt? und kann man das kopieren auf die ausmaße der tatsächlichen bildfläche des baumes reduzierung um füllrate zu sparen?
+Result: Implemented image-size LOD radii (treeLodInitPx: R1 = leaf reaches 2 px, R2 = cluster reaches 1,5 px) replacing 5x/15x Wuchshoehe; fixed the stretched wood quads (wood test used per-vertex distance while the threshold is per branch section, now the tree's lot point); fixed focalPx being 0 at first build (had caused 3,99M skeleton verts and 384 skipped trees) and the winH/fboH mismatch between build and shader. Measured: Bildhoehe 360 px -> R1 = 104,65 m, 180 px -> 52,32 m. Measured leaf instances are 0,256..0,427 m (and 0,452..0,754 m) long -> leaf cap hit 2 393 790/2 400 000, 63 trees downgraded. 94/648 (180 px) and 117/648 (360 px) trees sit in a fade band at any time. Answered the framebuffer-composite proposal: no framebuffer copy needed, scratch FBO with a blit of D_Szene, colour = mix(A,B,w) with w=1 where D_A >= D_Szene, output depth = min(D_A,D_B) via a depth-only LESS pass; per-tree scratch impractical at ~100 band trees; full-screen scratch costs 66 MB colour + 33 MB depth at 1920x1080 4x MSAA.
+Decision: R1/R2 come from projected size (LOD_LEAF_PX 2,0, LOD_CARD_PX 1,5), resolution-correct, host test extended (30 146 checks, 0 errors)
+Decision: committed 0544594 and delivered 187 496 B to /media/sf_Quarantine/64kDemo/64kdemo
+Decision: user's two-buffer compositing judged the best of the four options; to be built behind DEMO_COMP=1 for host A/B comparison, pending the leaf-size decision
+Decision: branch bending, joint gaps and too strong rustle noted in STATUS.md, not implemented
+Files: src/main.c, src/tree_lod.c, src/tree_lod.h, src/trees_cpu.c, src/shaders/tree.vert, tools/test_tree_lod.c, STATUS.md, /media/sf_Quarantine/64kDemo/64kdemo
+
+### Turn 82
+User: ne wir müssen das erst noch weiter durchdenken. Die Silhouetten der beiden LODs werden immer verschieden sein. auch wo es lücken gibt, durch die man durchschauen kann. ich zähle für den moment mal beides als silhouette. Wenn wir die blendformal so anpassen, dass teile, die nicht von beiden LODs abgedeckt werden immer den vollen farbwert bekommen, haben wir einen haufen pixel, der beim LOD wechsel instantan erscheint. Das sieht man aber deutlich. Also müssen wir hierfür eine andere lösung finden und sind wieder bei dem problem von IOT gelandet. Wie werden also nicht um eine sortierung der bäume herumkommen.
+[while the assistant worked] das ordnen soll nur für korrekte transparenz der nicht überschneidenden silhouettenpixel sorgen.
+Result: Diskussionsrunde zur Blenden-Geometrie, nichts committet. Gemessen (Ein-Baum-Test, nur Blatt-Schicht gegen nur Karten-Schicht, DEMO_LAYERS, 640x360, DEMO_SCALE=0): Karten-Silhouette ist eine echte Teilmenge der Blatt-Silhouette (nurKarten = 0), nurBlatt 3398/21821 px = 15,5 % bei 40 m, 7,8 % bei 60 m, 4,0 % bei 80 m; die nurBlatt-Pixel sitzen als EIN zusammenhaengender Fleck (3369 px von 3398), nicht als verteilte Ein-Pixel-Sprenkel. Masken-Differenzbild zeigt den Fleck als Flaeche in der Krone. Nutzer praezisiert: Sortierung ist nur fuer die nicht ueberlappenden Silhouetten-Pixel gedacht, nicht fuer die ueberlappenden.
+Decision: Sortierung macht die Nicht-Ueberlappungs-Pixel korrekt, aber nicht unsichtbar — sie sind waehrend des Bands halbtransparent und zeigen den Hintergrund teilweise
+Decision: naechster Hebel ist, den grossen zusammenhaengenden Deckungsloch-Fleck als Geometriefehler zu finden (Karten-Dichte/Skalierung aendert ihn nicht: DEMO_CARDT2 "4 2.0" -> 242 Karten, "1 2.0" -> 968 Karten, "1 2.6" -> Karten-Hint 0,842->1,095 m, Masken-Differenz bleibt 3391/3392/3398 px)
+Decision: Composite-Vorschlag des Nutzers (Framebuffers getrennt rendern, mischen) ist machbar, aber die Ausgabe-Tiefe muss min(D_A, D_B) sein, die Farbe nicht; Stufe B muss gegen die Szenen-Tiefe vor dem Baum testen
+Decision: im Blende-Band stecken jederzeit 94 (Bildhoehe 180 px) bzw. 117 (360 px) von 648 Baeumen -> Scratch-Puffer pro Baum unpraktikabel, Vollbild-Scratch = 66 MB Farbe + 33 MB Tiefe bei 1920x1080/4x MSAA
+Files: STATUS.md, src/tree_lod.c, src/tree_lod.h, src/trees_cpu.c, src/main.c, src/shaders/tree.vert, tools/test_tree_lod.c, /media/sf_Quarantine/64kDemo/64kdemo, /tmp/m_40_leaf.ppm, /tmp/m_40_card_1_2.6.ppm, /tmp/maskdiff2.png, /tmp/tab_s0.txt, /tmp/tab_s1.txt
+
+### Turn 83
+User: bevor du dich totrechnest. dein jetziger stand zeichnet tier3 nun bis zu so großen entfernungen, dass tier2 nicht mehr vorkommt. darum verschwindet die baumkrone einfach, weil du tier1 noch nicht gebaut hast.
+Result: Fixed the tier-range bug the user identified (R1 = 115.98 m, R2 = 320 m exceeded the 180 m build edge, so tier 2 never occurred and the crown vanished). treeLodInitPx now takes buildR = treeBuildRange*TREE_G: R1 = min(imageSizeCriterion, 0.45*buildR), R2 = max(imageSizeCriterion, 1.15*buildR). Measured R1 = 81.0 m, R2 = 207..547 m, 648 trees, 0 skipped, 0 downgraded, 1 701 080 leaf instances (cap 2.4M). Re-measured leaf-vs-card silhouettes validly at 70 m (same tree, cards forced with DEMO_LODRSCALE=0.5): |leaf| 19184, |cards| 18859, both 18781, leaf-only 403 px (2.1%, 108 patches, max 52 px, 100 <= 9 px), card-only 78 px (0.4%). Host test 30146 checks 0 errors; delivered f15edd8 (187496 B).
+Decision: tier bounds bound to the build edge — R1 <= 0.45*buildR so tier 2 always occurs, R2 >= 1.15*buildR so cards hold until the edge while no far tier exists
+Decision: sorting is only for the non-overlapping silhouette pixels (2.5% of crown area, 1-3 px patches); it makes them blend correctly against the background but does not make the see-through invisible; "both cover" (97.5%) is order-independent because layers are opaque alpha-test; intersecting polygons stay unsolvable by sorting
+Decision: previous silhouette measurement ("one 3365 px blob") declared invalid — caused by the broken tier ranges
+Decision: DEMO_CARDS is not a knob, the correct env is DEMO_CARDT2="<div> <scale>" (verified: karten 242 -> 968 with div 1)
+Files: src/tree_lod.h, src/tree_lod.c, src/trees_cpu.c, tools/test_tree_lod.c, STATUS.md, /media/sf_Quarantine/64kDemo/64kdemo, /tmp/tab5.txt, /tmp/maskdiff.png, /tmp/maskdiff2.png, /tmp/s_leaf_1.0.ppm, /tmp/s_card_0.5.ppm
+
+### Turn 84
+User: bitte einmal präziser, was du mit dem blattgrößenkriterium machen willst
+Result: Erklärt (ohne Code-Änderung), was das Blattgrößenkriterium genau tut: R1 = b·f/px und R2 = c·f/pxK mit f = 1,7·Bildhöhe, b/c aus den Seed-Werten des Generators und gegen die Instanzen gemessen; Tabelle der resultierenden R1 für Blattgrößen 0,10–0,60 m und Schwellen 1–6 px bei 360/720/1080 px Bildhöhe.
+Decision: Formel bleibt; nur zwei Stellschrauben — b (Blattgröße, Look-Entscheidung des Nutzers) und px (Handel Geometrie gegen Detail)
+Decision: aktuelles b = 0,256…0,427 m bzw. 0,452…0,754 m treibt R1 auf 104 m -> Klammer 81 m für alle Bäume, Kriterium unterscheidet dann nichts mehr
+Decision: gleiches Bild auf Karten-Stufe: gemessene Büschel 0,231…1,286 m -> R2 = 310 m -> nur Klammer, deshalb kann die Ferne-Stufe nie erscheinen
+Decision: vorgeschlagen b ≈ 0,10 m mit px = 2 -> R1 = 30,6 m (360 px) bis 91,8 m (1080 px)
+Decision: Blattanzahl bleibt 12 600/Baum; kleinere Blätter brauchen Ausgleich über ezLeafPer oder Büschelradius (gemessen: Verdoppeln der Blattgröße hob Laubpixel bei 10 m von 6639 auf 14066)
+Files: none
+
+### Turn 85
+User: was heißt 360 px, 720 px und 1080 px? zeilenzahl des fensters? aber müsste man dann nicht ab 92m die büschel sehen?
+Result: Explained the leaf-size LOD criterion precisely (no code changed): R1 = b·f/px and R2 = c·f/pxK with b/c measured from the tree's own instances and f = 1,7 × render-target height; answered that 360/720/1080 px means the FBO row count (window height / 2^RES, F1/F2/F3), and that from R1 the crown is drawn as Büschel — computed that at the switch the crown is always ~104 px wide, a leaf 2 px, a Büschel 15 px, 1260 cards, independent of resolution.
+Decision: 360/720/1080 px = Zeilenzahl des Render-Ziels (Fensterhöhe / 2^RES), bewusst nicht Fensterhöhe — bei halber Auflösung ist ein Blatt früher subpixelig
+Decision: Büschel-Dichte fällt nicht mit der Entfernung (eine Dichte für alle Stufen), deshalb 34-fache Überlagerung der Karten bei der Schaltweite — Dichte ist der nächste Kostenpunkt
+Decision: Einzelblätter bis R1 = 81 m kosten 1 701 080 Blatt-Instanzen (Existenzhülle 113 m)
+Files: none
+
+### Turn 86
+User: kann es sein dass deine schaltschwelle auf F1-F3 noch nicht reagiert?
+Result: Confirmed the user's suspicion — the wood LOD reacts to F1–F3 live (uniform `uFocalPx` from `fboH`), but leaf/card thresholds did not, because R1/R2 are baked into every instance at build time (`trees_cpu.c:375, 439, 464` write `d[7]=gLodR`, `d[11]=gLodR2`; skeleton `d[12]`) and a rebuild only happens after >12 m camera movement (`main.c:2717`). Fix: F1/F2/F3 now set `treeForceRebuild`. Committed db9821d, delivered as `/media/sf_Quarantine/64kDemo/64kdemo_neu` (old name busy because user runs it).
+Decision: resolution keys force a tree rebuild so baked R1/R2 follow the new focal length in pixels
+Decision: proposed cleaner fix awaiting user choice — store leaf size b and cluster size c per instance instead of R1/R2 and compute `R1 = b*uFocalPx/LOD_LEAF_PX` in the shader, so thresholds track resolution every frame and the CPU value is used only for existence cuts
+Decision: startup path measured (R1 = 104.65 m at 360 image rows vs 52.32 m at 180); the key path is only code-verified, not tested by me (no key input in the VM) — user checks on host
+Files: src/main.c, /media/sf_Quarantine/64kDemo/64kdemo_neu
+
+### Turn 87
+User: also vom prinzip her finde ich die einteilung für R1 so sehr gelungen. Die Sichtweite der Bäume ist aber im moment dadurch budget begrenzt? oder gibt es eine sichtweite, die das im moment begrenzt?
+Result: Erklärt und gemessen, was die Baum-Sichtweite begrenzt: harte Baukante bei treeBuildRange·TREE_G = 180 m ohne Entfernungs-Ausblendung für die Krone (tree.frag:160 hat Dunst ab 60 m, crown.frag/leaf.frag haben keinen), getrennt vom Blatt-Puffer LEAF_CAP 2,4 Mio, der die Reichweite der Blatt-Schicht begrenzt. Sweep gemessen: 126 m/1,0 = 336 Bäume, 1,04 M Blätter, 0 downgraded; 180 m/1,0 = 648, 1,70 M, 0; 180 m/1,4 = 2,39 M, 52 downgraded; 180 m/1,8 = 2,40 M, 203 downgraded; 234 m/1,0 = 1005 Bäume, 2,60 M Gerüst, 1,03 M Karten, 2,25 M Blätter, 0. Speicher: Gerüst 4,0 M×17 Float = 272 MB/Satz, Karten 1,2 M×14 = 67 MB, Blätter 2,4 M×13 = 125 MB (jeweils zwei Sätze); +1 Mio Blätter = +104 MB gesamt. Rückfrage gestellt, ob ich die Dunst-Formel in crown.frag/leaf.frag einbauen soll.
+Decision: sichtbare Baustelle ist die harte Kante bei 180 m, nicht das Budget; Gegenmittel = Dunst wie im Holz auch für Kronen und Einzelblätter
+Decision: R1-Klammer 0,45·Baukante kommt von der Weltkante, nicht vom Puffer; bei b = 0,10 m fällt R1 auf 31 m und der Blatt-Puffer hört auf, begrenzend zu sein
+Files: none
+
+### Turn 88
+User: ich würde die baukante so ändern, dass bäume in tier1 so weit sichtbar sind, wie das terrain. Aber wir müssen dafür glaube ich noch etwas für die performance tun? ich habe das gefühl, dass der baumthread zu langsam ist. Wenn ich mich schnell bewege verschwindet ein LOD und ne halbe sekunde später kommt das richtige. Es sollte also bei überblendungen diese verzögert werden, wenn die benötigte stufe gerade nicht vorhanden ist. Was ich mir für eine Endlose Welt am ende auch vorstellen könnte, wäre nur eine bestimmte anzahl an verschiedenen bäumen zu haben. und diese unterschiedliche rotiert und skaliert zu zeigen. Da könnte man mit z.B. 100 verschiedenen  Bäumen gut auskommen? Notfalls den Baumbuild auf mehrere threads verteilen? aber vorher müsste man wissen was wirklich limitiert. vlt ist es ja auch die PCI Speicherbandbreite / Latenz?
+Result: Messbank BAUM-ZEIT (DEMO_BUILDTIME) plus DEMO_UPMS eingebaut und committet (9a559f4), Build über /media/sf_Quarantine/64kDemo/64kdemo ausgeliefert. Gemessen: Generieren 548–556 ms für 648 Bäume/275 MB, Upload ungebremst 275 MB in 127–134 ms = 2,1 GB/s (DEMO_UPMS=1000 ändert nichts → Bandbreite nicht das Limit, die Einteilung auf 20 ms/Frame schon), Auslösen erst nach 12 m Kameraweg. Terrain-Dunst gemessen: 3 % bei 110 m, 25 % bei 215 m, 50 % bei 300 m, 90 % bei 498 m; Bäume enden bei 180 m. Hochrechnung Baukante: 300 m = 1800 Bäume, 6,08 Mio Gerüst-Vertices (414 MB/Satz), 1,86 Mio Karten, ~1,5 s Generieren (VM); 500 m = 5000 Bäume, 16,9 Mio Vertices (1,1 GB/Satz) — nicht machbar.
+Decision: vorgeschlagene Reihenfolge — (1) Präsenz-Bit pro Baum in den Instanzen + Blenden-Gating (ausgehende Schicht bleibt bei Gewicht 1, bis die kommende im Puffer liegt), (2) Host-Zahlen aus BAUM-ZEIT abwarten, (3) freigegebener inkrementeller Per-Baum-Cache, (4) Prototypen + Kronenhülle für weitere Kante
+Decision: 100 Prototypen entkoppeln nur das Generieren von der Weltgröße; Upload und Zeichnen skalieren weiter mit der Baumzahl
+Decision: Multi-Threading der Generierung erst nach Host-Messung, ob Generieren oder Upload limitiert
+Files: src/main.c, /media/sf_Quarantine/64kDemo/64kdemo
+
+### Turn 89
+User: DEMO_BUILDTIME=1 ./64kdemo
+[glx] glXChooseFBConfig: 44 FBConfigs
+[glx] Visual: id=0x2eb depth=24  FBConfig=ja (GLX 1.4 Kontext)
+64kDemo - OpenGL: 4.3.0 NVIDIA 610.57.04
+FLY: Maus=Schauen WASD=Fliegen Space/X=Hoch/Runter Shift=Turbo O=Orbit R=Reset 1/2/3=Skala T=Wire P=Shot G=GrasFrost V=NurGras M=MSAA H=HUD Q/Esc=Ende
+DEBUG: C=Farbcodierung(gelb aus/cyan ein) J=DepthWrite K=DichteKante L=Fade-Dauer strecken
+Schilf-Vorlage: 76 Vertices (5 Streifen a 6 Stationen)
+Mesh-Pipeline bereit
+Blatt-Atlas: 8x8 Kacheln (256 px), 4 Varianten x 16 Richtungen, 10 Blaetter je Krone, 0.23 s
+Impostor-Atlas: 8x8 Kacheln a 128 px (1024x1024 px)
+Shadow-Map 2048x2048: FBO 0x8cd5
+DBG Shadow-Loc scene tex=10 mvp=8 on=12 px=13 | tree tex=6 mvp=3 on=8 px=9
+Frame-Zeiten 1 Frames: median 0 ms  p95 0 ms  max 0 ms
+  Baum-Erstbuild: Generieren 509 ms + Upload 107 ms = 616 ms  (280 MB Puffer)
+Baeume um (24,27): 640 Baeume, 2299389 Vertices, 659056 Canopy-Quads, 1673360 Einzelblaetter
+  Caps: Geruest 2299389/4000000  Karten 659056/1200000  Blaetter 1673360/2400000   TREffer: Geruest 0 Karten 0 Blaetter 0
+  uebersprungen (Budget): 0 Baeume, heruntergestuft auf groebste Stufe: 0
+  Baum-Build (Thread) uebernommen: 640 Baeume, 280 MB — Upload in Scheiben (6 MB/Frame)
+  Baum-Upload: 1 Slices, letzter 4 ms, max 4 ms, Mittel 4 ms
+Gras-Swap t=242420.03: 1225078 Halme, 1225078 neu, 0 sterben (je 1s)
+Schilf-Build: 29789 Pflanzen in 13689 Zellen (Uferzone 5696), Radius 35 m, Raster 0.60 m, 15 Pflanzen/m2 in der Uferzone
+  Schilf-Build: 18 ms
+Gras-Einfang: Zentrum (32.0,43.8) Terrain 0.66 m, gefunden=1, Halme im Feld 44996 von 1225078 (176 Halme/m2)
+Screenshot: /tmp/64kdemo_shot.ppm
+Frame-Zeiten 1 Frames: median 3419 ms  p95 3419 ms  max 3419 ms
+  Baum-Upload: 1 Slices, letzter 22 ms, max 22 ms, Mittel 22 ms
+DBG fps 23.45 t 242423.62
+BAUM-ZEIT: Generieren -0 ms + Upload 3754 ms = 3754 ms bis Satz-Wechsel
+DBG fps 39.20 t 242423.82
+DBG fps 47.65 t 242423.99
+DBG fps 52.78 t 242424.16
+DBG fps 56.29 t 242424.32
+Gras-Swap t=242424.47: 1225078 Halme, 0 neu, 1225078 sterben (je 1s)
+DBG fps 57.89 t 242424.49
+DBG fps 58.91 t 242424.66
+DBG fps 59.46 t 242424.82
+DBG fps 59.82 t 242424.99
+DBG fps 60.06 t 242425.16
+DBG fps 60.18 t 242425.32
+Frame-Zeiten 116 Frames: median 17 ms  p95 20 ms  max 73 ms
+  Baum-Upload: 14 Slices, letzter 0 ms, max 20 ms, Mittel 6 ms
+DBG fps 59.82 t 242425.49
+DBG fps 60.43 t 242425.66
+DBG fps 60.40 t 242425.82
+DBG fps 60.38 t 242425.99
+DBG fps 60.19 t 242426.16
+Baeume um (13,15): 640 Baeume, 2299389 Vertices, 659056 Canopy-Quads, 1673360 Einzelblaetter
+  Caps: Geruest 2299389/4000000  Karten 659056/1200000  Blaetter 1673360/2400000   TREffer: Geruest 0 Karten 0 Blaetter 0
+  uebersprungen (Budget): 0 Baeume, heruntergestuft auf groebste Stufe: 0
+Schilf-Build: 31602 Pflanzen in 13689 Zellen (Uferzone 5700), Radius 35 m, Raster 0.60 m, 15 Pflanzen/m2 in der Uferzone
+  Schilf-Build: 18 ms
+DBG fps 60.78 t 242426.32
+DBG fps 60.63 t 242426.49
+DBG fps 60.55 t 242426.66
+Schilf-Build: 25506 Pflanzen in 13689 Zellen (Uferzone 4022), Radius 35 m, Raster 0.60 m, 18 Pflanzen/m2 in der Uferzone
+  Schilf-Build: 16 ms
+Baeume um (1,1): 655 Baeume, 2224950 Vertices, 676878 Canopy-Quads, 1683040 Einzelblaetter
+  Caps: Geruest 2224950/4000000  Karten 676878/1200000  Blaetter 1683040/2400000   TREffer: Geruest 0 Karten 0 Blaetter 0
+  uebersprungen (Budget): 0 Baeume, heruntergestuft auf groebste Stufe: 0
+  Baum-Build (Thread) uebernommen: 655 Baeume, 277 MB — Upload in Scheiben (6 MB/Frame)
+DBG fps 61.13 t 242426.82
+DBG fps 60.83 t 242426.99
+Gras-Einfang: Zentrum (1.9,19.6) Terrain 0.71 m, gefunden=1, Halme im Feld 22602 von 1225078 (88 Halme/m2)
+Gras-Einfang: Zentrum (0.7,18.2) Terrain 0.71 m, gefunden=1, Halme im Feld 19449 von 1225078 (76 Halme/m2)
+DBG fps 67.79 t 242427.17
+Schilf-Build: 16125 Pflanzen in 13689 Zellen (Uferzone 4135), Radius 35 m, Raster 0.60 m, 11 Pflanzen/m2 in der Uferzone
+  Schilf-Build: 14 ms
+  Baum-Build (Thread) uebernommen: 646 Baeume, 268 MB — Upload
+[… 1055 characters cut – full text via protocol_turn(89)]
+Result: Host-Messwerte des Nutzers ausgewertet (Generieren 509 ms, Upload ungebremst 107 ms = 2,6 GB/s, Upload-Slices 5–6 ms über 14–40 Slices, Frame median 17 ms) — Generieren ist der Engpass, nicht die Speicher-/PCI-Bandbreite. Terrain-Dunst gemessen: 3 % bei 110 m, 25 % bei 215 m, 50 % bei 300 m, 90 % bei 498 m; Baumkosten hochgerechnet: 300 m Kante = 1800 Bäume / 6,08 Mio Gerüst-Vertices (414 MB/Satz) / 1,86 Mio Karten. Messbank BAUM-ZEIT (DEMO_BUILDTIME) und DEMO_UPMS eingebaut und committet (9a559f4), Build über /media/sf_Quarantine/64kDemo/64kdemo ausgeliefert. Die Korrektur der Messbank (Build-Zeit aus dem Worker statt Zeitstempel-Differenz, die "-0 ms" lieferte) ist angefangen und baut nicht.
+Decision: nächste Schritte in dieser Reihenfolge — (1) Präsenz-Bit pro Baum in den Instanzen, ausgehende Schicht bleibt bei Gewicht 1 bis die kommende im Puffer liegt (Nutzer: "Überblendungen verzögern, wenn die benötigte Stufe nicht vorhanden ist"), (2) Host-Zahlen bestimmen ob Threads oder Cache, (3) freigegebener inkrementeller Per-Baum-Cache, (4) Prototypen + Kronenhülle für weitere Baukante
+Decision: Generieren ist pro Baum unabhängig und hash-deterministisch, also parallelisierbar; in der VM kostet es 4× mehr als der Upload
+Decision: 100 Prototypen entkoppeln nur das Generieren von der Weltgröße — Upload und Zeichnen skalieren weiter mit der Baumzahl
+Files: src/main.c, src/trees_cpu.c, src/scene.h, STATUS.md, /media/sf_Quarantine/64kDemo/64kdemo

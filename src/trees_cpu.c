@@ -850,8 +850,12 @@ static void ez_norm3(float *x, float *y, float *z){
 // rekursiver Ast: Abschnitte bauen, Roehre senden, Kinder/Laub ansetzen
 // secOv/segOv: deren Terminalast-Regel ueberschreibt Section- und Segmentzahl des
 // Fortsetzungszweigs mit der des Elternastes (0 = Preset-Wert benutzen).
+// lenMul: deren tree.js:534-538 — bei immergruenen (Nadel-)Baeumen waechst ein
+// Zweig umso kuerzer, je hoeher er ansetzt: length[level] * (1 - Ansatzpunkt).
+// Genau das macht den Tannen-Kegelmantel. Laubabwerfende haben den Faktor 1.
 static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
-                    float seed, int tier, float btone, int secOv, int segOv){
+                    float seed, int tier, float btone, int secOv, int segOv,
+                    float lenMul){
   int S = (secOv > 0) ? secOv : P->sections[lvl];
   // Aufloes-Schwelle DIESES Astes: haelt nur vom Ast-Seed ab, also bei jedem
   // Build identisch und unabhaengig von Kamera, Stufe und Bildschirmposition.
@@ -890,7 +894,7 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
 
   // Kronenlevel-Laengen sind extra skalierbar: ihre Presets sind schlanker als
   // unsere Kronen proportioniert (Breite/Hoehe ~0,4 statt ~0,85).
-  float len = P->length[lvl] * unit * (lvl == 0 ? 1.0f : treeEzSpread);
+  float len = P->length[lvl] * unit * (lvl == 0 ? 1.0f : treeEzSpread) * lenMul;
   float sl = len / (float)S;
   Sec sec[13];
   sec[0] = *base;
@@ -962,7 +966,7 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
   }while(0)
 
   int maxKid = P->levels;               // Struktur in ALLEN Stufen gleich
-  Sec kids[96]; int nkid = 0;
+  Sec kids[96]; float kidT[96]; int nkid = 0;
   if(lvl < maxKid){
     int cnt = (P->children[lvl] * kidPct) / 100;
     if(cnt < 1) cnt = 1;
@@ -1007,7 +1011,7 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
       ez_norm3(&dx, &dy, &dz);
       cb.d[0] = dx; cb.d[1] = dy; cb.d[2] = dz;
       ring_basis(&cb.rg, dx, dy, dz);
-      kids[nkid] = cb; nkid++;
+      kids[nkid] = cb; kidT[nkid] = t; nkid++;
     }
   }
 
@@ -1077,10 +1081,14 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
   // 65,6 Einheiten Baumhoehe. Ohne diesen Zweig endet bei uns der Stamm bei 55 %
   // und die Krone wachst nur 18 statt 30 Einheiten ueber die Stamm spitze — das
   // ist der "abgeschnittene Stamm" und das "zu wenig Begruente".
-  if(lvl < maxKid){
+  // Nur laubabwerfende Baeume schieben einen Fortsetzungszweig an die Spitze
+  // (deren tree.js:424 `if (this.options.type === 'deciduous')`). Bei Nadel-
+  // baeumen endet der Stamm spitz — mit Fortsetzungszweig wuchs oben ein
+  // einzelner langer Ast aus der Tanne heraus.
+  if(lvl < maxKid && !P->evergreen){
     Sec cont = sec[S];
     ez_grow(lvl + 1, &cont, P, unit, seed + 91.7f + (float)lvl * 5.1f,
-            tier, btone, S, G);
+            tier, btone, S, G, 1.0f);
   }
 
   if(lvl >= maxKid){
@@ -1140,7 +1148,8 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
              (float)i / (float)(nkid > 1 ? nkid - 1 : 1),
              kids[i].rg.p[0], kids[i].rg.p[1], kids[i].rg.p[2]);
     ez_grow(lvl + 1, &kids[i], P, unit,
-            seed + (float)lvl * 17.0f + (float)i * 3.13f, tier, btone, 0, 0);
+            seed + (float)lvl * 17.0f + (float)i * 3.13f, tier, btone, 0, 0,
+            P->evergreen ? (1.0f - kidT[i]) : 1.0f);
   }
 }
 
@@ -1226,7 +1235,7 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
   // Deckungsflaeche — ein Sprung mitten in der Blende.
   ezCardScale = treeCardScaleN;
   ezDbgName = P->name; ezDbgUnit = unit; ezDbgR0 = root.rg.r; ezDbgNSec = 0;  ezDbgS = s; ezDbgHf = hf;
-  ez_grow(0, &root, P, unit, seed, tier, btone, 0, 0);
+  ez_grow(0, &root, P, unit, seed, tier, btone, 0, 0, 1.0f);
   // Karten (Distanzstufe): ab 0,9 lodR uebernehmen sie das Laub, im Band um
   // lodR existieren beide und der Shader blendet sie um lodR +/-10 % um.
   // Dichte/Groesse wie deren LOD1/LOD2: jeder zweite / vierte Laubansatz.
