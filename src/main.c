@@ -545,6 +545,9 @@ static void ensure_fbo(int w, int h) {
   p_glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rbDepthMS);
   if (p_glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
     fprintf(stderr, "FBO-MS unvollstaendig!\n");
+  // Brennweite in Pixeln hier setzen: der Build braucht sie fuer die
+  // Bildgroessen-Schaltweiten, und der erste Build laeuft vor dem ersten Frame.
+  trees_set_focal_px(1.7f * (float)sh);
   p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
   fboW = sw; fboH = sh;
 }
@@ -2246,6 +2249,11 @@ int main(int argc, char **argv) {
       flyPos[0] = cx; flyPos[2] = cz; flyPos[1] = c_terrainH(cx, cz) + 1.10f;
       flyPitch = cp; if(cy2 < 1e29f) flyYaw = cy2;
       printf("DEBUG Kamera gesetzt: (%.1f, %.2f, %.1f) Pitch %.2f Yaw %.2f\n", cx, flyPos[1], cz, cp, flyYaw); } } }
+  { const char *es = getenv("DEMO_SCALE"); if(es){ int v = atoi(es); if(v>=0 && v<=2) scaleIdx = v; } }   // 0=1x 1=1/2 2=1/4
+  // Brennweite in Pixeln VOR dem ersten Build: die Bildgroessen-Schaltweiten
+  // (R1/R2) und der Holz-Schnitt brauchen sie. Ohne diesen Wert war focalPx beim
+  // ersten Build 0 -> kein Holz-Schnitt -> 3,99 Mio Geruest-Vertices und Cap-Treffer.
+  trees_set_focal_px(1.7f * (float)(winH >> scaleIdx));
   treeTabDump = getenv("DEMO_TREETAB") ? 1 : 0;
   dbgFizzle = getenv("DEMO_FIZ") ? 1 : 0;      // Standard AUS (Nutzer: Bienenschwarm)
   dbgFlutter = getenv("DEMO_FLUT") ? 1 : 0;   // Standard AUS (weisses Flimmern)
@@ -2692,7 +2700,7 @@ int main(int argc, char **argv) {
       // Bildgroesse, also muss der Generator dasselbe Bildformat kennen wie der
       // Shader (sonst existiert ein Ast, der nie sichtbar waere — oder umgekehrt
       // fehlt einer, der noch sichtbar waere).
-      trees_set_focal_px(1.7f * (float)winH);
+      if(fboH > 0) trees_set_focal_px(1.7f * (float)fboH);   // fboH=0 vor dem ersten ensure_fbo   // muss zum Uniform im Shader passen (fboH, nicht winH)
       if(getenv("DEMO_RADDBG")) { static int once=0; if(!once){ once=1; printf("RADDBG main fboH %d focal %.1f\n", fboH, 1.7f*(float)fboH); fflush(stdout);} }
       if(treeForceRebuild){ tCX = 1e30f; treeForceRebuild = 0; }   // Taste 1
       // DEMO_TIERSWITCH=<sek>: nach n Sekunden hart auf tier 0 umstellen und einen
@@ -2726,7 +2734,7 @@ int main(int argc, char **argv) {
           builtT = 1;
           trees_thread_start();
         } else {
-          trees_set_focal_px(1.7f * (float)winH);   // Bildgroessen-LOD: Build und
+          if(fboH > 0) trees_set_focal_px(1.7f * (float)fboH);   // fboH=0 vor dem ersten ensure_fbo   // muss zum Uniform im Shader passen (fboH, nicht winH)   // Bildgroessen-LOD: Build und
                                                    // Shader mussel dasselbe Format kennen
           trees_build_request(tCX, tCZ, camPos);   // Worker baut im Hintergrund
         }

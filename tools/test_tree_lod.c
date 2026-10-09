@@ -216,6 +216,42 @@ int main(void){
     ok(anchor, "%s misst den LOD-Abstand ohne Baum-Anker", shaders[s]);
   }
 
+  /* ---- BILDGROESSEN-SCHALTWEITEN (treeLodInitPx, Nutzer: "eine Funktion der
+   * Blattgroesse und/oder der Flaeche auf dem Bildschirm") ---- */
+  {
+    struct { float leafM, cardM, focal; } C[] = {
+      {0.05f,0.10f,612.0f},{0.09f,0.18f,612.0f},{0.14f,0.28f,612.0f},
+      {0.05f,0.10f,1836.0f},{0.09f,0.18f,1836.0f},{0.14f,0.28f,1836.0f},
+      {0.001f,0.001f,1836.0f},{0.09f,0.18f,0.0f} };
+    for(int ci = 0; ci < (int)(sizeof(C)/sizeof(C[0])); ci++){
+      TreeLod L; treeLodInitPx(&L, C[ci].leafM, C[ci].cardM, C[ci].focal, 0.0f);
+      float w1 = C[ci].leafM * C[ci].focal / LOD_LEAF_PX;
+      if(C[ci].focal <= 0.0f) w1 = 30.0f;
+      if(w1 < 8.0f) w1 = 8.0f; else if(w1 > 160.0f) w1 = 160.0f;
+      ok(fabsf(L.R1 - w1) < 1e-3f, "R1 = %.2f, erwartet %.2f (Blatt %.3f m, focal %.0f px)",
+         L.R1, w1, C[ci].leafM, C[ci].focal);
+      ok(L.R2 >= 1.5f * L.R1 - 1e-3f, "R2 = %.2f liegt unter dem 1,5-fachen von R1 = %.2f", L.R2, L.R1);
+      ok(L.R2 <= 320.0f + 1e-3f, "R2 = %.2f ueber 320 m", L.R2);
+      for(int bi = 0; bi < 2; bi++){
+        L.bb = bi;
+        float worst = 0.0f, slope = 0.0f, prev = -1.0f;
+        for(float d = 0.0f; d <= 1.5f * L.R2; d += 0.5f){
+          float w[4] = { treeLodWLeaf(&L, d), treeLodWCard(&L, d),
+                         treeLodWBillboard(&L, d), treeLodWMesh(&L, d) };
+          float sum = w[0] + w[1] + w[2];
+          if(fabsf(sum - 1.0f) > worst) worst = fabsf(sum - 1.0f);
+          if(prev >= 0.0f){ float s2 = fabsf(w[0] - prev); if(s2 > slope) slope = s2; }
+          prev = w[0];
+        }
+        ok(worst < 1e-4f, "Blatt %.3f m focal %.0f bb=%d: Gewichte weichen von 1 ab (worst %.1e)",
+           C[ci].leafM, C[ci].focal, bi, worst);
+        float lim = 1.5f * 0.5f / (0.2f * L.R1) * 1.05f;
+        ok(slope <= lim, "Blatt %.3f m: Blattgewicht springt %.3f pro 0,5 m (Schranke %.3f)",
+           C[ci].leafM, slope, lim);
+      }
+    }
+  }
+
   printf("== %d Pruefungen, %d Fehler ==\n", checks, fails);
   return fails ? 1 : 0;
 }

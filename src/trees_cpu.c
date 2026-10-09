@@ -1174,6 +1174,21 @@ static void sort_inst_far_near(float *buf, int from, int n, int stride, const fl
            (size_t)stride * sizeof(float));
 }
 
+// Blatt- und Buschelgroesse EINES Baums, ohne ihn zu bauen: dieselben
+// Seed-Hashes wie gen_tree_ez (TH ist eine reine Funktion des Seeds).
+// Liefert die Weltgroesse eines Einzelblatts und eines Karten-Quads.
+static void ez_size_hint(float seed, float s, float *leafM, float *cardM){
+  int pidx = (int)(TH(0) * (float)(EZ_NPRESETS - 0.001f));
+  if(treeEzPreset >= 0 && treeEzPreset < EZ_NPRESETS) pidx = treeEzPreset;
+  const EzPreset *P = &EZ_PRESETS[pidx];
+  float hf = 0.80f + TH(1) * 2.20f;
+  float treeH = 1.5f * hf * 1.15f * s;
+  float unit = treeH / P->length[0];
+  float lsz = P->leafSize * unit;                 // Weltgroesse einer Laubposition
+  *leafM = lsz * 0.45f * ezLeafScale;             // = Blattlaenge im Blatt-Shader
+  *cardM = lsz * 1.00f * treeCardScaleN;          // Mittelwert der Karten-Kantenlaenge
+}
+
 static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int tier,
                         float d, float R1){
   (void)d; (void)R1;   // frueher steuerte die Distanz noch, ob Karten gebaut werden
@@ -1456,7 +1471,16 @@ int trees_build_step(int maxTrees){
     // "verschwindende Blattwald". Deshalb jetzt 5x und 15x, absolut begrenzt.
     // ALLE Entfernungs-Entscheidungen stammen aus src/tree_lod.c (Strategie B):
     // dieselben Funktionen, die tools/test_tree_lod.c ohne GL prueft.
-    TreeLod TL; treeLodInit(&TL, H, treeLodScale); TL.bb = treeBillboard0;
+    // Schaltweiten aus BILDGROESSE (tree_lod.h): R1 da, wo ein Einzelblatt 2
+    // Bildpunkte fuellt, R2 da, wo ein Buschel 1,5 fuellt. Die Blatt- und
+    // Buschelgroesse holt sich der Aufrufer aus demselben Seed wie der Generator
+    // (TH ist eine reine Funktion des Seeds), damit Build und Generator dieselbe
+    // Art und dieselbe Groesse sehen.
+    float ezLeafHint = 0.0f, ezCardHint = 0.0f;
+    ez_size_hint(cand[i].p[0] * 12.9898f + cand[i].p[2] * 78.233f, cand[i].s,
+                 &ezLeafHint, &ezCardHint);
+    TreeLod TL; treeLodInitPx(&TL, ezLeafHint, ezCardHint, gFocalPx, treeLodScale);
+    TL.bb = treeBillboard0;
     TL.focalPx = gFocalPx; gTL = TL;   // gTL braucht ez_grow fuer den Ast-Schnitt
     float R1 = TL.R1, R2 = TL.R2;
     int tier;
@@ -1536,10 +1560,20 @@ int trees_build_step(int maxTrees){
     // seine Blaetter schon nach 10 Einheiten, der kleinere Nachbarbaum in
     // dreifacher Entfernung behaelt sie" messbar.
     if(treeTabDump)
-      fprintf(stderr, "TREETAB x=%7.2f z=%7.2f y=%6.2f s=%5.3f H=%5.2f R1=%6.2f R2=%6.2f "
-                      "tier=%d dbuild=%6.2f blaetter=%5d karten=%4d\n",
-              cand[i].p[0], cand[i].p[2], cand[i].p[1], cand[i].s, H, R1, R2, tier, d,
-              nLeafInst - leafBefore, nCrownVerts - quadBefore);
+      {   // gemessene Groessen der Instanzen dieses Baums (Gegenprobe zum Hint)
+        float lmin = 1e9f, lmax = -1e9f, cmin = 1e9f, cmax = -1e9f;
+        for(int q = leafBefore; q < nLeafInst; q++){
+          float v = leafInst[q * LEAF_FLOATS + 3]; if(v < lmin) lmin = v; if(v > lmax) lmax = v; }
+        for(int q = quadBefore; q < nCrownVerts; q++){
+          float v = crownVerts[q * CROWN_FLOATS + 3]; if(v < cmin) cmin = v; if(v > cmax) cmax = v; }
+        fprintf(stderr, "TREETAB x=%7.2f z=%7.2f y=%6.2f s=%5.3f H=%5.2f hintBlatt=%5.3f "
+                        "hintBuschel=%5.3f gemessenBlatt=%.3f..%.3f gemessenBuschel=%.3f..%.3f "
+                        "focalpx=%6.0f R1=%6.2f R2=%6.2f tier=%d dbuild=%6.2f "
+                        "blaetter=%5d karten=%4d\n",
+                cand[i].p[0], cand[i].p[2], cand[i].p[1], cand[i].s, H, ezLeafHint, ezCardHint,
+                lmin, lmax, cmin, cmax, gFocalPx, R1, R2, tier, d,
+                nLeafInst - leafBefore, nCrownVerts - quadBefore);
+      }
     // Sicherheitsnetz: die Budget-Schaetzung oben ist pro Baum nur geschaetzt.
     // Hat der Baum trotzdem ein Cap gerissen, wird er KOMPLETT zurueckgerollt —
     // ein Baum, der mitten im Ast endet, zeigt eine offene Ringkante (eine

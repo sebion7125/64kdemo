@@ -10,6 +10,22 @@ float treeLodSmoothstep(float a, float b, float x){
   return t * t * (3.0f - 2.0f * t);
 }
 
+void treeLodInitPx(TreeLod *L, float leafM, float cardM, float focalPx, float lodScale){
+  L->H = 0.0f; L->bb = 1;
+  /* R1 = wo ein Einzelblatt LOD_LEAF_PX Bildpunkte fuellt, R2 = wo ein Buschel
+   * LOD_CARD_PX fuellt. px = groesse * focalPx / d  ->  d = groesse * focalPx / px.
+   * focalPx <= 0 (kein Fenster bekannt) -> sinnvoller Ersatzwert, damit nichts
+   * verschwindet. */
+  if(focalPx > 0.0f && leafM > 0.0f) L->R1 = leafM * focalPx / LOD_LEAF_PX;
+  else                               L->R1 = 30.0f;
+  if(focalPx > 0.0f && cardM > 0.0f) L->R2 = cardM * focalPx / LOD_CARD_PX;
+  else                               L->R2 = 3.0f * L->R1;
+  if(L->R1 < 8.0f)   L->R1 = 8.0f;      else if(L->R1 > 160.0f) L->R1 = 160.0f;
+  if(L->R2 < 1.5f * L->R1) L->R2 = 1.5f * L->R1;
+  if(L->R2 > 320.0f) L->R2 = 320.0f;
+  if(lodScale > 0.0f){ L->R1 *= lodScale; L->R2 *= lodScale; }
+}
+
 void treeLodInit(TreeLod *L, float H, float lodScale){
   L->H = H; L->bb = 1;
   /* Schaltweiten: R1 = wo die Einzelblaetter aufhoeren zu decken, R2 = wo die

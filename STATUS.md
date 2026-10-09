@@ -3276,3 +3276,33 @@ Schwelle messen.
      R1 = 45 m fuer alle           : 574 090 gebaut
    Der Pufferbedarf aendert sich also nicht (die Existenz-Huelle 1,15 R1 + 20 m
    bleibt), nur die gezeichnete Blattmenge steigt.
+
+## UMGESETZT 2026-10-09: Schaltweiten aus BILDGROESSE (LOD scaling)
+treeLodInitPx(blattM, buschelM, focalPx): R1 = wo ein Einzelblatt LOD_LEAF_PX (2,0)
+Bildpunkte fuellt, R2 = wo ein Buschel LOD_CARD_PX (1,5) fuellt. Vorher R1 = 5x,
+R2 = 15x Wuchshoehe. Gemessen (DEMO_TREETAB, ein Baum, s=2,511):
+  Bildhoehe 360 px (focalPx 612):  R1 = 104,65 m  R2 = 310,07 m
+  Bildhoehe 180 px (focalPx 306):  R1 =  52,32 m  R2 = 155,04 m   (genau die Haelfte)
+Nebenbefunde:
+ - focalPx war beim ersten Build 0 -> kein Holz-Schnitt -> 3,99 Mio Geruest-Vertices
+   und 384 uebersprungene Baeume. Jetzt gesetzt in ensure_fbo + vor dem ersten Build,
+   und die Uniform-Setzung ignoriert fboH = 0.
+ - Brennweite im Build (winH) und im Shader (fboH) waren unterschiedlich -> jetzt
+   einheitlich fboH.
+ - GEMESSENE BLATTGROESSE aus den Instanzen: 0,256..0,427 m (Baum s=2,511),
+   0,452..0,754 m (s=2,544). Das sind 26..75 cm lange Blaetter an 4..7 m hohen
+   Baeumen - ein Eichenblatt ist ~10 cm. Die Blattgroesse ist jetzt der begrenzende
+   Faktor fuer R1: bei 0,34 m Blatt und 360-px-Bildhoehe R1 = 105 m ->
+   2 393 790 Blatt-Instanzen (Cap 2 400 000) und 63 Baeume heruntergestuft.
+   Entscheidung offen: Blattgroesse auf ~0,08..0,012 m (ezLeafScale runter) oder
+   grobe Blaetter behalten und LOD_LEAF_PX erhoehen.
+ - Im Blende-Band stecken jederzeit 94..117 von 648 Baeumen (gemessen bei 180 bzw.
+   360 px Bildhoehe) - wichtig fuer die Kosten einer Puffer-Kompositierung.
+
+## NOTIZ (zurueckgestellt, Nutzer 2026-10-09)
+ - Astbewegung im Wind verschiebt den Ast an der Verzweigungsstelle statt ihn zu
+   biegen -> an den Uebergangen entstehen Luecken (der gefuerchtete Spalt zwischen
+   Ast und Zweig). Korrekt waere Biegen: die Auslenkung mit der Bogenlaenge ab
+   der Verzweigung wachsen lassen (und die Ring-Querschnitte mitdrehen).
+ - Das Blaetter-Rascheln ist unnatuerlich stark; natuerlicher waeren kleinere
+   Blattbewegung und mehr Zweigbewegung.

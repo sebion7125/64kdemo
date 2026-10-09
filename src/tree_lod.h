@@ -89,6 +89,21 @@ float treeLodWBranch(const TreeLod *L, float rad, float d);
  * damit mit der Sichtbarkeitsregel zusammen, und ein Satz-Wechsel kann nichts
  * mehr sichtbar veraendern. */
 float treeLodRadCut(const TreeLod *L, float rad);
+
+/* BILDGROESSEN-KRITERIUM fuer die Laub-Schaltweiten (Nutzerbefund 2026-10-09:
+ * "die radien fuer den LOD-uebergang variieren immer noch nicht nachvollziehbar
+ * von baum zu baum. Wenn ueberhaupt sollte das eine funktion der blattgroesse
+ * und/oder der flaeche sein, die der baum auf dem bildschirm einnimmt").
+ * Vorher: R1 = 5 x Wuchshoehe, R2 = 15 x Wuchshoehe. Die Schaltweite hing damit
+ * an der BAUMHOEHE - ein 4-m-Baum schaltete bei 20 m, ein 12-m-Baum bei 60 m,
+ * obwohl ihre Blaetter gleich gross sind.
+ * Jetzt: R1 = Entfernung, bei der EIN EINZELBLATT LOD_LEAF_PX Bildpunkte
+ * fuellt, R2 = Entfernung, bei der ein BUSCHEL (Karten-Quad) LOD_CARD_PX
+ * Bildpunkte fuellt. Beides ist eine Funktion aus Weltgroesse mal Brennweite
+ * in Pixeln, also aufloesungs- und fenstergerecht. */
+#define LOD_LEAF_PX 2.0f
+#define LOD_CARD_PX 1.5f
+void treeLodInitPx(TreeLod *L, float leafM, float cardM, float focalPx, float lodScale);
 float treeLodBranchCut(const TreeLod *L);
 float treeLodMeshCut(const TreeLod *L);
 

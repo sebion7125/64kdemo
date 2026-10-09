@@ -71,8 +71,13 @@ void main(){
   // a - a^2 f (1-f) uebrig, bei f = 0,5 bis zu 25 % weniger (gemessen:
   // Deckungs-Delle in JEDEM Ueberblend-Fenster).
   if(uFocalPx > 0.0){
-    float d3 = length(p - uCamPos);
-    if(aLod.y > lodBranchW(aLod.x, d3, uFocalPx)){
+    // Distanz = Lotpunkt des Baums (md), NICHT die Vertex-Position. Der
+    // Schwellwert aLod.y sitzt pro ASTABSCHNITT auf allen Vertices gleich; mit
+    // der Vertex-Entfernung kippte der Test innerhalb eines Abschnitts, ein
+    // Teil der Ringe fiel weg und der Rest wurde als gestrecktes Viereck mit
+    // Rindentextur sichtbar (Nutzerbefund "quadratische quads an zweigen,
+    // seltsam gestreckte holztextur").
+    if(aLod.y > lodBranchW(aLod.x, md, uFocalPx)){
       gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return;
     }
   }
