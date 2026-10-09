@@ -2995,3 +2995,35 @@ Bildmessung ganzer Anflug 140->3 m: groesste Deckungs-Delle -2,15 % bei 31,2 m
 (zuvor -4,99 %, vor der Sortierung -8,16 %). Abdeckungsfehler der Gewichte
 0,77 %, Steigung 0,046/m (Schranke 0,223), 0 Pump-Frames, LT-ERGBNIS OK.
 Selbsttest (Vorversion): ALLE PRUEFUNGEN OK.
+
+## NOTIZ (offen, von Nutzer gesetzt 2026-10-09)
+
+### A. Reihenfolgen-/Alpha-Problem UNABHÄNGIG vom LOD
+1. **tier 2 innerhalb eines Baums**: die Kronen-Karten eines Baums überlappen sich
+   stark (840 Karten, div 3, Skala 2,0) und werden alpha-gemischt. Sortiert ist
+   nur grob (pro Baum hinten→vorn, Karten/Blätter pro Baum). Innerhalb eines
+   Baums mischen sich Karten, die sich gegenseitig schneiden, abhängig von
+   Pufferreihenfolge und Tiefenschreib-Zustand.
+2. **Impostors zwischen Bäumen**: die Ganzbaum-Kacheln sind große, weiche
+   Alpha-Flächen. Zwei benachbarte Bäume überlappen am Bildschirm; welches Bild
+   oben liegt, hängt von der Instanzreihenfolge ab, und die Kante schreibt Tiefe
+   mit Alpha < 1 -> Verdeckung der dahinterliegenden Bäume falsch.
+Beides ist ein eigenes Thema (nicht LOD-Fading). Erwartete Lösung wie bei der
+Referenz (GPU Gems 3 Kap. 4/16): opak + Alpha-TEST (fizzle) statt Alpha-BLEND,
+damit reihenfolge-unabhängig.
+
+### B. Dauer der Blende (Ist gemessen, Soll vom Nutzer: ~2 m Kameraweg oder mehr)
+Fokusbaum im Ein-Baum-Test: R1 = 33,7 m, R2 = 10,1 m*15 = 101,1 m.
+* Band = 0,20 * R  ->  R1-Band 6,7 m, R2-Band 20,2 m.
+  (allgemein: R1 = clamp(5H,20,60) -> Band 4..12 m; R2 = clamp(15H,40,120) -> Band 8..24 m)
+* Karten-Gewicht (kommende Schicht) läuft über das ganze Band: gemessen
+  35,9 m: 0,920 | 34,0 m: 0,567 | 32,0 m: 0,154 | 30,0 m: 0,000  -> ~7 m Kameraweg.
+* Blatt-Gewicht (abgehende Schicht, Halt) bleibt 1,000 und fällt erst im
+  letzten Auslauf (t = 0,97..1,00): d = 1,094*R1 .. 1,10*R1 = 36,87..37,07 m
+  -> **0,20 m Kameraweg**. Das ist der Teil, den man als "schlagartig" sieht.
+* Zusätzlich unsichtbar: die kommende Schicht kann über der opaken abgehenden
+  nicht gemischt werden, wo diese tiefer liegt (Tiefentest) -> der weiche Teil
+  der Blende ist an den meisten Pixeln gar nicht zu sehen.
+Soll: die SICHTBARE Änderung muss >= 2 m Kameraweg brauchen. Der Auslauf des
+Halts (3 % des Bands) ist dafür zu klein; er muss auf ~2 m (oder die Blende
+insgesamt breiter / der Halt ganz weg, wenn fizzle kommt).
