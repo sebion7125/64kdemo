@@ -3138,3 +3138,32 @@ Messplan (noch nicht gebaut):
   unabhaengigkeit; ein flaches Quad schlaegt hier gross aus.
 * LT-DECKUNG ueber den radialen Anflug (Kontinuitaet Karten -> Huelle).
 * Sortier-Umkehr-Test (DEMO_SORTREV) muss 0 Pixel Differenz liefern (opak).
+
+## ENTWURF: finale Stufen-Leiter (Stand 2026-10-09, noch nicht umgesetzt)
+Ausloeser (Nutzer): tier 2 (Karten) wegen OIT-/Reihenfolgeproblemen unbefriedigend,
+Blattanimation nur bei tier 3 ueberzeugend.
+
+Grundregel: **Stufe = was im Puffer liegt. Schicht = was sichtbar ist.**
+Das Holz hat keine Stufen mehr (aufgeloest ueber projizierte Astdicke,
+LOD_PX_LO/LOD_PX_HI, opak, segmentweise). Ueberbleibende Stufen betreffen nur
+die Laubdarstellung:
+
+| Stufe | Laub | Dreiecke/Instanzen pro Baum | Animation |
+|---|---|---|---|
+| NAH  (d < 0,9*R1) | Einzelblaetter, opak Alpha-Test | 12 600 Instanzen (gemessen) | je Blatt (ueberzeugend, Nutzer) |
+| MITTE (Band um R1) | Cluster-Bueschel: 2 feste, opake Quadrate je Buschel, UV-raschelnd | 840*2 = 1 680 Quadrate = 3 360 Dreiecke | UV-Rauschen + Sway |
+| FERN (ab R2) | Kronenhuelle (Dichtegitter 10^3), geteilter Atlas, UV-raschelnd | ~200-600 Dreiecke | UV-Rauschen + Sway |
+
+Wegfall: die heutige Karten-Schicht in ihrer jetzigen Form (kamerazugewandte,
+sich schneidende, alpha-gemischte Quadrate) und das flache Ganzbaum-Quad samt
+Aufnahmemechanik.
+
+Uebergang: fizzle (Alpha-TEST mit stabilem Rauschen, komplementaere Schwellen)
+in den Baendern 0,90-1,10*R1 und 0,90-1,10*R2. Kein Alpha-Blend, kein Sortieren,
+kein Tiefen-Nachpass, kein Halt.
+
+Offene Entscheidungen:
+1. MITTE als Cluster-Quadrate (erhaelt Aest-/Buschelstruktur, 3 360 Dreiecke)
+   ODER direkt die Huelle (billiger, aber Buschelstruktur weg -> Klumpen).
+2. Wie viele verschiedene Laub-Shaderwege wir fahren (NAH und MITTE/FERN
+   koennen sich Textur und Beleuchtung teilen).
