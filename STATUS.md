@@ -3019,8 +3019,17 @@ Fokusbaum im Ein-Baum-Test: R1 = 33,7 m, R2 = 10,1 m*15 = 101,1 m.
 * Karten-Gewicht (kommende Schicht) läuft über das ganze Band: gemessen
   35,9 m: 0,920 | 34,0 m: 0,567 | 32,0 m: 0,154 | 30,0 m: 0,000  -> ~7 m Kameraweg.
 * Blatt-Gewicht (abgehende Schicht, Halt) bleibt 1,000 und fällt erst im
-  letzten Auslauf (t = 0,97..1,00): d = 1,094*R1 .. 1,10*R1 = 36,87..37,07 m
-  -> **0,20 m Kameraweg**. Das ist der Teil, den man als "schlagartig" sieht.
+  Auslauf (t = 0,97..1,00). GEMESSEN (Ein-Baum-Test 42->30 m, Protokoll): bei
+  37,10 m noch 0,000 — 36,70 m: 0,200 — 36,30 m: 1,000, darunter bis 30,33 m
+  durchgehend 1,000. Der sichtbare Wechsel läuft also über **0,70 m Kameraweg**
+  (nicht 0,20 m — die Zahl war ein linearer Überschlag; smoothstep ist eine
+  S-Kurve, ihr Wert 0,97 liegt bei 90 % der Strecke, nicht bei 97 %).
+* Handover gesamt: 30,33 .. 37,07 m = 6,74 m Kameraweg. Davon ist der Teil, den
+  das Auge als Änderung sieht, 0,70 m.
+* Knopf "Auslauf beginnt bei t0" (Auslaufbreite in m Kameraweg):
+  R1-Band 6,74 m: t0=0,97 -> 0,70 | 0,95 -> 0,91 | 0,90 -> 1,32 | 0,80 -> 1,94 |
+  0,70 -> 2,45 | 0,50 -> 3,37
+  R2-Band 20,22 m: t0=0,97 -> 2,10 | 0,90 -> 3,96 | 0,80 -> 5,81 | 0,50 -> 10,11
 * Zusätzlich unsichtbar: die kommende Schicht kann über der opaken abgehenden
   nicht gemischt werden, wo diese tiefer liegt (Tiefentest) -> der weiche Teil
   der Blende ist an den meisten Pixeln gar nicht zu sehen.
