@@ -165,7 +165,8 @@ void main(){
       else { w2 = 1.0; vCompW = lodBandIn(iLodR2, d); }
     } else {                                        // Karten: ein bei R1, aus bei R2
       if(uCompPhase < 1.5){ if(in1 > 0.5) w1 = 0.0; if(in2 > 0.5) w2 = 1.0; }
-      else { w1 = (in1 > 0.5) ? 1.0 : 0.0; w2 = 1.0; vCompW = lodBandIn(iLodR, d); }
+      else if(uCompPhase < 2.5){ w1 = (in1 > 0.5) ? 1.0 : 0.0; w2 = 1.0; vCompW = lodBandIn(iLodR, d); }
+      else { if(in1 > 0.5) w1 = 0.0; }   // Phase 3 = Kopie-Puffer: nur Karten, keine Blaetter
     }
   }
   if(uFizOn < 0.5){ w1 = (w1 >= 0.5) ? 1.0 : 0.0; w2 = (w2 >= 0.5) ? 1.0 : 0.0; }

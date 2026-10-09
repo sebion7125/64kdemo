@@ -3508,3 +3508,66 @@ Konfiguration unterscheiden sich im VM-Software-GL bereits am Frame 1: 164 729 b
 Realzeit. Bildvergleiche zwischen zwei Laufen sind hier also kein Beweis; bewiesen
 sind die Zahlen der Tiefen-Lesbank (DEMO_COMPDEP) und die CPU-Simulation des
 Composite-Passes. Aussehen bewertet der Nutzer auf dem Host.
+
+## 2026-10-09 (Runde 32): Composite **pro Baum** statt globaler Zwei-Puffer-Verbund
+
+Nutzerentwurf, der den Verbund dieser Runde ersetzt:
+
+> „eigentlich war meine idee, für jeden baum, der gerade gefaded wird so einen
+> kopierpass zu haben und alle bäume von hinten nach vorne zu rendern. eine
+> pixelweise entscheidung fürs blending braucht es nicht. und es soll immer
+> geblended werden, auch wenn das pixel nur eine der LOD stufen repräsentiert.
+> über sichtbarkeit entscheidet allein der depth test …"
+
+Umgesetzt (Default an, `DEMO_COMP=0` aus):
+
+| Schritt | was passiert |
+|---|---|
+| Basispass | Baeume in einem Blendenband fehlen dort mit Laub **und** Karten (`uCompPhase = 1` in `leaf.vert`/`crown.vert`); Geruest bleibt |
+| 1. Kopie | Bildbox des Baums aus der Szene nach `fboB`: **Farbe und Tiefe** |
+| 2. abgehend | Einzelblaetter DIESES Baums opak in die Kopie (`uCompPhase = 3`) |
+| 3. kommend | Karten DIESES Baums opak in die Szene (`uCompPhase = 2`) |
+| 4. mischen | ueber der Box `mischen(Szene, Kopie, 1 − w)` (`comp.frag`), ohne Tiefentest, ohne Tiefenwrite; dann zurueckblitten |
+
+Beide Stufen testen damit gegen dieselbe Tiefe — naemlich die Szene **ohne**
+diesen Baum. Das ist der Kern: zeichne ich die kommende Stufe gegen die Szene
+*mit* der abgehenden Stufe, wirft der Tiefentest sie komplett weg. Gemessen:
+Box nach der kommenden Stufe 429 helle Pixel wie vorher, 0 neue Fragmente.
+
+Daten dafuer: `TreeSlot` (scene.h) traegt pro Baum die Instanz-Bereiche
+(`leaf0/leafN`, `card0/cardN`) und eine Huelle aus den **gemessenen** Instanzen
+(Karten und Einzelblaetter). Die Baum-Reihenfolge im Blendenband wird pro Frame
+auf der CPU aus denselben Kern-Funktionen (`treeLodWCard`) ermittelt und von fern
+nach nah abgearbeitet.
+
+### dabei gefundene eigene Fehler (alle gemessen)
+
+1. Der Composite-Lauf lag **vor** dem MSAA-Resolve — der Resolve hat sein
+   Ergebnis ueberschrieben. Jetzt danach.
+2. Der Kopier-Blit lief mit einem **uebergebliebenen Scissor-Rechteck** (die
+   Atlas-Aufnahme klemmt Scissor pro Kachel): Kopie komplett schwarz, Baum
+   waehrend der Blende weg (49 statt 304 helle Pixel). Scissor wird jetzt vor
+   dem Blit gesetzt.
+3. Readbacks mitten im Pass sind in Mesa unzuverlaessig (gleiche Konfiguration
+   bald 401 hell, bald 0) — erst `glFinish()` liefert brauchbare Zahlen.
+
+### gemessener Stand (Ein-Baum-Test 45→38 m, 320×180, 0,4 m/Frame)
+
+```
+d[m]   44.6  44.2  43.8  43.4  43.0  42.6 | 42.2  41.8  41.4 | 41.0  40.6
+helle  395   411   417   428   436   445 | 311   313   311 | 442   479
+Pixel                              Bandanfang (w = 0,995)
+```
+
+Kopie (abgehend) 394–429 hell, Szene (kommend) 281–411 hell, Mischziel folgt dem
+Gewicht — der Mechanismus arbeitet. **Offen:** in den ersten ~1,2 m des Bands
+faellt die Deckung um ~30 % (445 → 311) und erholt sich bei w ≈ 0,9 wieder.
+Ausgeschlossene Ursachen (je gemessen): MSAA (mit MSAA aus gleicher Verlauf),
+zu kleine Box (Polster 2/12/40 px gleicher Verlauf), Instanz-Bereich (alle Karten
+statt nur des Baums gleicher Verlauf). Naechster Verdacht: die kommende Stufe
+wird in der Szene von der Tiefe verdeckt, die der Basispass hinterlassen hat
+(Geruest + andere Baeume), waehrend sie im Basispass gegen die MSAA-Einzelmuster
+der selben Tiefe gewinnt.
+
+Aufwand (Wald, 640×360): 10 Baeume im Band, Boxflaeche 467 071 px = 811 % des
+Bildes, 10 594 Karten-Instanzen zusaetzlich gezeichnet (von 667 072 gesamt).

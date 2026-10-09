@@ -63,9 +63,16 @@ void main(){
   if(uFizOn < 0.5) keep = (keep >= 0.5) ? 1.0 : 0.0;   // harte Umschaltung
   // COMPOSITE: Blaetter sind bei R1 die ABGEHENDE Stufe. Phase 1 zeichnet sie
   // im Band voll, Phase 2 zeichnet sie gar nicht (dort kommt die Kartenstufe).
+  // uCompPhase: 1 = Basisdurchgang (Baeume in der Blende werden BAUMWEISE
+  // kopiert, hier bleiben ihre Blaetter WEG — sonst wirft der Tiefentest die
+  // kommende Stufe weg, gemessen: Box nach der kommenden Stufe genauso viele
+  // helle Pixel wie vorher, 0 neue Fragmente).
+  //             3 = nur die abgehende Stufe, volles Gewicht (Kopie-Puffer)
+  //             2 = nie (die Blaetter sind die abgehende Stufe)
   if(uCompPhase > 0.5){
-    if(uCompPhase < 1.5){ if(lodInBand(iLodR, d) > 0.5) keep = 1.0; }
-    else keep = 0.0;
+    if(uCompPhase < 1.5){ if(lodInBand(iLodR, d) > 0.5) keep = 0.0; }
+    else if(uCompPhase < 2.5) keep = 0.0;
+    else keep = 1.0;
   }
   vFiz1 = keep; vFizInv1 = 0.0;
   vFizScale = lodFizScale(uFocalPx, d);   // derselbe Anker-Abstand wie crown.vert

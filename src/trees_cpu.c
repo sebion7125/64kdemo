@@ -111,6 +111,10 @@ static void tree_bufs_init(void){
 float wireVerts[WIRE_CAP * WIRE_FLOATS];
 int treeBuildRange = 20;   // DEMO_TREEBUILDRANGE: Zellen-Radius des Wald-Baus
 int nTreeVerts = 0, nCrownVerts = 0, nWireVerts = 0, nTrees = 0, nLeafInst = 0;   // Schreibseite
+static TreeSlot treeSlotBufA[TREE_SLOT_MAX], treeSlotBufB[TREE_SLOT_MAX];
+TreeSlot *treeSlots = treeSlotBufA, *treeSlotsD = treeSlotBufB;   // Doppelbuffer wie die Geometrie
+static int treeSlotN = 0;   // Baum-Bereiche der Schreibseite
+int      treeSlotND = 0;  // Baum-Bereiche der Zeichenseite
 int nTreeVertsD = 0, nCrownVertsD = 0, nLeafInstD = 0, nTreesD = 0;               // Zeichenseite
 
 // Thread-Zustand (Mutex wie beim Gras: der Main-Thread tauscht nur Zeiger/Counts,
@@ -1403,6 +1407,7 @@ static int treeNCand = 0, treeCandPos = 0;
 void trees_build_begin(float tx, float tz){
   tree_bufs_init();
   nTreeVerts = 0; nCrownVerts = 0; nWireVerts = 0; nTrees = 0; nLeafInst = 0;
+  treeSlotN = 0;
   for(int q = 0; q < IMP_TILES; q++){ impRepD[q].valid = 0; impRepD[q].nTree = 0; }
   for(int q = 0; q < IMP_TILES; q++) impNTree[q] = 0;
   #define CAND_CAP TREE_CAND_CAP
@@ -1596,6 +1601,50 @@ int trees_build_step(int maxTrees){
       for(int q = leafBefore;  q < nLeafInst;  q++) leafInst[q * LEAF_FLOATS + 13] = (float)pres;
       for(int q = quadBefore;  q < nCrownVerts; q++) crownVerts[q * CROWN_FLOATS + 14] = (float)pres;
       treeDbgPres = pres;
+      // Bereich DIESES Baums im Puffer merken: der Composite arbeitet baumweise
+      // (Nutzerentwurf 2026-10-09) und braucht dafuer anfang + Anzahl der
+      // Instanzen pro Baum und Schicht. Zusammenhaengend sind sie, weil pro Baum
+      // emittiert und nur INNERHALB des Baums sortiert wird.
+      if(treeSlotN < TREE_SLOT_MAX){
+        TreeSlot *sl = &treeSlots[treeSlotN++];
+        sl->ax = cand[i].p[0]; sl->ay = cand[i].p[1]; sl->az = cand[i].p[2];
+        sl->h  = H; sl->R1 = R1; sl->R2 = R2;
+        sl->leaf0 = leafBefore; sl->leafN = nLeafInst  - leafBefore;
+        sl->card0 = quadBefore; sl->cardN = nCrownVerts - quadBefore;
+        sl->pres = pres;
+        sl->hx0 = sl->hz0 = 1e9f; sl->hx1 = sl->hz1 = -1e9f;
+        sl->hy0 = 1e9f; sl->hy1 = -1e9f;
+        // Huelle ueber BEIDEN Stufen: die Karten allein reichen nicht, die
+        // Einzelblatt-Quadrate ragen ueber den Karten-Kasten hinaus. Gemessen:
+        // mit Karten-Kasten wurden Kartenfragmente abgeschnitten (281 statt
+        // 445 helle Pixel innerhalb der Blende).
+        for(int q = leafBefore; q < nLeafInst; q++){
+          const float *lv = &leafInst[q * LEAF_FLOATS];
+          float hs = lv[3] + 0.05f;
+          if(lv[0]-hs < sl->hx0) sl->hx0 = lv[0]-hs;
+          if(lv[0]+hs > sl->hx1) sl->hx1 = lv[0]+hs;
+          if(lv[2]-hs < sl->hz0) sl->hz0 = lv[2]-hs;
+          if(lv[2]+hs > sl->hz1) sl->hz1 = lv[2]+hs;
+          if(lv[1]-hs < sl->hy0) sl->hy0 = lv[1]-hs;
+          if(lv[1]+hs > sl->hy1) sl->hy1 = lv[1]+hs;
+        }
+        for(int q = quadBefore; q < nCrownVerts; q++){
+          const float *cv = &crownVerts[q * CROWN_FLOATS];
+          float hs = 0.5f * cv[3] + 0.05f;
+          if(cv[0]-hs < sl->hx0) sl->hx0 = cv[0]-hs;
+          if(cv[0]+hs > sl->hx1) sl->hx1 = cv[0]+hs;
+          if(cv[2]-hs < sl->hz0) sl->hz0 = cv[2]-hs;
+          if(cv[2]+hs > sl->hz1) sl->hz1 = cv[2]+hs;
+          if(cv[1]-hs < sl->hy0) sl->hy0 = cv[1]-hs;
+          if(cv[1]+hs > sl->hy1) sl->hy1 = cv[1]+hs;
+        }
+        if(sl->cardN <= 0 || sl->hx1 < sl->hx0){   // keine Karten -> Wuchshoehe als Notnagel
+          float r = 0.62f * H;
+          sl->hx0 = cand[i].p[0]-r; sl->hx1 = cand[i].p[0]+r;
+          sl->hz0 = cand[i].p[2]-r; sl->hz1 = cand[i].p[2]+r;
+          sl->hy0 = cand[i].p[1];   sl->hy1 = cand[i].p[1]+H;
+        }
+      }
     }
     if(treeTabDump)
       {   // gemessene Groessen der Instanzen dieses Baums (Gegenprobe zum Hint)
@@ -1695,6 +1744,8 @@ void trees_build_finish(void){
   tp = treeVerts;   treeVerts = treeVertsD;   treeVertsD = tp;
   tp = crownVerts;  crownVerts = crownVertsD; crownVertsD = tp;
   tp = leafInst;    leafInst = leafInstD;     leafInstD = tp;
+  { TreeSlot *ts = treeSlots; treeSlots = treeSlotsD; treeSlotsD = ts; }
+  treeSlotND = treeSlotN;
   nTreeVertsD = nTreeVerts; nCrownVertsD = nCrownVerts;
   nLeafInstD = nLeafInst;   nTreesD = nTrees;
   // Ausfall-Aushilfe: ein Eimer kann nur ferne Baeume enthalten (tier 0 = nur

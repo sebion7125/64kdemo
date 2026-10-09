@@ -141,6 +141,29 @@ extern int   treeDbgLeafBuilt, treeDbgBranchBuilt, treeDbgMeshFine, treeDbgBB;
 extern int   treeDbgPres, treeDbgPresForce;
 extern int   treeBandCount;   // Baeume in einem Blendenband (Composite noetig?)   // Praesenz-Bits des letzten gebauten Baums
 extern float treeDbgCutLeaf, treeDbgCutBranch;
+/* Bereich eines Baums im Instanz-Puffer (fuer den Composite pro Baum).
+ * Der Mischpass des Nutzers (2026-10-09) arbeitet BAUMWEISE: Box des Baums
+ * kopieren, die kommende Stufe DIESES Baums darueber zeichnen, Box mit einem
+ * Gewicht mischen. Dafuer muessen die Instanzen eines Baums als zusammenhaengender
+ * Bereich adressierbar sein — sie sind es, weil pro Baum emittiert und innerhalb
+ * des Baums sortiert wird (sort_inst_far_near), nie ue Baumgrenzen hinweg. */
+#define TREE_SLOT_MAX 8192
+typedef struct {
+  float ax, ay, az;      // Lotpunkt des Baums (ay = Terrainhoehe am Fuss)
+  float h;               // Wuchshoehe
+  float R1, R2;          // Schaltweiten dieses Baums (aus treeLodInitPx)
+  int   leaf0, leafN;    // Einzelblatt-Instanzen
+  int   card0, cardN;    // Kronen-Karten-Instanzen (Ganzbaum-Kachel = Karte mit Variante >= 4)
+  int   pres;            // LOD_PRES_*: was liegt von diesem Baum wirklich im Puffer
+  // Huelle aus den GEMESSENEN Karten dieses Baums (Mittelpunkt +/- halbe
+  // Quadseite). Die Wuchshoehe als Kasten ist zu gross: gemessen 469 517 px
+  // Boxflaeche fuer 10 Baeume bei 640x360 = 815 % des Bildes, und die Boxen
+  // bestimmen, wie viel der Mischpass und der Kopierpass fuellen.
+  float hx0, hx1, hy0, hy1, hz0, hz1;
+} TreeSlot;
+extern TreeSlot *treeSlotsD;                 // Zeichenseite (nach trees_build_finish)
+extern int      treeSlotND;
+
 extern int   treeBuildRange;   // Zellen-Radius, in dem Baeume gebaut werden
 extern int treeCardDiv0; extern float treeCardScale0;   // DEMO_CARDT0 (Sweep-Bank)
 extern float ezLeafScale, ezLeafPer;   // DEMO_LEAFSC / DEMO_LEAFPER
