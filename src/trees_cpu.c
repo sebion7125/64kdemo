@@ -1688,11 +1688,14 @@ void trees_build_finish(void){
 
 // synchroner Komplettaufbau (erster Frame, Messlaeufe, Tests)
 void trees_build(float tx, float tz){
+  struct timespec tbs; clock_gettime(CLOCK_MONOTONIC, &tbs);
   trees_build_begin(tx, tz);
   trees_sort_candidates();
   while(!trees_build_step(64)){ }
   trees_build_finish();
-}
+
+  struct timespec tbe; clock_gettime(CLOCK_MONOTONIC, &tbe);
+  treeBuildMs = (tbe.tv_sec + tbe.tv_nsec*1e-9 - (tbs.tv_sec + tbs.tv_nsec*1e-9)) * 1000.0;}
 
 // ================= Build-Thread =================
 // Muster wie beim Gras (grass_cpu.c): Main-Thread ruft trees_build_request(),
