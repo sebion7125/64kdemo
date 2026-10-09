@@ -59,13 +59,24 @@ void main(){
   } else {
     fwd = normalize(uCamTgt - uCamPos);
   }
-  vec3 right = normalize(cross(fwd, vec3(0,1,0)));
-  vec3 up = cross(right, fwd);
+  vec3 right, up;
+  if(aData.w >= 4.0){
+    // Ganzbaum-Kachel bleibt kamerazugewandt (bis die 3D-Huelle kommt).
+    right = normalize(cross(fwd, vec3(0,1,0)));
+    up    = cross(right, fwd);
+  } else {
+    // Cluster-Karte: FESTE Orientierung, Drehwinkel sitzt in aData.y (0 oder
+    // 90 grad). Kein Mitschwenken mit der Kamera, keine Blickrichtungs-
+    // abhaengigkeit, und weil opak gezeichnet wird, sind sich schneidende
+    // Quadrate pro Pixel korrekt (Tiefenpuffer).
+    right = vec3(cos(aData.y), 0.0, -sin(aData.y));
+    up    = vec3(0.0, 1.0, 0.0);
+  }
   // Quad in der Kameraebene, um rotY (aData.y) gedreht
   // rotY traegt bei Ganzbaum-Kacheln das Seitenverhaeltnis (siehe unten), darf
   // also nicht als Drehwinkel missbraucht werden — das gab Kacheln mit
   // "zufaelliger" Orientierung (1,3 als Radiant = 74 grad, Nutzerbefund).
-  float rot = (aData.w >= 4.0) ? 0.0f : aData.y;
+  float rot = 0.0f;   // Drehung steckt bei Karten schon in right
   float cr = cos(rot), sr = sin(rot);
   vec2 ro = vec2(aOff.x * cr - aOff.y * sr, aOff.x * sr + aOff.y * cr);
   // Das Ganzbaum-Quad ist nicht quadratisch: aData.y traegt bei ihm die

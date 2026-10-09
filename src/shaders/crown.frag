@@ -15,6 +15,7 @@ uniform sampler2D uFoliage;
 uniform float uDepthOnly = 0.0;
 uniform float uImpostor = 0.0;   // 1 = Aufnahme-Pass
 uniform sampler2D uCrownTex;   // 2x2 Ganzbaum-Kronen-Kacheln (tier 0)   // Atlas: 8x8 Kacheln echter Blattwerk-Aufnahmen
+uniform float uTime = 0.0;   // Flattern (dasselbe Uniform wie im Vertex-Shader)
 uniform float uCrownMask;   // DEBUG: Kronen-Quads als reines Rot -> exakte Maske
 out vec4 O;
 #include "lod.glsl"   // fizzle — dieselben Funktionen wie in crown.vert
@@ -137,6 +138,16 @@ void main(){
   // vFade = 0 (gemessen, /tmp/crowndist.c): deren transparenten Atlas-Bereiche
   // (rgb = 0) wurden als dunkles Quadrat gemalt = der Nutzerbefund "schwarz".
   float a = tx.a * smoothstep(0.0, band, e);
+  // FLATTER-Rauschen (Nutzer: "das Einzelrascheln sieht man als Pixelrauschen,
+  // das sollte da sein"). Verankert an WELTZELLEN von etwa zwei Bildpunkten und
+  // zeitlich gestaffelt: die Silhouette jeder Zelle flackert, statt dass das
+  // Muster ueber die Flaeche laeuft (UV-Versatz wirkt schnell wie Wasser).
+  // Wirkt nur an Werten nahe der Silhouetten-Schwelle, die Blattflaeche selbst
+  // bleibt unveraendert.
+  {
+    float fl = lodFizN(vPos, vFizScale * 0.5, 113.0 + floor(uTime * 3.0) * 0.71);
+    a *= 0.85 + 0.30 * fl;
+  }
   float cov = a;   // Deckung vor der Ueberblendung (die kommt als vFade dazu)  // Rand des Billboards ausblenden: entkommt der Baum (Aeste, Blaetter) der
   // BBox-Schaetzung, beruehrt der Kachelinhalt den Rand — im Wald sieht man dann
   // ein hartes gruenes Rechteck gegen den Himmel (gemessen: 15 von 64 Kacheln

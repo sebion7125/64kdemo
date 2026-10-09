@@ -3197,3 +3197,21 @@ Messung: ganzer Anflug 140->3 m, groesste Deckungs-Delle -2,16 % bei 77,4 m
 (vorher -2,15 % bei 31,2 m — die Delle am Einzelblatt->Karten-Uebergang ist
 weg, die verbleibende liegt woanders). Kein dunkles Pixel im Szenenlauf
 (0,0 % dunkel, Mittel 128-168). Selbsttest: ALLE PRUEFUNGEN OK.
+
+## SCHRITT 2+3: gekreuzte Cluster-Quadate fester Orientierung + Flatter-Rauschen
+* crown.vert: Karten sind keine kamerazugewandten Quadrate mehr. Grundgeruest
+  fest: right = (cos aData.y, 0, -sin aData.y), up = Welt-Y. aData.y traegt bei
+  Karten 0 oder 90 grad. Das Ganzbaum-Quad bleibt kamerazugewandt (bis die
+  Huelle kommt).
+* trees_cpu.c emit_sprig_quads: pro Laubansatz ZWEI Quadrate (0 / 90 grad),
+  Dichte dafuer div 3 -> div 4. Gemessen 669 088 Karten (vorher 446 047),
+  Cap 900 000 -> 1 200 000, 0 Cap-Treffer, 0 uebersprungene Baeume.
+* crown.frag/leaf.frag: FLATTER-Rauschen (Nutzer: "das Einzelrascheln sieht man
+  als Pixelrauschen"). lodFizN mit eigener Weltzelle (halbe Blenden-Zelle) und
+  Salz 113 + floor(uTime*3)*0,71, multipliziert auf die Silhouetten-Schwelle
+  (0,85..1,15) — die Kontur flackert, das Muster laeuft nicht ueber die Flaeche.
+* Kosten gemessen (VM, llvmpipe, 320x180, gleiche Kamerafahrt): Frame-Median
+  2030 ms -> 2125 ms (+4,7 %). VM-Zahlen sind fuer den Host nicht aussagekraeftig.
+* tools/selftest.sh: HUD-Ausnahme 48 -> 56 Zeilen (die dritte HUD-Zeile reicht
+  bei 640x360 bis y=50; die 19 "nicht deterministischen" Pixel waren HUD-Text),
+  Standard-Lauf 20 s -> 35 s (der Lauf braeuchte laenger, die Caps-Zeile fehlte).

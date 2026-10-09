@@ -309,7 +309,7 @@ struct ImpRep treeImp[IMP_TILES];
 static struct ImpRep impRepD[IMP_TILES];
 int impNTree[IMP_TILES];   // Schreibseite des laufenden Builds
 float ezLeafScale = 2.0f, ezLeafPer = 1.0f;   // DEMO_LEAFSC / DEMO_LEAFPER
-int treeCardDivN = 3; float treeCardScaleN = 2.00f;    // DEMO_CARDT2 "<div> <scale>" 
+int treeCardDivN = 4; float treeCardScaleN = 2.00f;   // div 4, dafuer 2 gekreuzte Quadrate    // DEMO_CARDT2 "<div> <scale>" 
 // DEMO_T2="<stride> <Gzaehler> <Gnenner>": Vernetzung der mittleren Detailstufe.
 // Sweep-Bank, um Geruest-Kosten gegen Silhouette-Qualitaet zu messen.
 int treeT2Stride = 3, treeT2Gnum = 3, treeT2Gden = 4;
@@ -448,15 +448,22 @@ static void emit_sprig_quads(float seed, int want){
   int stride = ezNSprig / want; if(stride < 1) stride = 1;
   for(int q = 0; q < ezNSprig && want > 0; q += stride, want--){
     float h3 = TH(97 + q * 3), h4 = TH(98 + q * 3);
-    float qrot  = h3 * 6.283f;
     float qseed = h4 * 13.7f + q * 0.37f;
-    if(nCrownVerts + 1 > CROWN_CAP){ treeCapCrown++; return; }
-    { float *d = &crownVerts[nCrownVerts * CROWN_FLOATS];
+    // ZWEI gekreuzte Quadrate fester Orientierung (Nutzerentscheid 2026-10-09):
+    // kamerazugewandte Karten waeren abhaengig vom Blickwinkel und ueberlappen
+    // sich zwischen Baeumen in falscher Reihenfolge. Zwei senkrechte Quadrate
+    // um 90 grad versetzt geben Volumen, sind blickrichtungsunabhaengig und —
+    // weil sie opak gezeichnet werden — auch beim Schneiden korrekt.
+    for(int k = 0; k < 2; k++){
+      if(nCrownVerts + 1 > CROWN_CAP){ treeCapCrown++; return; }
+      float *d = &crownVerts[nCrownVerts * CROWN_FLOATS];
       d[0] = ezSx[q]; d[1] = ezSy[q]; d[2] = ezSz[q];
-      d[3] = ezSsize[q]; d[4] = qrot; d[5] = qseed; d[6] = (float)variant;
+      d[3] = ezSsize[q]; d[4] = k ? 1.5707964f : 0.0f;   // FEST: 0 grad / 90 grad
+      d[5] = qseed + k * 3.13f; d[6] = (float)variant;
       d[7] = gLodR; d[8] = ezLeafR; d[9] = ezLeafG; d[10] = ezLeafB; d[11] = gLodR2;
       d[12] = gAnchorX; d[13] = gAnchorZ;   // kanonischer LOD-Anker
-      nCrownVerts++; }
+      nCrownVerts++;
+    }
   }
 }
 

@@ -53,7 +53,7 @@ check_no_glerror(){
 log "== 64kDemo Selbsttest  (bin=$BIN, ${W}x$H, Software-GL in der VM) =="
 
 # 1) Standardszene, feste Kamera
-run standard 20 "DEMO_CAM=5 16 -0.15 0.7" "DEMO_SHOT=4"
+run standard 35 "DEMO_CAM=5 16 -0.15 0.7" "DEMO_SHOT=4"
 check_tree_counts standard; check_no_glerror standard
 
 # 2) Zweiter Lauf derselben Konfiguration: Bild muss bitgleich sein
@@ -72,7 +72,7 @@ def ppm(p):
     w,h = parts[1].split()
     return int(w), int(h), parts[3]
 w,h,a=ppm(sys.argv[1]); _,_,b=ppm(sys.argv[2])
-HUD=48
+HUD=56   # HUD-Kasten: drei Textzeilen bei 640x360 reichen bis y=50 (war 48)
 def diff(buf,off):
     c=0; mx=0
     for i in range(off*3, len(buf), 3):

@@ -9,6 +9,7 @@ in float vT;
 in float vW;
 in float vAsp;
 uniform vec3 uCamPos;
+uniform float uTime = 0.0;   // Flattern (gleicher Name wie im Vertex-Shader -> gleiches Uniform)
 uniform float uLeafMask;   // DEBUG: Blatt als Maske (reines Rot)
 uniform float uDepthOnly = 0.0;
 uniform float uAlbedoOnly; // Atlas-Kapture: nur Albedo + Abdeckung (keine Beleuchtung)
@@ -92,6 +93,15 @@ void main(){
   hw = max(hw, 1e-4);                                   // bei tt->0 wird hw klein
   float e = abs(vW) / hw;
   if(e > 1.0) discard;
+  // FLATTER-Rauschen (Nutzer): Rascheln auch da, wo kein Einzelblatt mehr
+  // aufloesbar ist. lodFizN ist in lod.glsl (dasselbe Rauschen wie die Blende),
+  // hier mit anderer Zelle und eigenem Salz, damit Blende und Flattern
+  // unabhaengig sind.
+  {
+    float fl = lodFizN(vPos, vFizScale * 0.5, 113.0 + floor(uTime * 3.0) * 0.71);
+    e *= 1.0 / (0.85 + 0.30 * fl);
+    if(e > 1.0) discard;
+  }
   // Ueberblendung als echtes Alpha (nicht gedithert): die Silhouette bleibt
   // harte Kante (MSAA), die Ueberblendung multipliziert das Alpha.
   // Depth-only-Nachpass: siehe crown.frag

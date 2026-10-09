@@ -80,7 +80,8 @@ float c_terrainH(float px, float py);
                                 // Doppel-Puffer (Build-Thread) = 2x diese Groesse.
 #endif
 #ifndef CROWN_CAP
-#define CROWN_CAP     900000    // Karten (instanziert); gemessen 318k im Stress-Szenario
+#define CROWN_CAP     1200000   // Karten (instanziert). 2 gekreuzte Quadrate je Buschel
+                            // (Nutzerentscheid): div 4 * 2 = ~814k gemessen, Luft nach oben.
 #endif
 #define WIRE_CAP      90000
 
