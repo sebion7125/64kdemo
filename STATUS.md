@@ -3078,3 +3078,19 @@ LOD-Uebergang):
 3. Ditherter Alpha-Test (stabiles Rauschen) fuer den Kantenbereich: macht aus
    fraktionalem Alpha ein stabiles Muster statt eines Siebs. Ohne TAA das Risiko
    von Schimmern.
+
+## NOTIZ: OIT geprueft und verworfen (2026-10-09)
+OIT = Order-Independent Transparency: das korrekte Mischen halbtransparenter
+Flaechen OHNE Sortieren der Objekte (Sortieren ist bei schneidenden Polygonen
+unmoeglich, es gibt keine Gesamtordnung). Verfahren: Depth Peeling (ein Durchgang
+pro Tiefenschicht), Per-Pixel-Linked-Lists (ein Geometrie-Durchgang + Sortieren
+pro Pixel im Speicher, GPU Pro 2, DOI 10.1201/b11325-36), Weighted Blended OIT
+(ein Durchgang, Naehe-Gewichte, Naeherung), Moment Transparency (HPG 2018,
+DOI 10.1145/3231578.3231585), Stochastic Transparency / Stochastic Layered Alpha
+Blending (SIGGRAPH 2016 Talks, DOI 10.1145/2897839.2927423), Hybrid OIT
+(z.B. Visual Computer 2022, DOI 10.1007/s00371-022-02562-7).
+Fuer uns verworfen: (1) Peeling = ein bis mehrere Extrados Durchgaenge ueber die
+ganze Szene, (2) Linked Lists = Speicher/Bandbreite, (3) Weighted Blended OIT
+bricht bei hochfrequentem Alpha — das ist genau Laub, (4) stochastic braucht
+Temporal AA, das wir nicht haben. Bei binaerem Alpha ist der Tiefenpuffer selbst
+die exakte, kostenlose OIT -> deshalb Alpha-TEST (Referenz) statt Mischen.
