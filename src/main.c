@@ -522,6 +522,15 @@ static void ensure_fbo(int w, int h) {
   if (sw == fboW && sh == fboH) return;
   if (fbo)   { p_glDeleteFramebuffers(1, &fbo);   p_glDeleteTextures(1, &texScene); p_glDeleteTextures(1, &texDepth); }
   if (fboMS) { p_glDeleteFramebuffers(1, &fboMS); p_glDeleteRenderbuffers(1, &rbColorMS); p_glDeleteRenderbuffers(1, &rbDepthMS); }
+  // Composite-Puffer MIT neu anlegen: blieben sie in alter Groesse, las der
+  // Composite-Pass ueber den Rand hinaus lesen (liefert 0) und das Bild war
+  // unterhalb/links der alten Groesse baumfrei (Nutzerbefund nach Maximieren).
+  if (fboB) {
+    p_glDeleteFramebuffers(1, &fboB); p_glDeleteTextures(1, &texB); p_glDeleteTextures(1, &texDepthB);
+    p_glDeleteFramebuffers(1, &fboS); p_glDeleteTextures(1, &texDepthS);
+    p_glDeleteFramebuffers(1, &fboC); p_glDeleteTextures(1, &texC); p_glDeleteTextures(1, &texDepthC);
+    fboB = fboS = fboC = 0; texB = texDepthB = texDepthS = texC = texDepthC = 0;
+  }
   // Single-Sample-Farbe (Compositing + Sampling)
   p_glGenTextures(1, &texScene);
   p_glBindTexture(GL_TEXTURE_2D, texScene);
@@ -606,6 +615,7 @@ static void ensure_fbo(int w, int h) {
   p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
   // Brennweite in Pixeln hier setzen: der Build braucht sie fuer die
   // Bildgroessen-Schaltweiten, und der erste Build laeuft vor dem ersten Frame.
+  printf("FBO neu: %dx%d (Composite-Puffer: %s)\n", sw, sh, fboB ? "neu angelegt" : "aus");
   trees_set_focal_px(1.7f * (float)sh);
   p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
   fboW = sw; fboH = sh;
@@ -3455,6 +3465,11 @@ int main(int argc, char **argv) {
     // MSAA brauchen Raster-Reihenfolge von hinten nach vorne). Die VBO ist
     // in Diamond-Order sortiert (Instance 0 = naechste Zelle), also in
     // Chunks vom Buffer-Ende her (keine Index-Buffer-Sortierung pro Frame).
+    // Gras und Schilf hoeren NICHT zu den LOD-Schichten der Baeume. Wuerden
+    // sie im Phase-2-Durchlauf erneut gezeichnet, blendeten sie doppelt und der
+    // Composite-Pass mischte sie wie eine einkommende Stufe (gemessen: 175 635
+    // von 230 400 Pixel gegen den Lauf ohne Composite veraendert).
+    if(cmpPhase == 1){
     p_glUseProgram(progGrass);
     p_glUniformMatrix4fv(locGMVP, 1, GL_FALSE, mvp);
     p_glUniform3f(locGCam, camPos[0], camPos[1], camPos[2]);
@@ -3546,6 +3561,8 @@ int main(int argc, char **argv) {
       p_glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, reedTplVerts, (GLsizei)nReedInst);
       p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
     }
+
+    }   // cmpPhase == 1 (Gras + Schilf)
 
     // REIHENFOLGE: erst die ABGEHENDE Schicht (Einzelblaetter), dann die
     // KOMMENDE (Karten/Billboard) darueber. Mit dem Halt der abgehenden Schicht

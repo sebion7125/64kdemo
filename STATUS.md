@@ -3426,3 +3426,35 @@ Szenario auch ohne meine Aenderungen fehl (HEAD 109 703 unterschiedliche Pixel,
 mit Composite 82 426). Ursache ist die bekannte Zeitabhaengigkeit: Build laeuft
 im Thread, Upload in Scheiben, der Screenshot nach Frame 4 erwischt je nach Lauf
 unterschiedliche Geometrie. Pruefung nicht abgeschwaecht.
+
+## FEHLERBEHEBUNG 2026-10-09 (Runde 38): Composite hat Gras/Schilf doppelt gezeichnet und Groessenwechsel nicht mitgemacht
+
+Nutzerbefund: „deine Aenderung hat den Alpha-Blend beim Gras gebrochen, die
+Transparenz ist total chaotisch, und nach dem Maximieren ist unten links ein
+Rechteck baumfrei". Beide Punkte sind bestaetigt und behoben.
+
+**1) Gras und Schilf innerhalb der Phase-Schleife.** Die Schleife ueber die zwei
+Composite-Phasen wurde vor dem Baum-Mesh geoeffnet und nach dem Kronen-Pass
+geschlossen — dazwischen liegen aber auch Gras und Schilf. Beide wurden also in
+Phase 2 erneut gezeichnet: in `fboB` ein zweites Mal geblendet, und der
+Composite-Pass hat sie wegen ihres Depth-Writes (`dbgGrassDepth = 1`) als
+„einkommende Stufe" behandelt und gemischt. Gemessen (640x360, Gras aus,
+identische Kamera, Screenshot nach Frame 4): **175 635 von 230 400 Pixel** gegen
+den Lauf ohne Composite veraendert, ueber alle Zeilen 0..359 — also der ganze
+Boden, nicht nur Baeume.
+
+Nach dem Fix (`if(cmpPhase == 1)` um Gras + Schilf): **0 unterschiedliche Pixel,
+max Delta 0** zwischen Composite und Nicht-Composite, solange keine Stufe in
+einem Band ist. Ein-Baum-Test unveraendert `LT-ERGBNIS OK`, Delle 0,00 %.
+
+**2) Composite-Puffer bei Groessenwechsel zu klein.** `ensure_fbo()` hat
+`fbo/fboMS` neu angelegt, die Composite-Puffer aber nur unter `fboB == 0` — sie
+behielten die alte Groesse. Der Composite-Pass las mit `texelFetch` ueber den
+Rand hinaus (liefert 0) und das Blit `fboC -> fbo` lief mit neuer Groesse auf
+alter Flaeche: das Rechteck unten links ohne Baeume. Jetzt werden `fboB/fboS/
+fboC` samt Texturen geloescht und neu angelegt; Protokollzeile
+`FBO neu: 320x180 (Composite-Puffer: neu angelegt)` nach F2 gemessen.
+
+Messgrenze: mit Gras kann ich im VM-Software-GL keinen A/B-Lauf machen — zwei
+Laufe derselben Konfiguration unterscheiden sich laufabhaengig um ~164 000 Pixel
+(Gras-Swap haengt an der Realzeit). Der Nachweis oben ist ohne Gras gefuehrt.
