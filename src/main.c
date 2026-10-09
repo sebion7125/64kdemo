@@ -2391,9 +2391,17 @@ int main(int argc, char **argv) {
           // und 2 schalten auch Billboard bzw. Schilf. Taste 1 hat dadurch
           // ZUGLEICH die Aufloesung von 1/2 auf 1x gesetzt (4x Pixel): das war
           // der "massive FPS-Einbruch", den der Nutzer meldete.
-          if (ks == XK_F1) scaleIdx = 0;
-          if (ks == XK_F2) scaleIdx = 1;
-          if (ks == XK_F3) scaleIdx = 2;
+          { int sc0 = scaleIdx;
+            if (ks == XK_F1) scaleIdx = 0;
+            if (ks == XK_F2) scaleIdx = 1;
+            if (ks == XK_F3) scaleIdx = 2;
+            // Die Schaltweiten R1/R2 stecken IN DEN INSTANZEN (d[7], d[11] ...),
+            // sie werden beim Bauen aus der Brennweite in Pixeln gerechnet. Eine
+            // neue Aufloesung wirkt deshalb erst, wenn neu gebaut wird - ohne
+            // diesen Schalter bleiben Laub- und Karten-Stufe auf der alten
+            // Aufloesung stehen, bis die Kamera 12 m zuruecklegt. Das Holz
+            // reagiert sofort, weil es uFocalPx als Uniform pro Frame bekommt.
+            if(scaleIdx != sc0) treeForceRebuild = 1; }
           if (ks == XK_p) { save_screenshot_ppm("/tmp/64kdemo_shot.ppm", winW, winH);
                             save_grass_tex_ppm("/tmp/64kdemo_grasstex.ppm"); }
           if (ks == XK_t) showTreeWire = !showTreeWire;
