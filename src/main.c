@@ -1202,6 +1202,11 @@ static void build_foliage_atlas(GLuint progLeaf){
 #define UP_BYTES (6u * 1024u * 1024u)   // feine Slices: nur so greift das Zeitbudget
 static struct { const float *src; GLuint vbo; size_t bytes, pos; } upBuf[3];
 static int upActive = 0, upNextSet = 1;
+// BAUM-ZEIT (DEMO_BUILDTIME): der Nutzer meldet, dass beim schnellen Bewegen ein
+// LOD verschwindet und etwa eine halbe Sekunde spaeter der richtige kommt. Das ist
+// die Zeit vom Ausloesen des Baus bis zum Satz-Wechsel. Gemessen wird in drei
+// Stuecken: Generieren (Worker-Thread), Upload (Scheiben im Hauptthread), Gesamt.
+static int dbgBuildTime = 0, dbgPhase = 0; static double dbgT0 = 0.0, dbgT1 = 0.0;
 
 // Ueberblendung beim Satz-Wechsel (Runde 27, Nutzer: "die Baeume springen wild
 // zwischen den LODs", "auch die Baeume ganz in der Ferne sollten sich langsam
@@ -1253,6 +1258,7 @@ static void upload_begin(const float *tv, const float *cv, const float *lv,
 // Zeitbudget statt Byte-Budget: ein festes 24-MB-Kontingent brauchte bei der
 // VM (1,4 s/Frame) 15 Frames = 20 s, bis das neue Set zeichnet — die naechsten
 // Baeume fehlten sichtbar. Mit Zeitbudget passt sich die Menge an die Framezeit an.
+static double upMsMax = 20.0;   // DEMO_UPMS=<ms>: Upload-Zeitbudget pro Frame
 #define UP_MS_MAX 20.0
 #define UP_MS_MIN 3.0
 static int upload_step(double frameMs){
@@ -1262,7 +1268,7 @@ static int upload_step(double frameMs){
   // ein Frame dominiert wird.
   double budgetMs = frameMs * 0.25;
   if(budgetMs < UP_MS_MIN) budgetMs = UP_MS_MIN;
-  if(budgetMs > UP_MS_MAX) budgetMs = UP_MS_MAX;
+  if(budgetMs > upMsMax) budgetMs = upMsMax;
   double t0 = now_sec();
   for(int i = 0; i < 3; i++){
     if(upBuf[i].pos >= upBuf[i].bytes) continue;
@@ -2255,6 +2261,8 @@ int main(int argc, char **argv) {
   // ersten Build 0 -> kein Holz-Schnitt -> 3,99 Mio Geruest-Vertices und Cap-Treffer.
   trees_set_focal_px(1.7f * (float)(winH >> scaleIdx));
   treeTabDump = getenv("DEMO_TREETAB") ? 1 : 0;
+  dbgBuildTime = getenv("DEMO_BUILDTIME") ? 1 : 0;
+  { const char *um = getenv("DEMO_UPMS"); if(um) upMsMax = atof(um); }
   dbgFizzle = getenv("DEMO_FIZ") ? 1 : 0;      // Standard AUS (Nutzer: Bienenschwarm)
   dbgFlutter = getenv("DEMO_FLUT") ? 1 : 0;   // Standard AUS (weisses Flimmern)
   envNoLeaf = getenv("DEMO_NOLEAF") ? 1 : 0;
@@ -2721,9 +2729,16 @@ int main(int argc, char **argv) {
             printf("  Messbank: erzwungener Stufenwechsel auf tier 0 (t=%.2f s)\n", tNow - t0);
             fflush(stdout); }
         } }
+      if(dbgBuildTime && !dbgPhase && !builtT) dbgPhase = 1;
+      if(dbgPhase == 1 && !trees_build_busy()){ dbgT1 = now_sec(); dbgPhase = 2; }
+      else if(dbgPhase == 2 && !upActive){
+        printf("BAUM-ZEIT: Generieren %.0f ms + Upload %.0f ms = %.0f ms bis Satz-Wechsel\n",
+               (dbgT1 - dbgT0) * 1000.0, (now_sec() - dbgT1) * 1000.0, (now_sec() - dbgT0) * 1000.0);
+        fflush(stdout); dbgPhase = 0;
+      }
       if(!builtT || ((!upActive && !trees_build_busy()) &&
                      (fabsf(camTgt[0] - tCX) > 12.0f || fabsf(camTgt[2] - tCZ) > 12.0f))){
-        tCX = camTgt[0]; tCZ = camTgt[2];
+        tCX = camTgt[0]; tCZ = camTgt[2]; dbgT0 = now_sec();
         if(!builtT){
           // Erster Build synchron (Baeume ab Frame 1 sichtbar), danach Thread.
           treeLodRef[0] = camPos[0]; treeLodRef[1] = camPos[1]; treeLodRef[2] = camPos[2];
