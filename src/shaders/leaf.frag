@@ -49,14 +49,14 @@ void main(){
   // unabhaengig sind.
   {
     float fl = lodFizN(vPos, vFizScale * 0.5, 113.0 + floor(uTime * 3.0) * 0.71);
-    e *= 1.0 / (0.85 + 0.30 * fl);
+    e *= 1.0 / mix(1.0, 0.85 + 0.30 * fl, uFlut);
     if(e > 1.0) discard;
   }
   // Ueberblendung als echtes Alpha (nicht gedithert): die Silhouette bleibt
   // harte Kante (MSAA), die Ueberblendung multipliziert das Alpha.
   // Depth-only-Nachpass: siehe crown.frag
   // FIZZLE (lod.glsl): Uebergang durch Wegwerfen, nicht durch Mischen.
-  {
+  if(uFizOn > 0.5){
     float n = lodFizN(vPos, vFizScale, 0.0);
     if(lodFizKeep(n, vFiz1, vFizInv1) < 0.5) discard;
   }

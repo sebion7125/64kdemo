@@ -140,6 +140,7 @@ extern float treeDbgCutLeaf, treeDbgCutBranch;
 extern int   treeBuildRange;   // Zellen-Radius, in dem Baeume gebaut werden
 extern int treeCardDiv0; extern float treeCardScale0;   // DEMO_CARDT0 (Sweep-Bank)
 extern float ezLeafScale, ezLeafPer;   // DEMO_LEAFSC / DEMO_LEAFPER
+extern int treeTabDump;
 extern int treeCardDivN; extern float treeCardScaleN;   // DEMO_CARDT2 (Basisstufe)
 extern int treeBillboard0;   // tier 0 als Ganzbaum-Billboard (TODO 23)
 extern int treeBB0Cards;     // Zusatzkarten darunter (DEMO_BB0CARDS)

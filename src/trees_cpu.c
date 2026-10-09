@@ -309,6 +309,7 @@ struct ImpRep treeImp[IMP_TILES];
 static struct ImpRep impRepD[IMP_TILES];
 int impNTree[IMP_TILES];   // Schreibseite des laufenden Builds
 float ezLeafScale = 2.0f, ezLeafPer = 1.0f;   // DEMO_LEAFSC / DEMO_LEAFPER
+int treeTabDump = 0;              // DEMO_TREETAB=1: eine Zeile pro Baum (LOD-Tabelle)
 int treeCardDivN = 4; float treeCardScaleN = 2.00f;   // div 4, dafuer 2 gekreuzte Quadrate    // DEMO_CARDT2 "<div> <scale>" 
 // DEMO_T2="<stride> <Gzaehler> <Gnenner>": Vernetzung der mittleren Detailstufe.
 // Sweep-Bank, um Geruest-Kosten gegen Silhouette-Qualitaet zu messen.
@@ -1531,6 +1532,14 @@ int trees_build_step(int maxTrees){
       sort_inst_far_near(crownVerts, quadBefore, nCrownVerts - quadBefore, CROWN_FLOATS, sref);
       sort_inst_far_near(leafInst,  leafBefore, nLeafInst  - leafBefore,  LEAF_FLOATS,  sref);
     }
+    // LOD-Tabelle pro Baum (DEMO_TREETAB): macht Befunde wie "ein Baum verliert
+    // seine Blaetter schon nach 10 Einheiten, der kleinere Nachbarbaum in
+    // dreifacher Entfernung behaelt sie" messbar.
+    if(treeTabDump)
+      fprintf(stderr, "TREETAB x=%7.2f z=%7.2f y=%6.2f s=%5.3f H=%5.2f R1=%6.2f R2=%6.2f "
+                      "tier=%d dbuild=%6.2f blaetter=%5d karten=%4d\n",
+              cand[i].p[0], cand[i].p[2], cand[i].p[1], cand[i].s, H, R1, R2, tier, d,
+              nLeafInst - leafBefore, nCrownVerts - quadBefore);
     // Sicherheitsnetz: die Budget-Schaetzung oben ist pro Baum nur geschaetzt.
     // Hat der Baum trotzdem ein Cap gerissen, wird er KOMPLETT zurueckgerollt —
     // ein Baum, der mitten im Ast endet, zeigt eine offene Ringkante (eine

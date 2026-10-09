@@ -59,6 +59,7 @@ void main(){
   // einzeln weg und baut sie neu auf ... alle Blaetter gleichzeitig alpha-
   // einblenden, und das Blending soll nicht gedithert sein"). Der Wert geht als
   // vAlpha ins Fragment und wird dort als echtes Alpha gemischt.
+  if(uFizOn < 0.5) keep = (keep >= 0.5) ? 1.0 : 0.0;   // harte Umschaltung
   vFiz1 = keep; vFizInv1 = 0.0;
   vFizScale = lodFizScale(uFocalPx, d);   // derselbe Anker-Abstand wie crown.vert
   if(keep <= 0.002) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }

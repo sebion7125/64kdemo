@@ -437,6 +437,7 @@ static int   envExitWhenDone = 0;
 // llaessigen Folie vor dem Hintergrund (Nutzerbefund). Lineare Blenden laufen
 // ueber den opaken Grund (lodBandOutHold), nicht ueber Sample-Abdeckung.
 static int   dbgTreeDepthWrite = 1, dbgTreeDepthPass = 1, dbgTreeA2C = 0;
+static int   dbgFizzle = 0, dbgFlutter = 0;   // DEMO_FIZ / DEMO_FLUT (Standard AUS)
 
 // DEMO_LODTEST="dStart dEnd step": EIN Baum, sonst nichts. Die Kamera rueckt pro
 // Frame eine FESTE Strecke (Meter, nicht m/s) radial auf den Baum zu, damit das
@@ -1989,6 +1990,8 @@ int main(int argc, char **argv) {
   GLint locCDepth  = p_glGetUniformLocation(progCrown, "uDepthOnly");
   GLint locLDepth  = p_glGetUniformLocation(progLeaf, "uDepthOnly");
   GLint locLFocal  = p_glGetUniformLocation(progLeaf, "uFocalPx");
+  GLint locLFiz    = p_glGetUniformLocation(progLeaf, "uFizOn");
+  GLint locLFlut   = p_glGetUniformLocation(progLeaf, "uFlut");
   GLint locGMVP    = p_glGetUniformLocation(progGrass, "uMVP");
   GLint locGCam    = p_glGetUniformLocation(progGrass, "uCamPos");
   GLint locGTime   = p_glGetUniformLocation(progGrass, "uTime");
@@ -2049,6 +2052,8 @@ int main(int argc, char **argv) {
   GLint locCMask   = p_glGetUniformLocation(progCrown, "uCrownMask");
   GLint locCFade   = p_glGetUniformLocation(progCrown, "uTreeFade");
   GLint locCFocal  = p_glGetUniformLocation(progCrown, "uFocalPx");
+  GLint locCFiz    = p_glGetUniformLocation(progCrown, "uFizOn");
+  GLint locCFlut   = p_glGetUniformLocation(progCrown, "uFlut");
   GLint locCImp    = p_glGetUniformLocation(progCrown, "uImpostor");
   GLint locCCards  = p_glGetUniformLocation(progCrown, "uCardsOn");
   GLint locCBB     = p_glGetUniformLocation(progCrown, "uBillboardOn");
@@ -2241,6 +2246,9 @@ int main(int argc, char **argv) {
       flyPos[0] = cx; flyPos[2] = cz; flyPos[1] = c_terrainH(cx, cz) + 1.10f;
       flyPitch = cp; if(cy2 < 1e29f) flyYaw = cy2;
       printf("DEBUG Kamera gesetzt: (%.1f, %.2f, %.1f) Pitch %.2f Yaw %.2f\n", cx, flyPos[1], cz, cp, flyYaw); } } }
+  treeTabDump = getenv("DEMO_TREETAB") ? 1 : 0;
+  dbgFizzle = getenv("DEMO_FIZ") ? 1 : 0;      // Standard AUS (Nutzer: Bienenschwarm)
+  dbgFlutter = getenv("DEMO_FLUT") ? 1 : 0;   // Standard AUS (weisses Flimmern)
   envNoLeaf = getenv("DEMO_NOLEAF") ? 1 : 0;
   envNoTerrain = getenv("DEMO_NOTERRAIN") ? 1 : 0;
   envLeafMask = getenv("DEMO_LEAFMASK") ? atoi(getenv("DEMO_LEAFMASK")) : 0;  // 1=rot, 2=nur Albedo
@@ -3427,6 +3435,8 @@ int main(int argc, char **argv) {
       p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
       p_glUseProgram(progLeaf);
       if(locLFocal >= 0) p_glUniform1f(locLFocal, 1.7f * (float)fboH);
+      if(locLFiz >= 0) p_glUniform1f(locLFiz, dbgFizzle ? 1.0f : 0.0f);
+      if(locLFlut >= 0) p_glUniform1f(locLFlut, dbgFlutter ? 1.0f : 0.0f);
       p_glUniformMatrix4fv(locLMVP, 1, GL_FALSE, mvp);
       p_glUniform3f(locLCam, camPos[0], camPos[1], camPos[2]);
       if(locLLod >= 0) p_glUniform3f(locLLod, camPos[0], camPos[1], camPos[2]);
@@ -3476,6 +3486,8 @@ int main(int argc, char **argv) {
       p_glDepthMask(GL_TRUE);
       p_glUseProgram(progCrown);
       if(locCFocal >= 0) p_glUniform1f(locCFocal, 1.7f * (float)fboH);
+      if(locCFiz >= 0) p_glUniform1f(locCFiz, dbgFizzle ? 1.0f : 0.0f);
+      if(locCFlut >= 0) p_glUniform1f(locCFlut, dbgFlutter ? 1.0f : 0.0f);
       p_glUniformMatrix4fv(locCMVP, 1, GL_FALSE, mvp);
       p_glUniform3f(locCCam, camPos[0], camPos[1], camPos[2]);
       p_glUniform3f(locCTgt, camTgt[0], camTgt[1], camTgt[2]);

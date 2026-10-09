@@ -3245,3 +3245,34 @@ Fuehrende Hypothese fuer die Farbluecke: die harte Silhouetten-Schwelle (a < 0.5
 uebrig, die dunklen Blattraender fallen weg. Test dafuer: Schwellwert als Knopf
 (DEMO_CARDSWELL) und Mittelwert der Laubpixel bei 45 m in Abhaengigkeit der
 Schwelle messen.
+
+## NUTZERBEFUND 2026-10-09 (Runde nach fizzle): Rauschen, Farbe, falsche Schaltweiten
+1. "extremes Rauschen an der Ueberblendung und an den Blaetterrändern, sieht aus
+   wie ein gruener Bienenschwarm". Bestaetigt und eingesehen: fizzle braucht ein
+   Muster UNTER Pixelgroesse plus ein Mittelverfahren (TAA oder A2C). Wir haben
+   keins von beiden (A2C verworfen), also ist ein pixelgrosses binaires Muster
+   sichtbar. uFizOn (DEMO_FIZ) und uFlut (DEMO_FLUT) sind jetzt Standard AUS,
+   die Schichten schalten bei Gewicht 0,5 hart um. Die Rausch-Blende bleibt als
+   Experiment erhalten.
+2. Weisse Blitze an Aesten: hauptverdachtig ist das Flatter-Rauschen (es setzt
+   die Silhouetten-Schwelle herab, dahinter scheint der helle Himmel durch).
+   Mit uFlut = 0 weg; Nutzer prueft auf dem Host.
+3. DEMO_TREETAB (neue Diagnose, eine Zeile pro Baum: Position, s, H, R1, R2,
+   tier, Bau-Entfernung, gebaute Blaetter/Karten). Messung an Kamera (5,16):
+     H=3,83 m  R1=20,0 m  bei 18,7 m  -> Blattgewicht 0,93 (faellt bis 22 m auf 0)
+     H=8,87 m  R1=44,4 m  bei 23,7 m  -> Blattgewicht 1,00
+     H=10,99 m R1=55,0 m  bei 30,0 m  -> Blattgewicht 1,00
+   Ursache des Befunds "der eine verliert die Blaetter schon nach 10 Einheiten,
+   der kleinere Nachbar in dreifacher Entfernung behaelt sie": R1 = 5 x
+   Wuchshoehe (Klemme 20..60). Die Schaltweite haengt an der BAUMHOEHE, nicht an
+   der Bildgroesse eines Blatts. Ein 4-m-Baum schaltet bei 20 m, ein 12-m-Baum
+   bei 60 m.
+   Richtiges Kriterium (wie beim Holz, das der Nutzer akzeptiert): Schaltweite =
+   wo ein Einzelblatt unter ~2 Bildpunkte faellt. Bei 6..10 cm Blatt und
+   Brennweite 1,7*Bildhoehe: 1080p -> 73 m, 720p -> 49 m.
+   Kosten gemessen (gleiche Szene, 648 Baeume):
+     Ist  (R1 = 5H je Baum)        : 642 330 Blatt-Instanzen gebaut
+     R1 = 73 m fuer alle           : 642 330 gebaut, davon 627 110 gezeichnet
+     R1 = 45 m fuer alle           : 574 090 gebaut
+   Der Pufferbedarf aendert sich also nicht (die Existenz-Huelle 1,15 R1 + 20 m
+   bleibt), nur die gezeichnete Blattmenge steigt.

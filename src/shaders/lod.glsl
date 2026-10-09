@@ -10,6 +10,17 @@
 // Bandbreite: LOD_BAND_LO/LOD_BAND_HI in src/tree_lod.h = 0,90..1,10 * R.
 // tools/test_tree_lod.c prueft, dass hier dieselben Zahlen stehen.
 
+// Knopfe (main.c, DEMO_FIZ / DEMO_FLUT):
+//   uFizOn = 0 -> keine Rausch-Blende, harte Umschaltung bei Gewicht 0,5.
+//     Grund Nutzerbefund 2026-10-09: "extremes Rauschen an der Ueberblendung,
+//     sieht aus wie ein gruener Bienenschwarm". Ohne TAA (und A2C haben wir
+//     verworfen) ist ein pixelgrosses binaires Muster sichtbar - die Illusion
+//     von Alpha-Blend entsteht nur, wenn das Muster unter der Pixelgroesse
+//     liegt und gemittelt wird.
+//   uFlut = 0 -> kein Flatter-Rauschen auf der Silhouette (weisses Flimmern).
+uniform float uFizOn = 1.0;
+uniform float uFlut = 1.0;
+
 // 0 auerhalb (nah) -> 1 jenseits des Bands: die kommende Schicht.
 float lodBandIn(float R, float d){ return smoothstep(R * 0.90, R * 1.10, d); }
 // 1 bis zum Band -> 0 dahinter: die abgehende Schicht (Komplement zu lodBandIn).

@@ -152,6 +152,7 @@ void main(){
   // die Staemme gingen aber bis ~255 m -> kahle Stummel in der Ferne.
   float far = 1.0 - smoothstep(190.0, 250.0, d3);
   w1 *= far * uTreeFade;  w2 *= far * uTreeFade;
+  if(uFizOn < 0.5){ w1 = (w1 >= 0.5) ? 1.0 : 0.0; w2 = (w2 >= 0.5) ? 1.0 : 0.0; }
   vFiz1 = w1; vFiz2 = w2; vFizInv1 = inv1; vFizInv2 = inv2;
   // Weltzellen von etwa EINEM Bildpunkt (Anker des Baums, damit Blatt- und
   // Karten-Shader exakt dieselbe Zellgroesse rechnen — sonst passen die

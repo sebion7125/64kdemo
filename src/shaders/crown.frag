@@ -96,7 +96,7 @@ void main(){
   // bleibt unveraendert.
   {
     float fl = lodFizN(vPos, vFizScale * 0.5, 113.0 + floor(uTime * 3.0) * 0.71);
-    a *= 0.85 + 0.30 * fl;
+    a *= mix(1.0, 0.85 + 0.30 * fl, uFlut);
   }
   float cov = a;   // Deckung vor der Ueberblendung (die kommt als vFade dazu)  // Rand des Billboards ausblenden: entkommt der Baum (Aeste, Blaetter) der
   // BBox-Schaetzung, beruehrt der Kachelinhalt den Rand — im Wald sieht man dann
@@ -122,10 +122,12 @@ void main(){
   // reihenfolge-unabhaengig, schneidende Karten korrekt, Tiefenpuffer stimmt.
   if(vCrown < 0.5){
     if(a < 0.5) discard;
-    float n1 = lodFizN(vPos, vFizScale, 0.0);
-    float n2 = lodFizN(vPos, vFizScale, 57.0);
-    if(lodFizKeep(n1, vFiz1, vFizInv1) < 0.5) discard;
-    if(lodFizKeep(n2, vFiz2, vFizInv2) < 0.5) discard;
+    if(uFizOn > 0.5){
+      float n1 = lodFizN(vPos, vFizScale, 0.0);
+      float n2 = lodFizN(vPos, vFizScale, 57.0);
+      if(lodFizKeep(n1, vFiz1, vFizInv1) < 0.5) discard;
+      if(lodFizKeep(n2, vFiz2, vFizInv2) < 0.5) discard;
+    }
   }
   // Schwelle schichtabhaengig: die Karten sind duenn gesäte Buschel und
   // brauchen eine niedrige Schwelle; die Ganzbaum-Kachel hat eine grosse
