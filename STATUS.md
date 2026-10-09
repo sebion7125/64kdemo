@@ -3094,3 +3094,47 @@ ganze Szene, (2) Linked Lists = Speicher/Bandbreite, (3) Weighted Blended OIT
 bricht bei hochfrequentem Alpha — das ist genau Laub, (4) stochastic braucht
 Temporal AA, das wir nicht haben. Bei binaerem Alpha ist der Tiefenpuffer selbst
 die exakte, kostenlose OIT -> deshalb Alpha-TEST (Referenz) statt Mischen.
+
+## NICHT UMGESETZT — Entwurf: 3D-Kronenhuelle statt flachem Ganzbaum-Quad
+(Nutzer erwaegt das selbst, 2026-10-09: glaubwuerdiger bei Blickwinkelwechsel,
+Textur animierbar = Windrauschen der Ferne bleibt erhalten)
+
+Warum das bei uns zieht:
+* flache, kamerazugewandte Quads sind der Grund fuer "schwebende gruenen Flecken"
+  und fuer die ueberlappenden, sich gegenseitig verdeckenden Kacheln zwischen
+  Baeumen (Reihenfolge-Problem, siehe NOTIZ weiter oben).
+* Eine Huelle ist opak -> Tiefenpuffer loest Verdeckung und Selbstschnitt exakt,
+  Sortieren und Tiefen-Nachpass werden ueberfluessig.
+* Kostenseitig günstiger als die Kartenschicht: heute 840 Karten/Baum
+  = 1680 Dreiecke (CROWN_FLOATS 14 je Instanz). Eine Huelle aus einem
+  10x10x10-Dichtegitter liefert ~200-600 Dreiecke/Baum.
+
+Varianten:
+A) Gekreuzte Karten: pro Buschel 2-3 Quadrate in FESTEN Orientierungen.
+   Minimaler Eingriff (vorhandene Karten-Emission, nur Orientierung fest statt
+   kamerazugewandt), Atlas bleibt. Kosten 3x Karten (2520 Quadrate/Baum),
+   Silhouette bleibt eckig.
+B) Kronenhuelle aus Dichtegitter (Buschelzentren -> Gitter -> Oberflaeche).
+   Beste Silhouette aus jedem Blickwinkel, am billigsten. Code: naive surface
+   nets ohne Table (marching cubes kostet die Dreieck-Tabelle ~2 KB).
+C) Buschel-Sphaeren: zu teuer (20 Dreiecke je Buschel).
+
+Textur: KEIN Render-to-Texture noetig. Die Huelle wird mit dem vorhandenen
+Karten-Atlas (main.c:604 FOL_ATLAS 2048, 8x8 Kacheln a 256 px) geteilt
+texturiert (UV aus Weltkoordinaten, triplanar/zylindrisch). Damit entfallen:
+Atlas-Aufnahme (64 Eimer, Slices ueber Frames), build_tile_mips fuer crnTex,
+fill_rgb, soften_alpha, und die Billboard-Quad-Logik (gBbSize/gBbCen/gBbAsp,
+ortho_mvp2).
+
+Windrauschen der Ferne: UV-Versatz pro Instanz
+  uv += (windDir * t + rauschen(pos, t)) * amp,  amp ~ 1..3 Texel,
+mit Zufallsphase pro Buschel (sonst "fliesst" es). Weil opak mit Alpha-Test,
+animiert der UV-Versatz automatisch die Silhouette = Rascheln. Dazu die Huelle
+selbst grob schwingen lassen (vorhandene sway), kein Einzelflattern.
+
+Messplan (noch nicht gebaut):
+* Neue Pruefung: Kamera im Kreis um einen festen Baum (fester Abstand) — die
+  Deckung darf nur minimal schwanken. Objektiver Beweis fuer Blickwinkel-
+  unabhaengigkeit; ein flaches Quad schlaegt hier gross aus.
+* LT-DECKUNG ueber den radialen Anflug (Kontinuitaet Karten -> Huelle).
+* Sortier-Umkehr-Test (DEMO_SORTREV) muss 0 Pixel Differenz liefern (opak).
