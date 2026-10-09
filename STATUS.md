@@ -3240,3 +3240,8 @@ Albedo-Modulation des Einzelblatts (pat, Rippe, Ader, Rand -18 %), andere
 Normalenverteilung (Blatt flach/beliebig, Karte senkrecht), Helligkeit der
 Atlas-Kachel selbst. Naechster Schritt: Mittelwert der Atlas-Kachel gegen die
 Mittel-Albedo der Einzelblaetter messen und die Kartenfarbe darauf abgleichen.
+Fuehrende Hypothese fuer die Farbluecke: die harte Silhouetten-Schwelle (a < 0.5
+-> discard) laesst auf mip-gemittelten Karten fast nur Texel im Blattinneren
+uebrig, die dunklen Blattraender fallen weg. Test dafuer: Schwellwert als Knopf
+(DEMO_CARDSWELL) und Mittelwert der Laubpixel bei 45 m in Abhaengigkeit der
+Schwelle messen.
