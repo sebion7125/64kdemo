@@ -2729,16 +2729,18 @@ int main(int argc, char **argv) {
             printf("  Messbank: erzwungener Stufenwechsel auf tier 0 (t=%.2f s)\n", tNow - t0);
             fflush(stdout); }
         } }
-      if(dbgBuildTime && !dbgPhase && !builtT) dbgPhase = 1;
+      // Phasen: 1 = Bau laeuft (Worker), 2 = Upload laeuft. Die Build-Zeit kommt
+      // aus dem Worker selbst (treeBuildMs), nicht aus der Differenz zweier
+      // Zeitstempel - die alte Fassung hat "-0 ms" geliefert.
       if(dbgPhase == 1 && !trees_build_busy()){ dbgT1 = now_sec(); dbgPhase = 2; }
       else if(dbgPhase == 2 && !upActive){
-        printf("BAUM-ZEIT: Generieren %.0f ms + Upload %.0f ms = %.0f ms bis Satz-Wechsel\n",
-               (dbgT1 - dbgT0) * 1000.0, (now_sec() - dbgT1) * 1000.0, (now_sec() - dbgT0) * 1000.0);
+        printf("BAUM-ZEIT: Bauen %.0f ms (Thread) + Uebergabe/Upload %.0f ms = %.0f ms bis der neue Satz zeichnet\n",
+               treeBuildMs, (now_sec() - dbgT1) * 1000.0, (now_sec() - dbgT0) * 1000.0);
         fflush(stdout); dbgPhase = 0;
       }
       if(!builtT || ((!upActive && !trees_build_busy()) &&
                      (fabsf(camTgt[0] - tCX) > 12.0f || fabsf(camTgt[2] - tCZ) > 12.0f))){
-        tCX = camTgt[0]; tCZ = camTgt[2]; dbgT0 = now_sec();
+        tCX = camTgt[0]; tCZ = camTgt[2]; dbgT0 = now_sec(); dbgPhase = 1;
         if(!builtT){
           // Erster Build synchron (Baeume ab Frame 1 sichtbar), danach Thread.
           treeLodRef[0] = camPos[0]; treeLodRef[1] = camPos[1]; treeLodRef[2] = camPos[2];

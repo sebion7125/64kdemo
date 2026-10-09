@@ -1,4 +1,6 @@
 // trees_cpu.c - prozedurale Baum-Geometrie (reines C, kein GL).
+#define _DEFAULT_SOURCE            // clock_gettime bei -std=c11
+#include <time.h>
 //
 // Ersetzt die alten SDF-Baeume (Stamm + 6 Kugeln) durch echte Struktur:
 //   - Stamm: gebogener, konischer Turm mit Wurzelflan
@@ -113,6 +115,7 @@ int nTreeVertsD = 0, nCrownVertsD = 0, nLeafInstD = 0, nTreesD = 0;             
 static pthread_mutex_t treeMu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  treeCv = PTHREAD_COND_INITIALIZER;
 static int treeReqPending = 0, treeBuildDone = 0, treeBuilding = 0;
+double treeBuildMs = 0.0;   // letzte Build-Zeit des Workers in ms (BAUM-ZEIT)
 static float treeReqTX = 0.0f, treeReqTZ = 0.0f, treeReqLod[3];
 static int treeReqLodValid = 0;
 
@@ -1738,10 +1741,14 @@ static void *tree_worker(void *unused){
       treeLodRef[2] = treeReqLod[2]; treeLodRefValid = 1;
     }
     pthread_mutex_unlock(&treeMu);
+    struct timespec tbs; clock_gettime(CLOCK_MONOTONIC, &tbs);
+    double tb = tbs.tv_sec + tbs.tv_nsec * 1e-9;
     trees_build_begin(tx, tz);
     trees_sort_candidates();
     while(!trees_build_step(32)){ }
     trees_build_finish();
+    struct timespec tbe; clock_gettime(CLOCK_MONOTONIC, &tbe);
+    treeBuildMs = (tbe.tv_sec + tbe.tv_nsec * 1e-9 - tb) * 1000.0;  // BAUM-ZEIT
   }
   return 0;
 }

@@ -125,7 +125,8 @@ void trees_build(float tx, float tz);
 void trees_build_begin(float tx, float tz);
 int  trees_build_step(int maxTrees);      // 1 = fertig
 void trees_build_finish(void);            // Schreib-/Zeichenseite tauschen
-void trees_set_focal_px(float f);   // Brennweite in Pixeln fuer das Ast-Bildgroessen-LOD
+void trees_set_focal_px(float f);
+extern double treeBuildMs;         // letzte Build-Zeit des Worker-Threads in ms   // Brennweite in Pixeln fuer das Ast-Bildgroessen-LOD
 void trees_build_request(float tx, float tz, const float lodRef[3]);
 int  trees_build_busy(void);
 void trees_build_finished_snapshot(float **tv, float **cv, float **lv,
