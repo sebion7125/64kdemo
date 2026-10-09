@@ -3458,3 +3458,53 @@ fboC` samt Texturen geloescht und neu angelegt; Protokollzeile
 Messgrenze: mit Gras kann ich im VM-Software-GL keinen A/B-Lauf machen — zwei
 Laufe derselben Konfiguration unterscheiden sich laufabhaengig um ~164 000 Pixel
 (Gras-Swap haengt an der Realzeit). Der Nachweis oben ist ohne Gras gefuehrt.
+
+## FEHLERBEHEBUNG 2026-10-09 (Runde 39): Composite hat verschiedene Baeume gemischt
+
+Nutzerbefund: „Z-Sortierung noch nicht aktiv, ich sehe hintere Baeume durchschimmern".
+
+**Ursache.** Der Composite-Pass hat gemischt, sobald BEIDE Puffer an einem Pixel
+decks: `mix(A, B, Gewicht)`. Gemessen (Standard-Szene, DEMO_COMPDEP-Lesbank):
+von 1530 bzw. 1569 Pixeln, an denen beide decken, liegen **alle** 30..60 m
+auseinander (groester Abstand 60,0 m) — es sind also durchgaengig *verschiedene*
+Baeume, nie zwei Stufen desselben Baums. An EINEM Baum (Ein-Baum-Test) messen
+dieselben Pixel maximal 2,8 m Abstand (251 von 272 unter 1 m).
+
+**Fix.** Gemischt wird nur noch, wenn beide Tiefen zum selben Objekt gehoeren.
+Dafur rechnet der Pass die Puffertiefe in Blicktiefe in Metern um. Die Projektion
+ist `NDC.z = za + zb/t` (build_mvp, main.c:1583), also `t = zb / (ndcz + za)`;
+`za`, `zb` kommen als Uniforms hinein. Regel:
+
+| Fall | frueher | jetzt |
+|---|---|---|
+| beide decken, Abstand <= 3 m (demsebe Baum) | gemischt | gemischt (unveraendert) |
+| beide decken, Abstand > 3 m (verschiedene Baeume) | gemischt -> Durchschimmern | **der Naehere unveraendert** |
+| nur eine Stufe deckt | die eine | die eine |
+
+Schwelle `DEMO_MIXTOL` (Standard 3,0 m, gemessen begruendet). Nach dem Fix:
+Ein-Baum-Test 272 von 272 Uberlappungspixeln gemischt (Blende aktiv), Wald 0 von
+1530 gemischt, 1530 auf den naeheren Aufgeloest.
+
+**Nebenbefunde, alle behoben.**
+1. `p_glUniform1f(locLDepth, 0.0f)` wurde aufgerufen, waehrend progLeaf **nicht**
+   das aktuelle Programm war -> GL_INVALID_OPERATION (0x502). Bestand seit langem,
+   fiel nur nicht auf, weil der Wert zufaellig auf eine gueltige Stelle des
+   zuletzt aktiven Programms fiel. Seit der Composite als letztes Programm
+   `progComp` hinterlaesst, schlug der Fehler zu: der Blatt-Pass fiel teilweise
+   aus, Screenshots wurden wegen des anhaengigen Fehlers verworfen.
+2. Der Composite haengt die Texture-Einheiten 0..4 um (drei Tiefen-Texturen) und
+   hat sie stehen lassen. Farb-Sampler spaeterer Passe trafen dann Tiefen-Texturen
+   -> 0x502. Jetzt werden die Bindungen vor dem Pass gemerkt und danach
+   zurueckgesetzt (dafuer `glGetIntegerv` nachgeruestet).
+3. `if(envShotTimes && ...)` prüfte ein Array statt des Flags `envShotTimes_on`
+   (Compilerwarnung `-Waddress`) — berichtigt.
+4. Neu: `DEMO_SHOTFRAME=<n>` macht den Screenshot am Frame, nicht nach Sekunden.
+   Noetig, weil zeitgesteuerte Aufnahmen in zwei Laufen *verschiedene Frames*
+   erwischen (der Composite-Lauf ist langsamer) und der Vergleich dann wertlos ist.
+
+**Messgrenze (wichtig fuer alle weiteren A/B-Laeufe).** Zwei Laufe mit identischer
+Konfiguration unterscheiden sich im VM-Software-GL bereits am Frame 1: 164 729 bzw.
+116 513 Pixel. Grund: Impostor-Kachel-Aufnahme und Upload-Slices haengen an der
+Realzeit. Bildvergleiche zwischen zwei Laufen sind hier also kein Beweis; bewiesen
+sind die Zahlen der Tiefen-Lesbank (DEMO_COMPDEP) und die CPU-Simulation des
+Composite-Passes. Aussehen bewertet der Nutzer auf dem Host.

@@ -129,6 +129,7 @@ static void (*p_glUniformMatrix4fv)(GLint location, GLsizei count, GLboolean tra
 static void (*p_glLineWidth)(GLfloat width);
 static void (*p_glReadBuffer)(GLenum mode);
 static GLenum (*p_glGetError)(void);
+static void (*p_glGetIntegerv)(GLenum pname, GLint *data);
 
 // ================= Bibliotheken laden =================
 static void gl_fail(const char *n) { fprintf(stderr, "GL: %s fehlt\n", n); exit(1); }
@@ -240,6 +241,7 @@ static void load_libs(void) {
   LOADGL2(glLineWidth);
   LOADGL2(glReadBuffer);
   LOADGL2(glGetError);
+  LOADGL2(glGetIntegerv);
 #undef LOADGL2
 #undef LOADGL
 }
@@ -399,6 +401,8 @@ static GLuint fboC = 0, texC = 0, texDepthC = 0;      // Composite: Ziel (texSce
 static GLuint fboS = 0, texDepthS = 0;                // Composite: Szenen-Tiefe vor Baeumen
 static int    envComp = 1;                            // DEMO_COMP=0 schaltet den Composite aus
 static int    dbgCompDepth = 1;                     // DEMO_COMPDEPTH=0: Composite ohne Tiefen-Write
+static double compMixTol = 3.0;
+static int    compPhase2On = 1;                     // DEMO_COMPPHASE2=0: Phase 2 + Composite aus, nur Tiefen-Kopie                   // DEMO_MIXTOL: Mischen nur bis so viel m Tiefenabstand
 static GLuint fboMS = 0, rbColorMS = 0, rbDepthMS = 0;   // Multi-Sample (Mesh-Render, MSAA)
 static int fboW = 0, fboH = 0;
 static int useMSAA = 1;   // 1 = MSAA an (M-Taste zum Umschalten: 4x -> 8x -> off)
@@ -461,6 +465,8 @@ static int   ltPrevTier = -999, ltPrevVerts = -1, ltPrevCrown = -1, ltPrevLeaf =
 static int   ltTierSeq[16]; static int ltGeomChg = 0, ltGeomChgInBand = 0, ltPump = 0;
 static int   ltCov[7]; static int ltCovN = 0; static float ltDipWorst = 0.0f, ltDipAt = 0.0f;   // DEMO_EXIT=1: arbeiten, dann sofort beenden
 static float envShotTimes[16]; static int envShotN = 0, envShotIdx = 0;
+static int envShotFrame = -1;   // DEMO_SHOTFRAME=<n>: Screenshot nach n Frames (zeitfrei)
+static int gFrameCount = 0;             // Frame-Zaehler fuer die frame-gesteuerte Aufnahme
 static int   envShotTimes_on = 0;
 static unsigned long frameNo = 0;
 //   DEMO_FREEZE=3.5  Shader-Zeit (Wind) auf 3,5 s einfrieren -> Screenshots sind
@@ -1765,7 +1771,9 @@ static void save_screenshot_ppm(const char *path, int w, int h) {
   //  sonst crasht glReadPixels (Mesa-Threads rendern noch)
   p_glFinish();
   p_glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, buf);
-  if (p_glGetError() != GL_NO_ERROR) {
+  GLenum e = p_glGetError();
+  if (e != GL_NO_ERROR) {
+    printf("Screenshot verworfen: GL-Fehler 0x%x\n", e);
     free(buf);
     return;
   }
@@ -2154,6 +2162,9 @@ int main(int argc, char **argv) {
   GLint locCompDA   = p_glGetUniformLocation(progComp, "uDepthA");
   GLint locCompDB   = p_glGetUniformLocation(progComp, "uDepthB");
   GLint locCompDS   = p_glGetUniformLocation(progComp, "uDepthS");
+  GLint locCompZa   = p_glGetUniformLocation(progComp, "uZa");
+  GLint locCompZb   = p_glGetUniformLocation(progComp, "uZb");
+  GLint locCompTol  = p_glGetUniformLocation(progComp, "uMixTol");
   GLint locTFocal  = p_glGetUniformLocation(progTMesh, "uFocalPx");
   GLint locCOld    = p_glGetUniformLocation(progCrown, "uTreeOld");
   GLint locCLFace  = p_glGetUniformLocation(progCrown, "uLightFace");
@@ -2213,6 +2224,7 @@ int main(int argc, char **argv) {
   { const char *e = getenv("DEMO_TDW");     if(e) dbgTreeDepthWrite = atoi(e) ? 1 : 0; }
   { const char *e = getenv("DEMO_TDPASS");  if(e) dbgTreeDepthPass  = atoi(e) ? 1 : 0; }
   { const char *e = getenv("DEMO_TABC");    if(e) dbgTreeA2C        = atoi(e) ? 1 : 0; }
+  { const char *sf = getenv("DEMO_SHOTFRAME"); if (sf) envShotFrame = atoi(sf); }
   { const char *ss = getenv("DEMO_SHOTS");
     if(ss){ envShotTimes_on = 1;
       const char *q = ss;
@@ -2228,6 +2240,8 @@ int main(int argc, char **argv) {
   { const char *pf = getenv("DEMO_PRESFORCE"); if (pf) treeDbgPresForce = atoi(pf); }
   { const char *ec = getenv("DEMO_COMP"); if (ec) envComp = atoi(ec); }
   { const char *ecd = getenv("DEMO_COMPDEPTH"); if (ecd) dbgCompDepth = atoi(ecd); }
+  { const char *mt = getenv("DEMO_MIXTOL"); if (mt) compMixTol = atof(mt); }
+  { const char *cp = getenv("DEMO_COMPPHASE2"); if (cp) compPhase2On = atoi(cp); }
   // DEMO_TREEFADE=<sek>: Ueberblendzeit beim LOD-Satzwechsel (0 = hart schneiden)
   { const char *tf = getenv("DEMO_TREEFADE"); if (tf) treeFadeDur = (double)atof(tf); }
   { const char *ts = getenv("DEMO_TIERSWITCH"); if (ts) treeTierSwitchS = (double)atof(ts); }
@@ -2391,6 +2405,7 @@ int main(int argc, char **argv) {
     //  Ersten ECHTEN Frame-Abstand (2. Frame) als FPS-Basis nehmen.
     static int frameCount = 0;
     frameCount++;
+    gFrameCount++;
     if (frameCount == 1) {
       // Erster Frame: FPS noch nicht bekannt, fpsEMA bleibt 60 (Initialwert)
     } else if (frameCount == 2) {
@@ -3141,7 +3156,7 @@ int main(int argc, char **argv) {
       p_glBindVertexArray(vaoTree[drawSet]);
       p_glDrawArrays(GL_TRIANGLES, 0, nTreeVertsCur);
       if(nCrownVertsCur > 0){
-        p_glUseProgram(progCrown);
+      p_glUseProgram(progCrown);
         p_glUniformMatrix4fv(locCMVP, 1, GL_FALSE, lightMVP);
         p_glUniform3f(locCCam, eye[0], eye[1], eye[2]);
         p_glUniform3f(locCTgt, ctr[0], ctr[1], ctr[2]);
@@ -3163,7 +3178,7 @@ int main(int argc, char **argv) {
         p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nCrownVertsCur);
       }
       if(shadowLeafOn && nLeafInstCur > 0 && !envNoLeaf && layLeaf){
-        p_glUseProgram(progLeaf);
+      p_glUseProgram(progLeaf);
         p_glUniformMatrix4fv(locLMVP, 1, GL_FALSE, lightMVP);
         p_glUniform3f(locLCam, eye[0], eye[1], eye[2]);
         // LOD-Auscull der Blaetter haengt an der KAMERA ab, nicht am Wurf-
@@ -3180,7 +3195,7 @@ int main(int argc, char **argv) {
         p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nLeafInstCur);
       }
       if(reedPassOn && progReed && nReedInst > 0){
-        p_glUseProgram(progReed);
+      p_glUseProgram(progReed);
         p_glUniformMatrix4fv(locRMVP, 1, GL_FALSE, lightMVP);
         p_glUniform3f(locRCam, eye[0], eye[1], eye[2]);
         p_glUniform1f(locRTime, tSh);
@@ -3423,15 +3438,18 @@ int main(int argc, char **argv) {
     // einkommenden Stufe) im Szenen-Puffer, Phase 2 = nur die einkommende Stufe
     // im Scratch-Puffer fboB. Gemischt wird nach dem Resolve in comp.frag.
     int cmpN = (envComp && treeBandCount > 0) ? 2 : 1;
-    if(cmpN == 2)
+    if(cmpN == 2){
       p_glBlitNamedFramebuffer(fboMS, fboS, 0, 0, fboW, fboH, 0, 0, fboW, fboH,
                                GL_DEPTH_BUFFER_BIT, GL_NEAREST);
-    for(int cmpPhase = 1; cmpPhase <= cmpN; cmpPhase++){
+      if(getenv("DEMO_COMPDBG")) printf("BLIT1 Szene->S: GL 0x%x\n", p_glGetError());
+    }
+    for(int cmpPhase = 1; cmpPhase <= (cmpN == 2 && !compPhase2On ? 1 : cmpN); cmpPhase++){
     if(cmpPhase == 2){
       // Szenen-Tiefe in den Scratch-Puffer laden, damit Phase 2 gegen dieselbe
       // Geometrie testet wie Phase 1.
       p_glBlitNamedFramebuffer(fboS, fboB, 0, 0, fboW, fboH, 0, 0, fboW, fboH,
                                GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+      if(getenv("DEMO_COMPDBG")) printf("BLIT2 S->B: GL 0x%x\n", p_glGetError());
       p_glBindFramebuffer(GL_FRAMEBUFFER, fboB);
     }
     // Baum-Mesh (Stamm/Aeste)
@@ -3583,10 +3601,15 @@ int main(int argc, char **argv) {
       // Tiefenschreiben immer an -> reihenfolge-unabhaengig, schneidende Quadrate
       // korrekt, kein Tiefen-Nachpass, kein Sortieren.
       p_glDisable(GL_BLEND);
-      p_glUniform1f(locLDepth, 0.0f);
       p_glDepthMask(GL_TRUE);
       p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
       p_glUseProgram(progLeaf);
+      // locLDepth gehoert zu progLeaf: der Aufruf VOR UseProgram war ein
+      // Uniform-Set auf ein fremdes Programm und meldete GL_INVALID_OPERATION
+      // (0x502). Sichtbar wurde er, seit der Composite als letztes Programm
+      // progComp hinterlaesst — vorher fiel der Wert zufaellig auf eine gueltige
+      // Stelle des zuletzt aktiven Programms.
+      p_glUniform1f(locLDepth, 0.0f);
       if(locLPhase >= 0) p_glUniform1f(locLPhase, (float)cmpPhase);
       if(locLFocal >= 0) p_glUniform1f(locLFocal, 1.7f * (float)fboH);
       if(locLFiz >= 0) p_glUniform1f(locLFiz, dbgFizzle ? 1.0f : 0.0f);
@@ -3715,7 +3738,7 @@ int main(int argc, char **argv) {
     // COMPOSITE: beide Stufen liegen in eigenen Puffern, gemischt wird pro Pixel
     // (comp.frag). Ziel ist fboC, weil texScene/texDepth gelesen werden — ein
     // direktes Schreiben in fbo waere eine Rueckkopplung (undefiniert).
-    if(cmpN == 2){
+    if(cmpN == 2 && compPhase2On){
       if(getenv("DEMO_COMPDBG")) printf("COMPDBG-step nach Phase2: GL 0x%x\n", p_glGetError());
       p_glBindFramebuffer(GL_FRAMEBUFFER, fboC);
       if(getenv("DEMO_COMPDBG")) printf("COMPDBG-step bind fboC: GL 0x%x status %d\n", p_glGetError(), p_glCheckFramebufferStatus(GL_FRAMEBUFFER));
@@ -3724,6 +3747,16 @@ int main(int argc, char **argv) {
       p_glDepthFunc(GL_ALWAYS);
       p_glDepthMask(dbgCompDepth ? GL_TRUE : GL_FALSE);   // DIAGNOSE
       p_glUseProgram(progComp);
+      // Texture-Einheiten 0..4 werden fuer den Composite umgehaengt. Spaetere
+      // Passe (gemessen: Schilf) verlassen sich auf die Bindungen des letzten
+      // Frames; sampelt ein Farb-Sampler eine Tiefen-Textur, meldet der Draw
+      // GL_INVALID_OPERATION (0x502) und der Pass faellt aus. Also merken und
+      // nach dem Composite zuruecksetzen.
+      GLuint prevTex[5];
+      for(int u = 0; u < 5; u++){
+        p_glActiveTexture(GL_TEXTURE0 + u);
+        GLint b = 0; p_glGetIntegerv(GL_TEXTURE_BINDING_2D, &b); prevTex[u] = (GLuint)b;
+      }
       p_glActiveTexture(GL_TEXTURE0); p_glBindTexture(GL_TEXTURE_2D, texScene);
       if(locCompTexA >= 0) p_glUniform1i(locCompTexA, 0);
       p_glActiveTexture(GL_TEXTURE1); p_glBindTexture(GL_TEXTURE_2D, texDepth);
@@ -3734,6 +3767,9 @@ int main(int argc, char **argv) {
       if(locCompDB >= 0) p_glUniform1i(locCompDB, 3);
       p_glActiveTexture(GL_TEXTURE4); p_glBindTexture(GL_TEXTURE_2D, texDepthS);
       if(locCompDS >= 0) p_glUniform1i(locCompDS, 4);
+      if(locCompZa >= 0) p_glUniform1f(locCompZa, (CAM_NEAR + CAM_FAR) / (CAM_NEAR - CAM_FAR));
+      if(locCompZb >= 0) p_glUniform1f(locCompZb, 2.0f * CAM_NEAR * CAM_FAR / (CAM_NEAR - CAM_FAR));
+      if(locCompTol >= 0) p_glUniform1f(locCompTol, (float)compMixTol);
       if(getenv("DEMO_COMPDBG")){ static int cdbg=0;
         if(cdbg++ < 4){ float ds=0,da=0,db=0;
           p_glBindFramebuffer(GL_FRAMEBUFFER, fboS);
@@ -3744,6 +3780,70 @@ int main(int argc, char **argv) {
           p_glReadPixels(fboW/2, fboH/2, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &db);
           printf("COMPDBG frame %d: Tiefe Mitte  Szene %.5f  nach Phase1 %.5f  Phase2 %.5f |"
                  " GL 0x%x  Baum bei %.1f m\n", ltFrame, ds, da, db, p_glGetError(), 0.0f);
+          p_glBindFramebuffer(GL_FRAMEBUFFER, fboC);
+        } }
+      // MESSBANK: wie weit liegen die Tiefen der beiden Stufen bei Pixeln, die
+      // BEIDE decken? Gleiche Stufe an einem Baum = kleiner Abstand, verschiedene
+      // Baeume = grosser Abstand. Daraus folgt die Misch-Toleranz.
+      if(getenv("DEMO_COMPDEP")){ static int cdbg4=0;
+        if(cdbg4++ < 2){
+          size_t n = (size_t)fboW*fboH;
+          float *dA = (float*)malloc(n*sizeof(float));
+          float *dB = (float*)malloc(n*sizeof(float));
+          float *dS = (float*)malloc(n*sizeof(float));
+          p_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+          p_glReadPixels(0,0,fboW,fboH,GL_DEPTH_COMPONENT,GL_FLOAT,dA);
+          p_glBindFramebuffer(GL_FRAMEBUFFER, fboB);
+          p_glReadPixels(0,0,fboW,fboH,GL_DEPTH_COMPONENT,GL_FLOAT,dB);
+          p_glBindFramebuffer(GL_FRAMEBUFFER, fboS);
+          p_glReadPixels(0,0,fboW,fboH,GL_DEPTH_COMPONENT,GL_FLOAT,dS);
+          float za = (CAM_NEAR + CAM_FAR) / (CAM_NEAR - CAM_FAR);
+          float zb = 2.0f * CAM_NEAR * CAM_FAR / (CAM_NEAR - CAM_FAR);
+          long both = 0; long buckets[9] = {0}; float worst = 0; long mixed = 0, nearer = 0;
+          for(size_t k = 0; k < n; k++){
+            if(dA[k] < dS[k] - 1e-6f && dB[k] < dS[k] - 1e-6f){
+              both++;
+              float ta = zb / ((dA[k]*2.0f - 1.0f) + za);
+              float tb = zb / ((dB[k]*2.0f - 1.0f) + za);
+              float dd = ta - tb; if(dd < 0) dd = -dd;
+              if(dd > worst) worst = dd;
+              if(dd <= (float)compMixTol) mixed++; else nearer++;
+              int b = dd < 1 ? 0 : dd < 2 ? 1 : dd < 3 ? 2 : dd < 5 ? 3 :
+                      dd < 8 ? 4 : dd < 15 ? 5 : dd < 30 ? 6 : dd < 60 ? 7 : 8;
+              buckets[b]++;
+            }
+          }
+          printf("COMPDEP beide decken: %ld Pixel (gemischt %ld, naeherer %ld) | Tiefenabstand <1:%ld <2:%ld <3:%ld <5:%ld"
+                 " <8:%ld <15:%ld <30:%ld <60:%ld >=60:%ld | groester %.1f m\n",
+                 both, mixed, nearer, buckets[0],buckets[1],buckets[2],buckets[3],buckets[4],
+                 buckets[5],buckets[6],buckets[7],buckets[8], worst);
+          // CPU-Simulation des Composite-Passes: was MUSS dabei herauskommen?
+          size_t np = (size_t)fboW*fboH*4;
+          float *cA = (float*)malloc(np*sizeof(float));
+          float *cB = (float*)malloc(np*sizeof(float));
+          p_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+          p_glReadPixels(0,0,fboW,fboH,GL_RGBA,GL_FLOAT,cA);
+          p_glBindFramebuffer(GL_FRAMEBUFFER, fboB);
+          p_glReadPixels(0,0,fboW,fboH,GL_RGBA,GL_FLOAT,cB);
+          long changed = 0; float maxchg = 0;
+          for(size_t k = 0; k < (size_t)fboW*fboH; k++){
+            if(dA[k] < dS[k] - 1e-6f && dB[k] < dS[k] - 1e-6f){
+              float ta = zb / ((dA[k]*2.0f - 1.0f) + za);
+              float tb = zb / ((dB[k]*2.0f - 1.0f) + za);
+              float w = (fabsf(ta - tb) <= (float)compMixTol) ? cB[4*k+3]
+                      : ((ta <= tb) ? 0.0f : 1.0f);
+              for(int c = 0; c < 3; c++){
+                float e = cA[4*k+c]*(1.0f-w) + cB[4*k+c]*w;
+                float d = fabsf(e - cA[4*k+c]);
+                if(d > maxchg) maxchg = d;
+              }
+              if(w > 0.02f && w < 0.98f) changed++;
+            }
+          }
+          printf("COMPDEP CPU-Simulation: %ld Pixel mit Gewicht zwischen 0.02 und 0.98,"
+                 " groesste Farbänderung %.3f\n", changed, maxchg);
+          free(cA); free(cB);
+          free(dA); free(dB); free(dS);
           p_glBindFramebuffer(GL_FRAMEBUFFER, fboC);
         } }
       if(getenv("DEMO_COMPDBG")){ static int cdbg3=0;
@@ -3775,8 +3875,13 @@ int main(int argc, char **argv) {
           printf("COMPDBG2 nach Draw: GL_vorher 0x%x  RGB %.3f %.3f %.3f a %.3f  Tiefe %.5f  GL_nachher 0x%x\n",
                  e1, px[0], px[1], px[2], px[3], dz, p_glGetError()); } }
       p_glDepthFunc(GL_LESS);
+      for(int u = 0; u < 5; u++){
+        p_glActiveTexture(GL_TEXTURE0 + u); p_glBindTexture(GL_TEXTURE_2D, prevTex[u]);
+      }
+      p_glActiveTexture(GL_TEXTURE0);
       p_glBlitNamedFramebuffer(fboC, fbo, 0, 0, fboW, fboH, 0, 0, fboW, fboH,
                                GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+      if(getenv("DEMO_COMPDBG")) printf("BLIT3 C->fbo: GL 0x%x\n", p_glGetError());
       p_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
       p_glActiveTexture(GL_TEXTURE0);
     }
@@ -3960,7 +4065,11 @@ int main(int argc, char **argv) {
     // X-Tasten (synthetische Tasten kommen in der VM nicht immer an).
     // DEMO_SHOTS="2 4 6 8": mehrere Screenshots in EINEM Lauf, nummeriert —
     // fuer Fehler, die zeitlich auftreten (Flackern, Uebergangsphasen)
-    if(envShotTimes && envShotIdx < envShotN &&
+    if(envShotFrame >= 0 && gFrameCount == envShotFrame){
+      save_screenshot_ppm("/tmp/64kdemo_frame.ppm", winW, winH);
+      envShotFrame = -1;
+    }
+    if(envShotTimes_on && envShotIdx < envShotN &&
        now_sec() - loopT0 >= envShotTimes[envShotIdx]){
       char nm[128];
       snprintf(nm, sizeof nm, "/tmp/64kdemo_shot_%02d.ppm", envShotIdx);
