@@ -3036,3 +3036,45 @@ Fokusbaum im Ein-Baum-Test: R1 = 33,7 m, R2 = 10,1 m*15 = 101,1 m.
 Soll: die SICHTBARE Änderung muss >= 2 m Kameraweg brauchen. Der Auslauf des
 Halts (3 % des Bands) ist dafür zu klein; er muss auf ~2 m (oder die Blende
 insgesamt breiter / der Halt ganz weg, wenn fizzle kommt).
+
+## NOTIZ: Zeichenreihenfolge-Fehler an den Silhouettenkanten (Nutzer, 2026-10-09)
+
+Belegt (Code-Stellen):
+* `soften_alpha()` (main.c:745) mischt 75 % eines Box-Blurs ins Atlas-Alpha,
+  Untergrenze 0,6*a -> das Atlas-Alpha ist NICHT binär, entlang jeder Blatt- und
+  Clusterkante liegen Werte 0..1.
+* `crown.frag:137` `a = tx.a * smoothstep(0,band,e)` (Billboard-Rand) -> weitere
+  Zwischenwerte.
+* `crown.frag:213` `O = vec4(col, cov)` mit `cov = a` -> jedes Kanten-Texel ist
+  halbtransparent.
+* Farbpass: Kronen- und Blatt-Pass schreiben Tiefe (`p_glDepthMask(GL_TRUE)`,
+  main.c:3479 bzw. 3428 solange kein Satz-Wechsel laeuft).
+
+Folge: ein halbtransparentes Kanten-Fragment schreibt Tiefe und verdeckt damit
+alles Dahinterliegende, obwohl es nur gemischt hat. Was im Pixel steht, haengt
+daher von der Reihenfolge ab: (a) ferne Kante zuerst -> die nahe Karte mischt
+sich mit der Farbe der fernen Kante (Halo), (b) zwei Karten desselben Baums, die
+sich schneiden, sind pro Pixel nicht sortiert (unser Sortieren pro Baum nutzt den
+Karten-Mittelpunkt, nicht die Pixel-Tiefe).
+
+WICHTIGER Befund gegen A2C auf grossen Karten: die Karten-Kachel deckt nur ~27 %
+ihrer Flaeche (Laubbuschel). Aus der Ferne wird die Textur minified und ueber die
+Mip-Kette gemittelt -> der Alpha-Wert ist ueber grosse Flaechen ~0,27, nicht 0/1.
+Bei 4x MSAA werden daraus 1 von 4 Samples -> die ganze Krone wird zum Sieb.
+A2C funktioniert nur, wo das Alpha zweipolig (0 oder 1) ist. Die Referenz
+(SpeedTree, GPU Gems 3 Kap. 4) umgeht das, indem die Cutouts 1-bit bleiben.
+
+Messbarer Test (noch nicht gebaut): Instanz-Reihenfolge absichtlich umdrehen
+(nah vor fern, DEMO_SORTREV) und die Pixelanzahl zaehlen, die sich gegen die
+richtige Reihenfolge unterscheidet. Bei durchgehend opakem Alpha-Test MUSS die
+Zahl 0 sein; sie ist der objektive Beweis fuer Reihenfolgeabhaengigkeit.
+
+Loesungswege (Referenz: Alpha-TEST + A2C fuer die Kante, fizzle fuer den
+LOD-Uebergang):
+1. Harte Schwelle `if(a < 0.5) discard;`, Ausgabe-Alpha 1 -> opak,
+   reihenfolge-unabhaengig, Tiefe korrekt. Kante wird treppig (MSAA glaettet nur
+   Dreieckskanten, nicht discard-Kanten).
+2. A2C nur fuer den Kantenbereich, Alpha im Inneren 1 (setzt 1 voraus).
+3. Ditherter Alpha-Test (stabiles Rauschen) fuer den Kantenbereich: macht aus
+   fraktionalem Alpha ein stabiles Muster statt eines Siebs. Ohne TAA das Risiko
+   von Schimmern.
