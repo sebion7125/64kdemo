@@ -333,7 +333,9 @@ static int treeSlotCard0, treeSlotCardN, treeSlotHull0, treeSlotHullN;
 int treeHullOn = 1; float treeHullSc = 1.20f;   // DEMO_HULLSC: Ueberlappung der
                              // Huellenzellen (1,0 = exakt kachelnd, 1,05 schliesst
                              // die Ecken der quadratischen Zellen)
-float treeHullCell = 2.0f;  // DEMO_HULLCELL: Zellgroesse in Buscheldurchmessern
+float treeHullCell = 1.4f;   // Sweep (Testbaum 320x180): 1,0 = Uebergang ohne Delle und
+                             // fern 8-11 helle Px (64 Zellen); 1,4 = Delle -9,6 Prozent, fern
+                             // 15 Px (41 Zellen); 2,0 = Delle -19 Prozent, fern 14-17 Px (23)  // DEMO_HULLCELL: Zellgroesse in Buscheldurchmessern
                              // (gemessen an einem 3,9-m-Baum, 139 m: Karten 484 Instanzen ->
                              // 21 helle Px; Huelle 1,0 -> 64/15 Px, 1,4 -> 43/25 Px, 2,5 -> 17/29 Px)
 int   treeHullAz = 0;       // DEMO_HULLAZ: Azimut-Zellen (0 = automatisch aus der
