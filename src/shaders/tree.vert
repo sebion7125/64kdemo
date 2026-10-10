@@ -80,6 +80,14 @@ void main(){
     if(aLod.y > lodBranchW(aLod.x, md, uFocalPx)){
       gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return;
     }
+    // BAUKANTE: das Holz haengt an derselben Kante wie die Krone. Sonst steht ab
+    // der Kronenkante ein nackter Stamm (dicker Stamm bleibt bis ~400 m sichtbar,
+    // die Krone hoert bei 207 m auf — Nutzerbefund "nackte baeme in der entfernung").
+    // Aufgeloest wird pro ASTABSCHNITT mit demselben stabilen Schwellwert aLod.y:
+    // der Ast ist ganz da oder gar nicht, kein Alpha, keine Sortierung.
+    if(uFarCut > 1.0 && aLod.y > lodFarFade(uFarCut, md)){
+      gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return;
+    }
   }
   // Uebergabe ans Billboard im selben Band, in dem das Billboard einblendet
   // (0,90..1,10 R2): die Gewichte sind komplementaer, Summe immer 1.

@@ -327,6 +327,8 @@ int treeT2Stride = 3, treeT2Gnum = 3, treeT2Gden = 4;
 int treeDowngraded = 0;   // Baeume, die wegen Budget auf die groebste Stufe fielen
 int treeBB0Cards = 0;    // Zusatzkarten unter dem tier-0-Billboard (DEMO_BB0CARDS)
 int gHullStart = 0, gHullN = 0;   // Range der Huellen-Quadrate dieses Baums
+int treeDbgSprig = 0;         // gefundene Buschel dieses Baums (Wirtstest)
+int treeDbgSprigHash = 0;     // Pruefsumme der Buschel-Positionen
 float gFarCut = 0.0f;             // Baukante der FERN-Stufe (1,15 x Bauradius)
 int gHullNaz = 0, gHullNhy = 0; float gHullCs = 0.0f;   // Rastermasse (TREETAB)
 static int treeSlotCard0, treeSlotCardN, treeSlotHull0, treeSlotHullN;
@@ -504,13 +506,13 @@ static void emit_hull_quads(float seed){
   // Existenz = Sichtbarkeit: unterhalb 0,90 R2 - Build-Nachlauf ist das
   // Huellengewicht 0, dort werden keine Zellen gebaut.
   if(gTreeDist < gLodR2 * 0.90f - LOD_BUILD_LAG) return;
-  // Jenseits der Baukante gibt es keinen Baum mehr im Puffer. Die Huelle darf
-  // dort aber nicht mit Gewicht 1 stehen, sonst ploppen ferne Baeume beim
-  // naechsten Build (alle 12 m Kameraweg) schlagartig auf. Der Shader blendet
-  // sie bis gFarCut auf null aus, also emittieren wir sie darueber hinaus
-  // gar nicht. Gemessen (640 Baeume, 640x360): 302 Baeume standen mit
-  // Huellengewicht 1,0 zwischen 178 und 268 m.
-  if(gTreeDist > gFarCut + LOD_BUILD_LAG) return;
+  // Kein Karten-/Huellen-Schnitt nach oben an der Baukante: der Wirtstest
+  // (tools/test_tree_build.c) hat gemessen, dass ein solcher Schnitt einen
+  // NACKTEN STAEMM erzeugt — der Baum war bei 236 und 248 m im Puffer, ohne
+  // Blatt, ohne Karte, ohne Huelle, waehrend sein Stamm wegen der Dicken-
+  // aufloesung bis ~400 m sichtbar bleibt. Kante jetzt fuer Holz UND Krone an
+  // einer Stelle (uFarCut), Aufloesung im Shader; die Geometrie existiert bis
+  // dahin ueberall.
   {
     enum { HULL_AZMAX = 32, HULL_HYMAX = 24 };
     static int   cellN[HULL_AZMAX * HULL_HYMAX];
@@ -977,7 +979,15 @@ static void ez_grow(int lvl, const Sec *base, const EzPreset *P, float unit,
   // 4 191 — bei einer Mesh-Weight von 1,00 (die Mesh-Blende liegt erst bei
   // 0,9..1,1 R2 = 91..111 m). Der Nutzer sah es als Sprung "an den Zweigen".
   // Volles Netz bis 1,15 R2, also bis ausserhalb der aeussersten Blende.
-  int fine = (gMeshFineCut <= 0.0f) || (gTreeDist <= gMeshFineCut);
+  // Tessellierung haengt an NICHTS ausser dem Level. Der Wirtstest
+  // (tools/test_tree_build.c) hat gemessen, dass sie bisher an der
+  // Build-Entfernung hing (gMeshFineCut): stride 1/2 gegen 6 und G anders ->
+  // andere vernetzte Ringe -> andere Astpfade -> andere Buschelpositionen.
+  // Pruefsumme der Buschel desselben Baums: b32be7ec bei 200 m, 30508e3e ab
+  // 212 m. Genau das ist das "einzelne Bueschel verschwinden" des Nutzers.
+  // Duenne Aeste fallen weiterhin ueber die projizierte Dicke weg (tree.vert),
+  // das ist eine Schwellwert-Entscheidung pro Abschnitt ohne Positionsfolge.
+  int fine = 1; (void)gMeshFineCut;
   // Volles Netz heisst NICHT ueberall gleich fein: dicke Aeste (lvl 0/1) tragen
   // die Silhouette und bekommen jeden Ring, duenne (lvl >= 2) bekommen jeden
   // zweiten. Diese Regel haengt nur am Level, also an der Struktur selbst, und
@@ -1331,7 +1341,7 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
   root.rg.r = P->radius[0] * unit;
   root.d[0] = 0.0f; root.d[1] = 1.0f; root.d[2] = 0.0f;
   ring_basis(&root.rg, 0.0f, 1.0f, 0.0f);
-  ezNSprig = 0;
+  ezNSprig = 0; treeDbgSprig = 0;
   ezLszMax = 0.0f;
   // Karten-Groesse gleicht die Ausduennung aus (div 2 -> 1,25, div 8 -> 2,20);
   // muss VOR ez_grow stehen, die Groesse sitzt in der Sprig-Liste.
@@ -1367,6 +1377,18 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
   // einblendet: der Build ist bis 12 m Kameraweg alt, ohne Vorrat waere beim
   // Annaehern nichts zum Einblenden da (derselbe Fehler, den die Einzelblaetter
   // mit 1,3 R1 Puffer hatten).
+  treeDbgSprig = ezNSprig;
+  {   // Pruefsumme der Buschel-Positionen (Wirtstest: aendert sich die Krone
+      // mit der Build-Entfernung?)
+    unsigned h = 2166136261u;
+    for(int q = 0; q < ezNSprig; q++)
+      for(int k = 0; k < 4; k++){
+        float v = (k==0)?ezSx[q]:(k==1)?ezSy[q]:(k==2)?ezSz[q]:ezSsize[q];
+        unsigned u; memcpy(&u, &v, 4);
+        h = (h ^ u) * 16777619u;
+      }
+    treeDbgSprigHash = (int)h;
+  }
   int cardDiv = treeCardDivN;   // Regelwerk C: eine Dichte fuer alle Stufen
   int wantCards = ezNSprig / cardDiv;
   // BBox wird fuer JEDEN Baum bestimmt (die Aufnahme-Rahmung braucht sie auch
@@ -1758,6 +1780,9 @@ int trees_build_step(int maxTrees){
         sl->leaf0 = leafBefore; sl->leafN = nLeafInst  - leafBefore;
         sl->card0 = quadBefore; sl->cardN = treeSlotCardN;
         sl->hull0 = (treeSlotHull0 >= 0) ? nCrownVerts - treeSlotHullN : 0;
+        sl->sprigHash = (unsigned)treeDbgSprigHash;
+        sl->sprigN = treeDbgSprig; sl->hzNaz = (short)gHullNaz;
+        sl->hzNhy = (short)gHullNhy; sl->hzCs = gHullCs;
         sl->hullN = treeSlotHullN;
         sl->pres = pres;
         sl->hx0 = sl->hz0 = 1e9f; sl->hx1 = sl->hz1 = -1e9f;

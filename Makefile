@@ -26,6 +26,13 @@ src/shaders_gen.c: src/shaders/vertex.glsl src/shaders/fragment.glsl src/shaders
 # Wirtstest des LOD-Kerns: OHNE GL, ohne Engine, in Millisekunden.
 # Prueft Komplementaeritaet der Baelen, Stetigkeit, Existenz-Raender,
 # Hysterese und dass GLSL-Seite und C-Kern dieselben Zahlen benutzen.
+# Wirtstest des BAUM-BAUS: derselbe Baum bei verschiedenen Build-Entfernungen.
+# Prueft, dass die Geometrie nicht von der Build-Entfernung abhaengt und dass es
+# keinen Abstand mit nacktem Stamm gibt.
+test-tree: tools/test_tree_build.c src/trees_cpu.c src/terrain_cpu.c src/tree_lod.c
+	$(CC) -O1 -Wall -Wextra -std=gnu11 -Isrc -o bin/test_tree_build tools/test_tree_build.c src/trees_cpu.c src/terrain_cpu.c src/tree_lod.c -lm -lpthread
+	./bin/test_tree_build
+
 test-lod: tools/test_tree_lod.c src/tree_lod.c src/tree_lod.h
 	$(CC) -O1 -Wall -Wextra -std=c11 -o bin/test_tree_lod tools/test_tree_lod.c src/tree_lod.c -lm
 	./bin/test_tree_lod
@@ -33,4 +40,4 @@ test-lod: tools/test_tree_lod.c src/tree_lod.c src/tree_lod.h
 clean:
 	rm -rf bin src/shaders_gen.c
 
-.PHONY: all clean test-lod
+.PHONY: all clean test-lod test-tree

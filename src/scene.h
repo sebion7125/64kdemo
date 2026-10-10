@@ -153,6 +153,8 @@ typedef struct {
   // der Composite zeichnet pro Uebergang eine andere Range (bei R1 kommen die
   // Karten, bei R2 kommen die Huellen-Quadrate und die Karten gehen ab).
   int hull0, hullN;
+  // Diagnose (Wirtstest): Rastermasse der Huelle und Zahl der Buschel
+  int sprigN; short hzNaz, hzNhy; float hzCs; unsigned sprigHash;
 } TreeSlot;
 extern TreeSlot *treeSlotsD;                 // Zeichenseite (nach trees_build_finish)
 extern int      treeSlotND;
@@ -162,6 +164,8 @@ void trees_build_finished_snapshot(float **tv, float **cv, float **lv,
                                    const TreeSlot **slots, int *nslots);
 int  trees_thread_start(void);
 // Ein-Baum-Szene (DEMO_ONE): was der Build fuer DEN einen Baum entschieden hat
+extern int   treeDbgSprig;      // gefundene Buschel des letzten Baums
+extern int   treeDbgSprigHash;  // Pruefsumme seiner Buschel-Positionen
 extern int   treeDbgTier, treeDbgVerts, treeDbgCrown, treeDbgLeaf, treeDbgBuilds;
 extern float treeDbgR1, treeDbgR2, treeDbgDBuild, treeDbgH, treeDbgX, treeDbgZ, treeDbgY;
 extern int   treeDbgBucket; extern float treeDbgRepX, treeDbgRepZ;

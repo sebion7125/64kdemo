@@ -168,7 +168,7 @@ void main(){
   // ferne Baeume ploppen beim Kameramarsch. vEdge traegt den Rand stattdessen
   // als Schwellen-Hebung in den Fragment-Shader (Aufloesung der Textur-Alpha,
   // opak, reihenfolge-unabhaengig).
-  float far = (uFarCut > 1.0) ? lodFarFade(uFarCut, d3) : 1.0;
+  float far = (uFarCut > 1.0) ? lodFarFade(uFarCut, d) : 1.0;   // d = kanonischer
   vEdge = far;
   // Rand-Aufloesung der Huelle: GANZE Zellen fallen weg, nicht Pixel. Die Zelle
   // traegt ueber ihren Seed einen stabilen Wert rc in [0,1); sie bleibt bis
