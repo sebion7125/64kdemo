@@ -176,7 +176,8 @@ extern float ezLeafScale, ezLeafPer;   // DEMO_LEAFSC / DEMO_LEAFPER
 extern int treeTabDump;
 extern int treeCardDivN; extern float treeCardScaleN;   // DEMO_CARDT2 (Basisstufe)
 extern int treeBillboard0;   // tier 0 als Ganzbaum-Billboard (TODO 23)
-extern int treeHullOn; extern float treeHullSc;     // FERN-Stufe: tangentiale Buschel-Quadrate (tier 1)
+extern int treeHullOn; extern float treeHullSc;     // FERN-Stufe: Kronenhuelle als Zylinder-Raster (tier 1)
+extern float treeHullCell; extern int treeHullAz;  // DEMO_HULLCELL Zellgroesse, DEMO_HULLAZ Azimut-Zellen (0=automatisch)
 extern int treeBB0Cards;     // Zusatzkarten darunter (DEMO_BB0CARDS)
 extern int treeDowngraded;   // wegen Budget auf die groebste Stufe herabgestuft
 extern int treeT2Stride, treeT2Gnum, treeT2Gden;   // DEMO_T2 (Sweep-Bank)

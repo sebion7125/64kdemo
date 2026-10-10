@@ -2274,6 +2274,8 @@ int main(int argc, char **argv) {
   { const char *nb = getenv("DEMO_NOBB0"); if (nb) treeBillboard0 = atoi(nb) ? 0 : 1; }
   { const char *nb = getenv("DEMO_HULL");  if (nb) treeHullOn = atoi(nb) ? 1 : 0; }
   { const char *nb = getenv("DEMO_HULLSC"); if (nb) treeHullSc = (float)atof(nb); }
+  { const char *nb = getenv("DEMO_HULLCELL"); if (nb) treeHullCell = (float)atof(nb); }
+  { const char *nb = getenv("DEMO_HULLAZ"); if (nb) treeHullAz = atoi(nb); }
   { const char *bc = getenv("DEMO_BB0CARDS"); if (bc) treeBB0Cards = atoi(bc) < 0 ? 0 : atoi(bc); }
   { const char *t2 = getenv("DEMO_T2");
     if(t2){ int a = 3, b = 3, c = 4;
@@ -3859,19 +3861,18 @@ int main(int argc, char **argv) {
         if(cd5++ < 14){ long area = 0, inst = 0;
           for(int q = 0; q < nCs; q++){ area += (long)csB[q]*csH[q];
                                        inst += treeSlotsD[csIdx[q]].cardN; }
-          float rmin = 1e9f, rmax = 0; int nR1 = 0, nR2 = 0;
+          float rmin = 1e9f, rmax = 0;
           for(int q = 0; q < nCs; q++){
             const TreeSlot *sl2 = &treeSlotsCur[csIdx[q]];
             if(sl2->R1 < rmin) rmin = sl2->R1; if(sl2->R1 > rmax) rmax = sl2->R1;
-            if(csD[q] > sl2->R1 * 1.05f) nR2++;
           }
           printf("COMPROBAUM %d Baeume in der Blende (Sicht %d..%d m, w %.2f..%.2f,"
-                 " R1 %.1f, R1-Spanne %.1f..%.1f, d>1.05R1: %d) | Boxflaeche %ld px"
+                 " R1 %.1f, R1-Spanne %.1f..%.1f) | Boxflaeche %ld px"
                  " (= %.1f %% des Bildes) | Karten-Instanzen %ld (doppelt gezeichnet:"
                  " %ld von %ld gesamt)\n",
                  nCs, nCs?(int)csD[nCs-1]:0, nCs?(int)csD[0]:0,
                  nCs?csW[nCs-1]:0.0f, nCs?csW[0]:0.0f,
-                 nCs?treeSlotsCur[csIdx[0]].R1:0.0f, rmin, rmax, nR2, area,
+                 nCs?treeSlotsCur[csIdx[0]].R1:0.0f, rmin, rmax, area,
                  100.0*(double)area/((double)fboW*fboH), inst, inst,
                  (long)nCrownVertsCur); } }
       if(nCs > 0){

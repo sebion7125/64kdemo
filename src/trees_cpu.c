@@ -327,10 +327,16 @@ int treeT2Stride = 3, treeT2Gnum = 3, treeT2Gden = 4;
 int treeDowngraded = 0;   // Baeume, die wegen Budget auf die groebste Stufe fielen
 int treeBB0Cards = 0;    // Zusatzkarten unter dem tier-0-Billboard (DEMO_BB0CARDS)
 int gHullStart = 0, gHullN = 0;   // Range der Huellen-Quadrate dieses Baums
+int gHullNaz = 0, gHullNhy = 0; float gHullCs = 0.0f;   // Rastermasse (TREETAB)
 static int treeSlotCard0, treeSlotCardN, treeSlotHull0, treeSlotHullN;
-int treeHullOn = 1; float treeHullSc = 1.40f;  // DEMO_HULLSC: 1,4 gleicht die Deckung aus (eine
-                             // Huelle statt zweier gekreuzter Karten):
-                             // 127 m: 28 px (1,0) -> 35 px (1,4) gegen 34 px Karten        // DEMO_HULL=0 schaltet die FERN-Stufe ab
+int treeHullOn = 1; float treeHullSc = 1.05f;   // DEMO_HULLSC: Ueberlappung der
+                             // Huellenzellen (1,0 = exakt kachelnd, 1,05 schliesst
+                             // die Ecken der quadratischen Zellen)
+float treeHullCell = 1.4f;  // DEMO_HULLCELL: Zellgroesse in Buscheldurchmessern
+                             // (gemessen an einem 3,9-m-Baum, 139 m: Karten 484 Instanzen ->
+                             // 21 helle Px; Huelle 1,0 -> 64/15 Px, 1,4 -> 43/25 Px, 2,5 -> 17/29 Px)
+int   treeHullAz = 0;       // DEMO_HULLAZ: Azimut-Zellen (0 = automatisch aus der
+                            // Kronenweite, damit die Zellen quadratisch bleiben)
 int treeBillboard0 = 0;      // 0 = ferne Baeume mit Karten (Standard), 1 =
                              // Ganzbaum-Impostor. Der Impostor-Pfad malt zurzeit
                              // eine schwarze Flaeche (Kachel liefert RGB 0 und
@@ -462,7 +468,6 @@ static void emit_sprig_quads(float seed, int want){
   int variant = (int)(fabsf(seed) * 7.31f) % 4;
   if(ezNSprig <= 0 || want <= 0) return;
   int stride = ezNSprig / want; if(stride < 1) stride = 1;
-  int want2 = want, stride2 = stride;
   for(int q = 0; q < ezNSprig && want > 0; q += stride, want--){
     float h3 = TH(97 + q * 3), h4 = TH(98 + q * 3);
     float qseed = h4 * 13.7f + q * 0.37f;
@@ -482,29 +487,81 @@ static void emit_sprig_quads(float seed, int want){
       nCrownVerts++;
     }
   }
-  // ---- FERN-Stufe (tier 1): tangentiale Buschel-Quadrate ------------------
-  // Ein Quadrat pro Buschel, Normale zeigt radial von der Kronenachse weg.
-  // Damit ist die ferne Krone blickrichtungsunabhaengig (kein Mitschwenken wie
-  // bei kamerazugewandten Karten), opak und pro Pixel durch den Tiefenpuffer
-  // geloest. Die Form kommt aus den echten Buschelpositionen, nicht aus einem
-  // Gitter — eine Tanne bekommt dadurch automatisch ihre Kegelform.
+  // ---- FERN-Stufe (tier 1): Kronenhuelle als Zylinder-Raster -----------------
+  // Die Buschel werden in Zellen eines Rasters um die Kronenachse geworfen
+  // (Azimut x Hoehe). Pro besetzter Zelle steht EIN Quadrat tangential an der
+  // Huelle, Mitte auf dem mittleren Radius der Zelle. Leere Zellen bleiben weg:
+  // die ferne Krone ist an denselben Stellen durchsichtig wie die echte.
+  // Die Azimut-Zahl wird aus der Kronenweite gewaehlt, damit Zellbreite
+  // (Bogenlaenge) und Zellhoehe gleich sind und die Quadrate die Huelle exakt
+  // kacheln. Die Form kommt aus den echten Buschelpositionen — eine Tanne wird
+  // dadurch automatisch zum Kegel, eine lichte Krone bekommt Luecken.
+  // Opak mit Alpha-Test: Verdeckung und Selbstschnitt loest der Tiefenpuffer.
   // Absichtlich NACH den Karten emittiert: beide Range bleiben getrennt, der
   // Composite zeichnet pro Uebergang eine andere Range.
   if(!treeHullOn) return;
   gHullStart = nCrownVerts;
-  for(int q = 0; q < ezNSprig && want2 > 0; q += stride2, want2--){
-    float h4 = TH(98 + q * 3);
-    float qseed = h4 * 13.7f + q * 0.37f;
-    if(nCrownVerts + 1 > CROWN_CAP){ treeCapCrown++; break; }
-    float *d = &crownVerts[nCrownVerts * CROWN_FLOATS];
-    float dx = ezSx[q] - gAnchorX, dz = ezSz[q] - gAnchorZ;
-    d[0] = ezSx[q]; d[1] = ezSy[q]; d[2] = ezSz[q];
-    d[3] = ezSsize[q] * treeHullSc;   // DEMO_HULLSC: Deckungsgrad der FERN-Stufe
-    d[4] = atan2f(dx, dz);                 // tangential: Normale = (sin a, 0, cos a)
-    d[5] = qseed; d[6] = 8.0f + (float)variant;   // 8..11 = Huellen-Quadrat
-    d[7] = gLodR; d[8] = ezLeafR; d[9] = ezLeafG; d[10] = ezLeafB; d[11] = gLodR2;
-    d[12] = gAnchorX; d[13] = gAnchorZ;
-    nCrownVerts++;
+  {
+    enum { HULL_AZMAX = 32, HULL_HYMAX = 24 };
+    static int   cellN[HULL_AZMAX * HULL_HYMAX];
+    static float cellR[HULL_AZMAX * HULL_HYMAX], cellY[HULL_AZMAX * HULL_HYMAX];
+    float csum = 0.0f, ylo = 1e9f, yhi = -1e9f, rmaxq = 0.0f;
+    int nq = 0;
+    for(int q = 0; q < ezNSprig; q++){
+      if(ezSsize[q] <= 0.0f) continue;
+      csum += ezSsize[q]; nq++;
+      if(ezSy[q] < ylo) ylo = ezSy[q];
+      if(ezSy[q] > yhi) yhi = ezSy[q];
+      float dx = ezSx[q] - gAnchorX, dz = ezSz[q] - gAnchorZ;
+      float r = sqrtf(dx * dx + dz * dz);
+      if(r > rmaxq) rmaxq = r;
+    }
+    if(nq == 0 || yhi <= ylo) return;
+    float cs = (csum / (float)nq) * treeHullCell;   // Zellgroesse in Weltmetern
+    if(cs < 0.05f) cs = 0.05f;
+    float rm = rmaxq;                               // weiteste Kronenausdehnung
+    int naz = treeHullAz > 0 ? treeHullAz : (int)(6.283185f * rm / cs + 0.5f);
+    if(naz < 6) naz = 6;
+    if(naz > HULL_AZMAX) naz = HULL_AZMAX;
+    int nhy = (int)((yhi - ylo) / cs) + 1;
+    if(nhy > HULL_HYMAX){ cs = (yhi - ylo) / (float)HULL_HYMAX; nhy = HULL_HYMAX; }
+    float daz = 6.283185f / (float)naz;
+    gHullNaz = naz; gHullNhy = nhy; gHullCs = cs;
+    memset(cellN, 0, sizeof(int) * (size_t)(naz * nhy));
+    memset(cellR, 0, sizeof(float) * (size_t)(naz * nhy));
+    memset(cellY, 0, sizeof(float) * (size_t)(naz * nhy));
+    for(int q = 0; q < ezNSprig; q++){
+      if(ezSsize[q] <= 0.0f) continue;
+      float dx = ezSx[q] - gAnchorX, dz = ezSz[q] - gAnchorZ;
+      float r = sqrtf(dx * dx + dz * dz);
+      float az = atan2f(dx, dz); if(az < 0.0f) az += 6.283185f;
+      int ia = (int)(az / daz); if(ia >= naz) ia = naz - 1;
+      int ih = (int)((ezSy[q] - ylo) / cs); if(ih >= nhy) ih = nhy - 1;
+      int c = ih * naz + ia;
+      cellN[c]++; cellY[c] += ezSy[q];
+      if(r > cellR[c]) cellR[c] = r;     // aeussere Huelle, nicht Mitte
+    }
+    for(int ih = 0; ih < nhy; ih++){
+      for(int ia = 0; ia < naz; ia++){
+        int c = ih * naz + ia;
+        if(cellN[c] == 0) continue;              // Luecke: nichts emittiert
+        if(nCrownVerts + 1 > CROWN_CAP){ treeCapCrown++; break; }
+        float r = cellR[c];                      // aeusserster Buschel der Zelle
+        if(r < 0.35f * cs) r = 0.35f * cs;       // Spitze: nicht auf der Achse
+        float azc = ((float)ia + 0.5f) * daz;
+        float *d = &crownVerts[nCrownVerts * CROWN_FLOATS];
+        d[0] = gAnchorX + sinf(azc) * r;
+        d[1] = cellY[c] / (float)cellN[c];
+        d[2] = gAnchorZ + cosf(azc) * r;
+        d[3] = cs * treeHullSc;
+        d[4] = azc;                              // Normale = (sin azc, 0, cos azc)
+        d[5] = (float)ia * 3.7f + ih * 1.31f;    // Kachelversatz, stabil pro Zelle
+        d[6] = 8.0f + (float)variant;            // 8..11 = Huellen-Quadrat
+        d[7] = gLodR; d[8] = ezLeafR; d[9] = ezLeafG; d[10] = ezLeafB; d[11] = gLodR2;
+        d[12] = gAnchorX; d[13] = gAnchorZ;
+        nCrownVerts++;
+      }
+    }
   }
   gHullN = nCrownVerts - gHullStart;
 }
@@ -1729,10 +1786,11 @@ int trees_build_step(int maxTrees){
         fprintf(stderr, "TREETAB x=%7.2f z=%7.2f y=%6.2f s=%5.3f H=%5.2f hintBlatt=%5.3f "
                         "hintBuschel=%5.3f gemessenBlatt=%.3f..%.3f gemessenBuschel=%.3f..%.3f "
                         "focalpx=%6.0f R1=%6.2f R2=%6.2f tier=%d dbuild=%6.2f "
-                        "blaetter=%5d karten=%4d huellen=%4d pres=%d\n",
+                        "blaetter=%5d karten=%4d huellen=%4d pres=%d huellenraster=%dx%d zelle %.2f m\n",
                 cand[i].p[0], cand[i].p[2], cand[i].p[1], cand[i].s, H, ezLeafHint, ezCardHint,
                 lmin, lmax, cmin, cmax, gFocalPx, R1, R2, tier, d,
-                nLeafInst - leafBefore, treeSlotCardN, treeSlotHullN, treeDbgPres);
+                nLeafInst - leafBefore, treeSlotCardN, treeSlotHullN, treeDbgPres,
+                gHullNaz, gHullNhy, gHullCs);
         if(treeSlotHullN > 0){
           const float *hd = &crownVerts[(size_t)(nCrownVerts - treeSlotHullN) * CROWN_FLOATS];
           const float *cd = &crownVerts[(size_t)quadBefore * CROWN_FLOATS];
