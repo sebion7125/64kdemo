@@ -3710,3 +3710,46 @@ belastet die VM) -> Schuss bei Frame 1, der Vergleichslauf bei Frame ~380.
 Zwei Laeufe mit identischer Konfiguration und `DEMO_SHOTFRAME=8` sind bitgleich
 (0 Pixel Unterschied, gruen 7 778 in beiden). Der Vergleich selbst ist
 unveraendert streng; nur der Ausloesezeitpunkt ist jetzt reproduzierbar.
+
+## RUNDE 2026-10-10 (2): nackte Baeume, Salat, Reichweite — gemessen
+
+NACKTE BAEUME / HUELLE "KAUM GEZEICHNET": Ursache war die Rand-Aufloesung vom Vortag
+(`thr /= vEdge` in crown.frag). Eine minifizierte Buschel-Kachel hat überall
+Atlas-Alpha ~0,27, Grundschwelle ~0,19 — schon vEdge = 0,7 hebt die Schwelle ueber
+0,27 und die Krone ist weg. Gemessen (Ein-Baum, 320x180): 12 helle Px bei 178 m, nur
+4 Px bei 202 m. Ersetzt: ganze Huellen-Zellen fallen weg (stabiler Zellwert rc aus dem
+Seed, Zelle bleibt bis rc > far). Nachher 16 Px bei 184 m, 14 Px bei 200 m — die Krone
+wird mit Entfernung nicht schwächer.
+
+SALAT BEI TASTE 1: der Ganzbaum-Impostor ist durch die Huelle ersetzt; Taste 1 schaltet
+ihn nicht mehr ein (die Kachel-Aufnahme malte Huellen-Quadrate in die Kachel).
+
+EXISTENZ = SICHTBARKEIT (Karten nur bis 1,10 R2 + Build-Nachlauf, Huelle erst ab
+0,90 R2 - Nachlauf). Das ist der Hebel fuer die Reichweite. Gemessen (VM, 640x360):
+
+| Baukante | Baeume | uebersprungen | Kronen-Instanzen | Geruest-Vertices | Blaetter | Bauen (VM) |
+|---|---|---|---|---|---|---|
+| 180 m | 640 | 0 | 460 851 | 1 070 007 | 1 108 880 | 483 ms |
+| 297 m | 1639 | 0 | 697 482 | 1 232 796 | 1 223 480 | 687 ms |
+| 450 m | 3761 | 0 | 863 787 | 1 351 119 | 1 223 480 | 1188 ms |
+
+Vor dem Schnitt: 297 m = 529 uebersprungene Baeume (Karten-Puffer 1 199 835/1 200 000
+voll), 450 m = 2651 von 3761 uebersprungen. Terrainsichtweite (84 % Dunst) liegt bei
+~450 m — die Baukante kann also auf 450 m, aber ein VOLLSTAENDIGER Neubau kostet dann
+1,2 s (VM, Host etwa 4x schneller) pro Schaufen-Wechsel. Der Per-Baum-Slot-Cache
+(inkrementeller Bau) bleibt deshalb der naechste Schritt.
+
+HUELLEN-ZELLEN-SWEEP (Testbaum, 320x180, R2 = 114,6 m):
+
+| Zellgroesse (Buscheldurchmesser) | Delle im Uebergang | fern (180/200 m) | Zellen/Baum |
+|---|---|---|---|
+| 1,0 | keine (LT-ERGBNIS OK) | 8–11 Px | 64 |
+| 1,4 (Standard) | −9,6 % bei 105,5 m | 15 Px | 41 |
+| 2,0 | −19 % bei 106,0 m | 14–17 Px | 23 |
+
+Die Delle ist kein Deckungsloch: die Helligkeitssumme steigt (12414 → 13817), nur die
+Zahl ueberschrittener Pixel faellt — Ursache sind die unterschiedlichen Farben von
+Karten- und Huellen-Kacheln (vom Nutzer gemeldet, offen).
+
+Selbsttest: alle Pruefungen OK. Hinweis: ein Lauf mitten in parallelen Messlaeufen
+brach mit "keine Caps-Zeile" (CPU-Streit), allein laeuft er wieder durch.
