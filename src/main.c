@@ -2256,7 +2256,8 @@ int main(int argc, char **argv) {
   { const char *ly = getenv("DEMO_LAYERS");   // z.B. "leaf", "card", "bb", "leaf,card"
     if(ly){ layLeaf = strstr(ly,"leaf") ? 1 : 0;
             layCard = strstr(ly,"card") ? 1 : 0;
-            layBB   = strstr(ly,"bb")   ? 1 : 0; } }
+            layBB   = strstr(ly,"bb")   ? 1 : 0;
+            layHull = strstr(ly,"hull") ? 1 : 0; } }
   { const char *ef = getenv("DEMO_FREEZE"); if (ef) envFreeze = (float)atof(ef); }
   { const char *pf = getenv("DEMO_PRESFORCE"); if (pf) treeDbgPresForce = atoi(pf); }
   { const char *ec = getenv("DEMO_COMP"); if (ec) envComp = atoi(ec); }

@@ -190,6 +190,12 @@ void main(){
       else { if(in1 > 0.5) w1 = 0.0; }   // Phase 3 = Kopie-Puffer: nur Karten, keine Blaetter
     }
   }
+  // Die Anzeige-Filter (Tasten 4/5/6/8) müssen AUCH im Composite gelten: der
+  // Composite-Zweig oben setzt w1/w2 neu, ohne die Filter anzuwenden — deshalb
+  // waren bei "nur Einzelblaetter" die Karten der Blend-Baeume trotzdem da.
+  if(hull > 0.5)      w2 *= uHullOn;
+  else if(bbq > 0.5)  w2 *= uBillboardOn;
+  else              { w1 *= uCardsOn; w2 *= uCardsOn; }
   if(uFizOn < 0.5){ w1 = (w1 >= 0.5) ? 1.0 : 0.0; w2 = (w2 >= 0.5) ? 1.0 : 0.0; }
   vFiz1 = w1; vFiz2 = w2; vFizInv1 = inv1; vFizInv2 = inv2;
   // Weltzellen von etwa EINEM Bildpunkt (Anker des Baums, damit Blatt- und

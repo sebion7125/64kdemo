@@ -500,6 +500,11 @@ static void emit_sprig_quads(float seed, int want){
   // Opak mit Alpha-Test: Verdeckung und Selbstschnitt loest der Tiefenpuffer.
   // Absichtlich NACH den Karten emittiert: beide Range bleiben getrennt, der
   // Composite zeichnet pro Uebergang eine andere Range.
+  // Range VOR jedem fruehen Return setzen: ohne das behalten gHullStart/gHullN
+  // die Werte des vorherigen Baums, und der Per-Baum-Slot (TreeSlot.hull0/hullN)
+  // sowie der Aufnahme-Slice zeigen dann auf fremde Instanzen. Gemessen: 19 von
+  // 640 Baeumen liegen jenseits der Baukante und waeren betroffen gewesen.
+  gHullStart = nCrownVerts; gHullN = 0;
   if(!treeHullOn) return;
   // Jenseits der Baukante gibt es keinen Baum mehr im Puffer. Die Huelle darf
   // dort aber nicht mit Gewicht 1 stehen, sonst ploppen ferne Baeume beim
@@ -508,7 +513,6 @@ static void emit_sprig_quads(float seed, int want){
   // gar nicht. Gemessen (640 Baeume, 640x360): 302 Baeume standen mit
   // Huellengewicht 1,0 zwischen 178 und 268 m.
   if(gTreeDist > gFarCut + LOD_BUILD_LAG) return;
-  gHullStart = nCrownVerts;
   {
     enum { HULL_AZMAX = 32, HULL_HYMAX = 24 };
     static int   cellN[HULL_AZMAX * HULL_HYMAX];
@@ -1833,7 +1837,13 @@ int trees_build_step(int maxTrees){
       struct ImpRep *ir = &impRepD[ezBucket];
       ir->valid = 1; ir->dense = dense; ir->tier = tier;
       ir->vStart = vertBefore; ir->vCount = nTreeVerts - vertBefore;
-      ir->cStart = quadBefore; ir->cCount = nCrownVerts - quadBefore;
+      // NUR die Karten, NIC die Huellen-Quadrate: die Kachel-Aufnahme malt mit
+      // uImpostor, und die Huellen-Quadrate liegen auf der Zylinderhuelle mit
+      // eigener Kachelwahl — sie fuellen die Ganzbaum-Kachel mit fremden Farben
+      // (Nutzer: "bunter Salat, der fast den ganzen Bildschirm abdeckt").
+      ir->cStart = quadBefore;
+      ir->cCount = gHullStart - quadBefore;
+      if(ir->cCount < 0) ir->cCount = 0;
       ir->lStart = leafBefore; ir->lCount = nLeafInst - leafBefore;
       ir->nTree = impNTree[ezBucket];
       ir->cx = cand[i].p[0]; ir->cy = cand[i].p[1]; ir->cz = cand[i].p[2];
