@@ -122,7 +122,16 @@ void main(){
   // Uebergang zwischen den Schichten ist Wegwerfen. Kein Alpha-Blend ->
   // reihenfolge-unabhaengig, schneidende Karten korrekt, Tiefenpuffer stimmt.
   if(vCrown < 0.5){
-    if(a < 0.5) discard;
+    // Schwelle mit der Mip-Stufe senken. Eine Buschel-Kachel deckt nur ~27 %
+    // ihrer Flaeche ab (gemessen: Alpha-Mittel 0,27). Box-gefiltert bleibt der
+    // Mittelwert ueber alle Mip-Stufen erhalten — eine feste Schwelle 0,5
+    // verwirft deshalb AB JEDER minifizierten Karte alles: im Ein-Baum-Test ab
+    // 126 m ueberhaupt kein Kronen-Fragment mehr (0 helle Pixel bei 138..142 m,
+    // auch mit der Karten-Stufe). Mit sinkender Schwelle bleibt die Silhouette
+    // bei grossen Karten hart (lod 0 -> 0,5) und die ferne Krone hoert nicht
+    // auf zu existieren.
+    float thr = 0.5 * exp2(-0.6 * lod);
+    if(a < thr) discard;
     if(uFizOn > 0.5){
       float n1 = lodFizN(vPos, vFizScale, 0.0);
       float n2 = lodFizN(vPos, vFizScale, 57.0);

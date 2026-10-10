@@ -149,6 +149,10 @@ typedef struct {
   // Boxflaeche fuer 10 Baeume bei 640x360 = 815 % des Bildes, und die Boxen
   // bestimmen, wie viel der Mischpass und der Kopierpass fuellen.
   float hx0, hx1, hy0, hy1, hz0, hz1;
+  // Karten- und Huellen-Instanzen liegen GETRENNT hintereinander im Puffer:
+  // der Composite zeichnet pro Uebergang eine andere Range (bei R1 kommen die
+  // Karten, bei R2 kommen die Huellen-Quadrate und die Karten gehen ab).
+  int hull0, hullN;
 } TreeSlot;
 extern TreeSlot *treeSlotsD;                 // Zeichenseite (nach trees_build_finish)
 extern int      treeSlotND;
@@ -172,6 +176,7 @@ extern float ezLeafScale, ezLeafPer;   // DEMO_LEAFSC / DEMO_LEAFPER
 extern int treeTabDump;
 extern int treeCardDivN; extern float treeCardScaleN;   // DEMO_CARDT2 (Basisstufe)
 extern int treeBillboard0;   // tier 0 als Ganzbaum-Billboard (TODO 23)
+extern int treeHullOn; extern float treeHullSc;     // FERN-Stufe: tangentiale Buschel-Quadrate (tier 1)
 extern int treeBB0Cards;     // Zusatzkarten darunter (DEMO_BB0CARDS)
 extern int treeDowngraded;   // wegen Budget auf die groebste Stufe herabgestuft
 extern int treeT2Stride, treeT2Gnum, treeT2Gden;   // DEMO_T2 (Sweep-Bank)

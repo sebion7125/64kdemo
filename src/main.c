@@ -2272,6 +2272,8 @@ int main(int argc, char **argv) {
   // treeBillboard0 = atoi(nb) liess den Billboard AN, gemessen an identischen
   // Karten-Zahlen: Stufe 0 364 Karten mit und ohne den Knopf.)
   { const char *nb = getenv("DEMO_NOBB0"); if (nb) treeBillboard0 = atoi(nb) ? 0 : 1; }
+  { const char *nb = getenv("DEMO_HULL");  if (nb) treeHullOn = atoi(nb) ? 1 : 0; }
+  { const char *nb = getenv("DEMO_HULLSC"); if (nb) treeHullSc = (float)atof(nb); }
   { const char *bc = getenv("DEMO_BB0CARDS"); if (bc) treeBB0Cards = atoi(bc) < 0 ? 0 : atoi(bc); }
   { const char *t2 = getenv("DEMO_T2");
     if(t2){ int a = 3, b = 3, c = 4;
@@ -3700,7 +3702,7 @@ int main(int argc, char **argv) {
       if(locCFade >= 0) p_glUniform1f(locCFade, treeFadeNew);
       if(locCCards >= 0) p_glUniform1f(locCCards, (float)layCard);
       if(locCBB >= 0) p_glUniform1f(locCBB, (float)layBB);
-      if(locCBP >= 0) p_glUniform1f(locCBP, (float)treeBillboard0);
+      if(locCBP >= 0) p_glUniform1f(locCBP, (float)(treeBillboard0 || treeHullOn));
       // Z-Buffer-Trick (Nutzer) waehrend einer Ueberblendung: gemischt wird ohne
       // Depth-Write (sonst verdeckt eine halb durchsichtige Karte den Hintergrund,
       // der erst danach kommt), und danach schreibt ein Farbmaske-aus-Pass die
@@ -3760,6 +3762,9 @@ int main(int argc, char **argv) {
     if(envComp && treeSlotNCur > 0){
       static int   csIdx[TREE_SLOT_MAX];
       static float csW[TREE_SLOT_MAX], csD[TREE_SLOT_MAX];
+      // csR2[q] = 1: dieser Baum haengt im R2-Band (Karten -> FERN-Stufe).
+      // Dann ist die ABGEHENDE Stufe der Karten und die KOMMENDE die Huelle.
+      static unsigned char csR2[TREE_SLOT_MAX];
       static int   csX[TREE_SLOT_MAX], csY[TREE_SLOT_MAX], csB[TREE_SLOT_MAX], csH[TREE_SLOT_MAX];
       float focalPx = 1.7f * (float)fboH;
       int nCs = 0;
@@ -3769,7 +3774,12 @@ int main(int argc, char **argv) {
         float dx = camPos[0] - sl->ax, dz = camPos[2] - sl->az;
         float d = sqrtf(dx*dx + dz*dz);
         TreeLod L; L.H = sl->h; L.R1 = sl->R1; L.R2 = sl->R2;
-        L.bb = treeBillboard0; L.pres = sl->pres; L.focalPx = focalPx;
+        // FERN-Stufe liegt vor, wenn IM GEBAUTEN PUFFER ein Ganzbaum-Kachel-
+        // oder Huellen-Quadrat dieses Baums sitzt (Variante >= 4). Gemessen,
+        // nicht gewollt: treeHullOn/treeBillboard0 koennen beim Build anders
+        // gewesen sein als das, was schliesslich im Puffer landete.
+        L.bb = (sl->pres & LOD_PRES_BB) ? 1 : 0;
+        L.fern = L.bb; L.pres = sl->pres; L.focalPx = focalPx;
         float w = 0.0f;
         int inBand = 0;
         if(d > L.R1 * LOD_BAND_LO && d < L.R1 * LOD_BAND_HI){ w = treeLodWCard(&L, d); inBand = 1; }
@@ -3818,6 +3828,7 @@ int main(int argc, char **argv) {
           if(bw <= 0 || bh <= 0) continue;
         }
         csIdx[nCs] = i; csW[nCs] = w; csD[nCs] = d;
+        csR2[nCs] = (unsigned char)((w != treeLodWCard(&L, d)) ? 1 : 0);
         csX[nCs] = bx; csY[nCs] = by; csB[nCs] = bw; csH[nCs] = bh;
         nCs++;
       }
@@ -3832,6 +3843,7 @@ int main(int argc, char **argv) {
             int *v = (k==0)?csX:(k==1)?csY:(k==2)?csB:csH;
             int tv = v[b]; v[b] = v[b-1]; v[b-1] = tv;
           }
+          { unsigned char tb = csR2[b]; csR2[b] = csR2[b-1]; csR2[b-1] = tb; }
         }
       if(getenv("DEMO_COMPDBG")){ static int cd6 = 0;
         if(cd6++ < 4 && treeSlotNCur > 0){
@@ -3897,9 +3909,36 @@ int main(int argc, char **argv) {
           p_glBlitNamedFramebuffer(fbo, fboB, bx, by, bx + bw, by + bh,
                                    bx, by, bx + bw, by + bh,
                                    GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST);
-          // 2) abgehende Stufe (Einzelblaetter) in die Kopie
+          // 2) abgehende Stufe in die Kopie: im R1-Band die Einzelblaetter,
+          //    im R2-Band die Karten DIESES Baums
           p_glBindFramebuffer(GL_FRAMEBUFFER, fboB);
-          if(sl->leafN > 0){
+          if(csR2[q] && sl->cardN > 0){
+            p_glUseProgram(progCrown);
+            if(locCPhase >= 0) p_glUniform1f(locCPhase, 3.0f);
+            if(locCFocal >= 0) p_glUniform1f(locCFocal, focalPx);
+            if(locCFiz >= 0) p_glUniform1f(locCFiz, 0.0f);
+            if(locCFlut >= 0) p_glUniform1f(locCFlut, dbgFlutter ? 1.0f : 0.0f);
+            p_glUniformMatrix4fv(locCMVP, 1, GL_FALSE, mvp);
+            p_glUniform3f(locCCam, camPos[0], camPos[1], camPos[2]);
+            p_glUniform3f(locCTgt, camTgt[0], camTgt[1], camTgt[2]);
+            p_glActiveTexture(GL_TEXTURE0); p_glBindTexture(GL_TEXTURE_2D, folTex);
+            p_glUniform1i(locCFol, 0);
+            p_glActiveTexture(GL_TEXTURE1); p_glBindTexture(GL_TEXTURE_2D, crnTex);
+            if(locCFol2 >= 0) p_glUniform1i(locCFol2, 1);
+            p_glActiveTexture(GL_TEXTURE0);
+            p_glUniform1f(locCMask, (float)envCrownMask);
+            if(locCLFace >= 0) p_glUniform1f(locCLFace, 0.0f);
+            p_glUniform1f(locCTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
+            if(locCFade >= 0) p_glUniform1f(locCFade, 1.0f);
+            if(locCCards >= 0) p_glUniform1f(locCCards, 1.0f);
+            if(locCBB >= 0) p_glUniform1f(locCBB, 0.0f);
+            if(locCBP >= 0) p_glUniform1f(locCBP, 1.0f);
+            p_glUniform1f(locCDepth, 0.0f);
+            p_glDepthMask(GL_TRUE);
+            p_glBindVertexArray(vaoCrown[drawSet]);
+            p_glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 6, (GLsizei)sl->cardN,
+                                                (GLuint)sl->card0);
+          } else if(sl->leafN > 0){
             p_glUseProgram(progLeaf);
             p_glUniform1f(locLDepth, 0.0f);
             if(locLPhase >= 0) p_glUniform1f(locLPhase, 3.0f);
@@ -3918,9 +3957,11 @@ int main(int argc, char **argv) {
             p_glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 6, (GLsizei)sl->leafN,
                                                 (GLuint)sl->leaf0);
           }
-          // 3) kommende Stufe (Karten) in die Szene
+          // 3) kommende Stufe in die Szene: im R1-Band die Karten, im R2-Band
+          //    die Huellen-Quadrate
           p_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-          if(sl->cardN > 0){
+          int cN = csR2[q] ? sl->hullN : sl->cardN, c0 = csR2[q] ? sl->hull0 : sl->card0;
+          if(cN > 0){
             p_glUseProgram(progCrown);
             if(locCPhase >= 0) p_glUniform1f(locCPhase, 2.0f);
             if(locCFocal >= 0) p_glUniform1f(locCFocal, focalPx);
@@ -3940,15 +3981,15 @@ int main(int argc, char **argv) {
             if(locCFade >= 0) p_glUniform1f(locCFade, 1.0f);
             if(locCCards >= 0) p_glUniform1f(locCCards, (float)layCard);
             if(locCBB >= 0) p_glUniform1f(locCBB, (float)layBB);
-            if(locCBP >= 0) p_glUniform1f(locCBP, (float)treeBillboard0);
+            if(locCBP >= 0) p_glUniform1f(locCBP, (float)(treeBillboard0 || treeHullOn));
             p_glUniform1f(locCDepth, 0.0f);
             p_glDepthMask(GL_TRUE);
             p_glBindVertexArray(vaoCrown[drawSet]);
             if(compMixOn == 2)   // MESSBANK: alle Karten statt nur des Baums
               p_glDrawArraysInstanced(GL_TRIANGLES, 0, 6, (GLsizei)nCrownVertsCur);
             else
-              p_glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 6, (GLsizei)sl->cardN,
-                                                  (GLuint)sl->card0);
+              p_glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 6, (GLsizei)cN,
+                                                  (GLuint)c0);
           }
           // 4) Box mischen: Szene (kommende Stufe) gegen Kopie (abgehende Stufe).
           //    Ziel fboC, weil texScene gelesen wird — direktes Schreiben in fbo
@@ -4098,8 +4139,9 @@ int main(int argc, char **argv) {
         }
       }
       printf("LT-DECKUNG frame %4d d %6.2f m: %7d helle Pixel, Helligkeitssumme %8ld"
-             " (fade %.2f, Satz %d, cmp %d, Band %d)\n",
-             ltFrame - 1, dCov, lit, ltLum, treeFadeNew, drawSet, envComp ? 2 : 1, treeBandCount);
+             " (fade %.2f, Satz %d, cmp %d, Band %d, Kron-Instanzen %d, Huellen %d)\n",
+             ltFrame - 1, dCov, lit, ltLum, treeFadeNew, drawSet, envComp ? 2 : 1, treeBandCount,
+             nCrownVertsCur, treeSlotNCur > 0 ? treeSlotsCur[0].hullN : -1);
       ltLum = 0;
       fflush(stdout);
     }

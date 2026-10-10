@@ -326,6 +326,11 @@ int treeCardDivN = 4; float treeCardScaleN = 2.00f;   // div 4, dafuer 2 gekreuz
 int treeT2Stride = 3, treeT2Gnum = 3, treeT2Gden = 4;
 int treeDowngraded = 0;   // Baeume, die wegen Budget auf die groebste Stufe fielen
 int treeBB0Cards = 0;    // Zusatzkarten unter dem tier-0-Billboard (DEMO_BB0CARDS)
+int gHullStart = 0, gHullN = 0;   // Range der Huellen-Quadrate dieses Baums
+static int treeSlotCard0, treeSlotCardN, treeSlotHull0, treeSlotHullN;
+int treeHullOn = 1; float treeHullSc = 1.40f;  // DEMO_HULLSC: 1,4 gleicht die Deckung aus (eine
+                             // Huelle statt zweier gekreuzter Karten):
+                             // 127 m: 28 px (1,0) -> 35 px (1,4) gegen 34 px Karten        // DEMO_HULL=0 schaltet die FERN-Stufe ab
 int treeBillboard0 = 0;      // 0 = ferne Baeume mit Karten (Standard), 1 =
                              // Ganzbaum-Impostor. Der Impostor-Pfad malt zurzeit
                              // eine schwarze Flaeche (Kachel liefert RGB 0 und
@@ -457,6 +462,7 @@ static void emit_sprig_quads(float seed, int want){
   int variant = (int)(fabsf(seed) * 7.31f) % 4;
   if(ezNSprig <= 0 || want <= 0) return;
   int stride = ezNSprig / want; if(stride < 1) stride = 1;
+  int want2 = want, stride2 = stride;
   for(int q = 0; q < ezNSprig && want > 0; q += stride, want--){
     float h3 = TH(97 + q * 3), h4 = TH(98 + q * 3);
     float qseed = h4 * 13.7f + q * 0.37f;
@@ -476,6 +482,31 @@ static void emit_sprig_quads(float seed, int want){
       nCrownVerts++;
     }
   }
+  // ---- FERN-Stufe (tier 1): tangentiale Buschel-Quadrate ------------------
+  // Ein Quadrat pro Buschel, Normale zeigt radial von der Kronenachse weg.
+  // Damit ist die ferne Krone blickrichtungsunabhaengig (kein Mitschwenken wie
+  // bei kamerazugewandten Karten), opak und pro Pixel durch den Tiefenpuffer
+  // geloest. Die Form kommt aus den echten Buschelpositionen, nicht aus einem
+  // Gitter — eine Tanne bekommt dadurch automatisch ihre Kegelform.
+  // Absichtlich NACH den Karten emittiert: beide Range bleiben getrennt, der
+  // Composite zeichnet pro Uebergang eine andere Range.
+  if(!treeHullOn) return;
+  gHullStart = nCrownVerts;
+  for(int q = 0; q < ezNSprig && want2 > 0; q += stride2, want2--){
+    float h4 = TH(98 + q * 3);
+    float qseed = h4 * 13.7f + q * 0.37f;
+    if(nCrownVerts + 1 > CROWN_CAP){ treeCapCrown++; break; }
+    float *d = &crownVerts[nCrownVerts * CROWN_FLOATS];
+    float dx = ezSx[q] - gAnchorX, dz = ezSz[q] - gAnchorZ;
+    d[0] = ezSx[q]; d[1] = ezSy[q]; d[2] = ezSz[q];
+    d[3] = ezSsize[q] * treeHullSc;   // DEMO_HULLSC: Deckungsgrad der FERN-Stufe
+    d[4] = atan2f(dx, dz);                 // tangential: Normale = (sin a, 0, cos a)
+    d[5] = qseed; d[6] = 8.0f + (float)variant;   // 8..11 = Huellen-Quadrat
+    d[7] = gLodR; d[8] = ezLeafR; d[9] = ezLeafG; d[10] = ezLeafB; d[11] = gLodR2;
+    d[12] = gAnchorX; d[13] = gAnchorZ;
+    nCrownVerts++;
+  }
+  gHullN = nCrownVerts - gHullStart;
 }
 
 // Einzelblatt-Instanz: Basispunkt (Welt), Groesse, Orientierung, Seitenverhaeltnis, Farbe
@@ -1499,9 +1530,14 @@ int trees_build_step(int maxTrees){
     float ezLeafHint = 0.0f, ezCardHint = 0.0f;
     ez_size_hint(cand[i].p[0] * 12.9898f + cand[i].p[2] * 78.233f, cand[i].s,
                  &ezLeafHint, &ezCardHint);
-    TreeLod TL; treeLodInitPx(&TL, ezLeafHint, ezCardHint, gFocalPx,
-                           (float)treeBuildRange * TREE_G, treeLodScale);
-    TL.bb = treeBillboard0;
+    // fern MUSS vor InitPx gesetzt sein: die Klemme von R2 haengt davon ab.
+    // Mit FERN-Stufe (Huelle) darf R2 nicht ueber die Baukante geschoben werden,
+    // sonst erscheint die FERN-Stufe nie (gemessen vorher: R2 = 207 m bei einer
+    // Baukante von 180 m -> ab 126 m gar keine Krone mehr).
+    TreeLod TL; TL.fern = treeHullOn ? 1 : 0;
+    treeLodInitPx(&TL, ezLeafHint, ezCardHint, gFocalPx,
+                  (float)treeBuildRange * TREE_G, treeLodScale);
+    TL.bb = (treeBillboard0 || treeHullOn) ? 1 : 0;
     TL.focalPx = gFocalPx; gTL = TL;   // gTL braucht ez_grow fuer den Ast-Schnitt
     float R1 = TL.R1, R2 = TL.R2;
     int tier;
@@ -1580,7 +1616,42 @@ int trees_build_step(int maxTrees){
       float sref[3] = { treeReqLodValid ? treeReqLod[0] : treeReqTX,
                         treeReqLodValid ? treeReqLod[1] : 0.0f,
                         treeReqLodValid ? treeReqLod[2] : treeReqTZ };
-      sort_inst_far_near(crownVerts, quadBefore, nCrownVerts - quadBefore, CROWN_FLOATS, sref);
+      // Huellen-Quadrate (Variante >= 8) stehen beim Emitter am Ende, aber pro
+      // Baum koennen noch andere Kronen-Instanzen dazukommen (Ganzbaum-Kachel).
+      // Deshalb hier noch einmal stabil ans Ende des Baum-Bereichs geschoben:
+      // nur zusammenhaengende Rangen kann der Composite pro Stufe zeichnen.
+      int h0 = -1, hn = 0;
+      for(int q = quadBefore; q < nCrownVerts; q++)
+        if(crownVerts[(size_t)q * CROWN_FLOATS + 6] >= 8.0f){ hn++; if(h0 < 0) h0 = q; }
+      if(h0 >= 0 && h0 + hn < nCrownVerts && nCrownVerts - quadBefore <= SORT_MAX){
+        if(!sortTmp) sortTmp = (float*)malloc((size_t)SORT_MAX * CROWN_FLOATS * sizeof(float));
+      }
+      if(h0 >= 0 && h0 + hn < nCrownVerts && sortTmp){
+        // Karten nach vorn kopieren, Huellen-Instanzen in sortTmp parken und
+        // anschliessend anhaengen (stabil, sortTmp ist schon allokiert).
+        int w = quadBefore;
+        for(int q = quadBefore; q < nCrownVerts; q++){
+          const float *c = &crownVerts[(size_t)q * CROWN_FLOATS];
+          if(c[6] < 8.0f){
+            if(q != w) memcpy(&crownVerts[(size_t)w * CROWN_FLOATS], c,
+                              CROWN_FLOATS * sizeof(float));
+            w++;
+          } else {
+            memcpy(&sortTmp[(size_t)(q - quadBefore) * CROWN_FLOATS], c,
+                   CROWN_FLOATS * sizeof(float));
+          }
+        }
+        for(int k = 0; k < hn; k++)
+          memcpy(&crownVerts[(size_t)(w + k) * CROWN_FLOATS],
+                 &sortTmp[(size_t)k * CROWN_FLOATS], CROWN_FLOATS * sizeof(float));
+      }
+      if(hn > 0) h0 = nCrownVerts - hn;
+      treeSlotCard0 = quadBefore; treeSlotCardN = (h0 >= 0 ? h0 : nCrownVerts) - quadBefore;
+      treeSlotHull0 = h0; treeSlotHullN = hn;
+      // Karten und Huellen GETRENNT sortieren, sonst liegen sie vermischt im
+      // Puffer und der Composite kann nicht pro Stufe eine eigene Range zeichnen.
+      sort_inst_far_near(crownVerts, quadBefore, treeSlotCardN, CROWN_FLOATS, sref);
+      if(hn > 0) sort_inst_far_near(crownVerts, nCrownVerts - hn, hn, CROWN_FLOATS, sref);
       sort_inst_far_near(leafInst,  leafBefore, nLeafInst  - leafBefore,  LEAF_FLOATS,  sref);
     }
     // LOD-Tabelle pro Baum (DEMO_TREETAB): macht Befunde wie "ein Baum verliert
@@ -1610,7 +1681,9 @@ int trees_build_step(int maxTrees){
         sl->ax = cand[i].p[0]; sl->ay = cand[i].p[1]; sl->az = cand[i].p[2];
         sl->h  = H; sl->R1 = R1; sl->R2 = R2;
         sl->leaf0 = leafBefore; sl->leafN = nLeafInst  - leafBefore;
-        sl->card0 = quadBefore; sl->cardN = nCrownVerts - quadBefore;
+        sl->card0 = quadBefore; sl->cardN = treeSlotCardN;
+        sl->hull0 = (treeSlotHull0 >= 0) ? nCrownVerts - treeSlotHullN : 0;
+        sl->hullN = treeSlotHullN;
         sl->pres = pres;
         sl->hx0 = sl->hz0 = 1e9f; sl->hx1 = sl->hz1 = -1e9f;
         sl->hy0 = 1e9f; sl->hy1 = -1e9f;
@@ -1656,10 +1729,19 @@ int trees_build_step(int maxTrees){
         fprintf(stderr, "TREETAB x=%7.2f z=%7.2f y=%6.2f s=%5.3f H=%5.2f hintBlatt=%5.3f "
                         "hintBuschel=%5.3f gemessenBlatt=%.3f..%.3f gemessenBuschel=%.3f..%.3f "
                         "focalpx=%6.0f R1=%6.2f R2=%6.2f tier=%d dbuild=%6.2f "
-                        "blaetter=%5d karten=%4d pres=%d\n",
+                        "blaetter=%5d karten=%4d huellen=%4d pres=%d\n",
                 cand[i].p[0], cand[i].p[2], cand[i].p[1], cand[i].s, H, ezLeafHint, ezCardHint,
                 lmin, lmax, cmin, cmax, gFocalPx, R1, R2, tier, d,
-                nLeafInst - leafBefore, nCrownVerts - quadBefore, treeDbgPres);
+                nLeafInst - leafBefore, treeSlotCardN, treeSlotHullN, treeDbgPres);
+        if(treeSlotHullN > 0){
+          const float *hd = &crownVerts[(size_t)(nCrownVerts - treeSlotHullN) * CROWN_FLOATS];
+          const float *cd = &crownVerts[(size_t)quadBefore * CROWN_FLOATS];
+          fprintf(stderr, "  HULL-DUMP erst. Huelle: pos(%.2f %.2f %.2f) groesse %.3f rot %.3f "
+                          "variante %.0f pres %.0f R2 %.1f | erste Karte: pos(%.2f %.2f %.2f) "
+                          "groesse %.3f rot %.3f variante %.0f\n",
+                  hd[0], hd[1], hd[2], hd[3], hd[4], hd[6], hd[14], hd[11],
+                  cd[0], cd[1], cd[2], cd[3], cd[4], cd[6]);
+        }
       }
     // Sicherheitsnetz: die Budget-Schaetzung oben ist pro Baum nur geschaetzt.
     // Hat der Baum trotzdem ein Cap gerissen, wird er KOMPLETT zurueckgerollt —

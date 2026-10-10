@@ -68,6 +68,10 @@ typedef struct {
                    // Das ist keine Shader-Spezialitaet: ohne dieses Feld
                    // rechnete der Ein-Baum-Test "Billboard 1,000 / Karten 0,000"
                    // fuer einen Baum, der im Bild sehr wohl stand.
+  int   fern;      // 1 = FERN-Stufe (Huelle) liegt im Puffer. Dann darf R2 NICHT
+                   // auf 1,15 x Baukante geklemmt werden — sonst kommt die
+                   // FERN-Stufe nie vor. Ohne FERN-Stufe muessen die Karten bis
+                   // an die Baukante durchhalten.
   int   pres;      // LOD_PRES_*: was liegt von DIESEM Baum wirklich im Puffer?
                    // 0 = unbekannt / alles vorhanden -> Baelen gelten pur.
   float focalPx;  // Brennweite in Pixeln (1,7 * Bildhoehe) — Ast-LOD nach Bildgroesse

@@ -3647,3 +3647,56 @@ Messbank `DEMO_COVLOG=1`: helle / gruen dominierte Pixel und Helligkeitssumme pr
 Frame (Wald, ohne Ein-Baum-Szene). In der VM nicht brauchbar — bei 160×90 laufen
 3 Frames in 200 s, der Composite kostet dort zu viel Fuellrate. Bewertung der
 Bewegung bleibt auf dem Host.
+
+## 2026-10-09 (Runde 35): FERN-Stufe (tier 1) gebaut — tangentiale Buschel-Quadrate
+
+Nutzer: „bau als naechstes bitte die tier1 baeme ein."
+
+**Was es ist.** Ein Quadrat pro Buschel, Mitte = Buschelposition, Normale radial
+von der Kronenachse weg (`rotY = atan2(dx, dz)` um den Lotpunkt des Baums).
+Damit ist die ferne Krone blickrichtungsunabhaengig (kein Mitschwenken wie bei
+kamerazugewandten Karten), opak, und sich schneidende Quadrate pro Pixel durch
+den Tiefenpuffer geloest. Die Form kommt aus den echten Buschelpositionen — eine
+Tanne bekommt damit automatisch Kegelform. Atlas: dieselbe Buschel-Kachel wie die
+Karten, aber die Richtungswahl kommt aus der EIGENEN Orientierung des Quadrats
+(`aData.y`), nicht aus der Blickrichtung.
+
+**Erkannt und behoben: tier 1 fehlte nicht nur, ab 126 m war ueberhaupt keine
+Krone mehr da.** `treeLodInitPx` klemmte R2 auf `>= 1,15 x Baukante` (= 207 m),
+weil es keine FERN-Stufe gab; die Karten blendeten bei 1,1 x R2 = 126 m aus —
+und dahinter war nichts. Gemessen im Ein-Baum-Test: 138..142 m = 0 helle Pixel,
+auch mit der Karten-Stufe und mit Maskenausgabe. Jetzt: mit FERN-Stufe
+`R2 <= 0,90 x Baukante`, ohne FERN bleibt die alte Klemme.
+
+**Fehler beim Einbau (gemessen):** im Atlas-Zweig von `crown.vert` fehlte die
+Obergrenze — Huellen-Quadrate (Variante 8..11) liefen ueber `aData.w >= 4.0` in
+den Ganzbaum-Impostor-Zweig, bekamen `vCrown = 1`, lasen den Impostor-Atlas und
+fielen durch die Deckungs-Schwelle. Beweis: 121 Huellen-Quadrate eines Baums,
+auch mit 8-facher Groesse, 0 Fragmente; Variante auf 0..3 gesetzt -> 2959 px.
+
+**Deckungsangleich:** eine Huelle statt zweier gekreuzter Karten deckt weniger.
+Bei 127 m (R2-Band): Karten 34 px, Huelle 28 px. `DEMO_HULLSC` skaliert die
+Huellen-Quadrate; 1,4 gibt 35 px und liegt damit auf den Karten.
+
+**Kosten** (Wald, 648 Baeume): Kronen-Instanzen 667 072 -> 1 000 608
+(333 536 Huellen-Quadrate), Cap 1,2 M, 0 Cap-Treffer, 0 uebersprungene Baeume.
+
+**Uebergang gemessen** (Ein-Baum-Test 132 -> 96 m, R2 = 114,6 m, Band
+103,1..126,0 m): Deckung 35 -> 61 helle Pixel ueber das ganze Band,
+groesste Deckungs-Delle -9,64 % bei 105,0 m, 0 Pump-Frames,
+1 Geometrie-Wechsel (ausserhalb des Bands). Wirtstest 140 650 Pruefungen,
+0 Fehler (beide Faelle fern=0/1).
+
+## Notiert, nicht gebaut (Nutzer 2026-10-09)
+
+- **Perturbation Map auf den Karten**, damit das Schwimmen der Blaetter in der
+  Ferne nicht verschwindet.
+- Der heutige Blatter-flackert-Effekt wirkt auf den Einzelblaettern „aehnlich wie
+  eine Wasseroberflaeche" — gleiche Baustelle.
+- **Windmodell an den Baemen muss komplett ueberarbeitet werden.** Heute:
+  Verschiebung an der Verzweigung -> Luecken an den Uebergaengen. Richtig waere
+  Biegen.
+- **Einzelblaetter werden geaendert**: angedacht sind Buschel aus
+  Groessenordnung 10 Blaettern, weil die Blattstile komplett fehlen.
+- Ueberblendung sieht nach dem Composite-Fix zum ersten Mal „sehr gut und
+  unauffaellig" aus (Nutzer).

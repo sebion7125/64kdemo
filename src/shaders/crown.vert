@@ -62,7 +62,7 @@ void main(){
     fwd = normalize(uCamTgt - uCamPos);
   }
   vec3 right, up;
-  if(aData.w >= 4.0){
+  if(aData.w >= 4.0 && aData.w < 8.0){
     // Ganzbaum-Kachel bleibt kamerazugewandt (bis die 3D-Huelle kommt).
     right = normalize(cross(fwd, vec3(0,1,0)));
     up    = cross(right, fwd);
@@ -83,12 +83,12 @@ void main(){
   vec2 ro = vec2(aOff.x * cr - aOff.y * sr, aOff.x * sr + aOff.y * cr);
   // Das Ganzbaum-Quad ist nicht quadratisch: aData.y traegt bei ihm die
   // Seitenverhaelung h/w (bei Karten ist der Slot die Rotation, dort 1,0).
-  float qasp = (aData.w >= 4.0) ? aData.y : 1.0;
+  float qasp = (aData.w >= 4.0 && aData.w < 8.0) ? aData.y : 1.0;
   vec3 p = aCenter + right * (ro.x * aData.x) + up * (ro.y * aData.x * qasp);
   // Ganzbaum-Billboard minimal Richtung Kamera schieben: das Geruest desselben
   // Baums blendet im selben Band aus, schreibt aber Tiefe — ohne diesen Offset
   // faede das Billboard hinter dem halb durchsichtigen Stamm weg.
-  if(aData.w >= 4.0) p += normalize(uCamPos - aCenter) * 0.25f;
+  if(aData.w >= 4.0 && aData.w < 8.0) p += normalize(uCamPos - aCenter) * 0.25f;
   // Aufnahme-Pass: dieselben Karten mehrmals versetzt gezeichnet fuellen die
   // Luecken von Arten mit wenigen grossen Karten (Kiefer: 162 Karten an einem
   // 7-m-Baum = einzelne Blatt-Lappen in der 128-px-Kachel).
@@ -102,7 +102,7 @@ void main(){
   // Das Ganzbaum-Billboard (Kachel >= 4) steht STILL: ein 20 m grosser,
   // mitschwingender Lappen "wabert" und wirkt albern (Nutzer). Die Blueten- und
   // Blattbewegung steckt in den Karten und Einzelblaettern.
-  float amp = aData.x * ((aData.w >= 4.0) ? 0.0 : (0.06 + 0.16 * gust));
+  float amp = aData.x * ((aData.w >= 4.0 && aData.w < 8.0) ? 0.0 : (0.06 + 0.16 * gust));
   p.x += (wnd * 0.5 + gust) * amp;
   p.z += cos(uTime * 1.3 + ph * 1.7) * amp * 0.7;
   p.y += sin(uTime * 2.2 + ph) * amp * 0.35;
@@ -126,9 +126,12 @@ void main(){
   // decken (gemessen), und die Karten sind dichter (div 3 / scale 2,0).
   // FIZZLE (lod.glsl): Uebergang durch Wegwerfen statt Mischen. Pro Uebergang
   // eine Schwelle; inv = 1 heisst "kommende Schicht" (behaelt n >= 1-w).
-  float bbq = (aData.w >= 4.0) ? 1.0 : 0.0;
+  float bbq  = (aData.w >= 4.0 && aData.w < 8.0) ? 1.0 : 0.0;
+  float hull = (aData.w >= 8.0) ? 1.0 : 0.0;      // FERN-Stufe: tangenciales
+                                                  // Buschel-Quadrat (tier 1)
+  float fern = max(bbq, hull);                    // beide kommen bei R2 rein
   float w1, inv1, w2, inv2;
-  if(bbq > 0.5){
+  if(fern > 0.5){
     w1 = 1.0; inv1 = 0.0;                                        // bei R1 nicht beteiligt
     w2 = (uLightFace < 0.5) ? lodWBillboard(iLodR2, d, uBBPresent, iPres) : 1.0;
     inv2 = 1.0; w2 *= uBillboardOn;                              // kommend bei R2
@@ -149,6 +152,8 @@ void main(){
   // Aufnahme-Pass: keine Entfernungsschwelle, sonst verschwindet genau das,
   // was in die Kachel gehoert.
   if(uImpostor > 0.5){ w1 = 1.0; w2 = 1.0; inv1 = 0.0; inv2 = 0.0; }
+  if(uImpostor > 0.5 && hull > 0.5) p = aCenter;   // Aufnahme: Huelle hoert
+                                                  // sich nicht selbst auf
   // Build-Rand: Baeume werden bis RANGE=20 Zellen a 9 m gebaut (180 m halbe
   // Kantenlaenge, Ecken ~255 m). Bis 2026-10-07 endete das Blattdach bei 185 m,
   // die Staemme gingen aber bis ~255 m -> kahle Stummel in der Ferne.
@@ -160,7 +165,12 @@ void main(){
   if(uCompPhase > 0.5){
     float in1 = lodInBand(iLodR, d);
     float in2 = (iLodR2 > 0.0) ? lodInBand(iLodR2, d) : 0.0;
-    if(bbq > 0.5){                                  // Ganzbaum-Kachel: ein bei R2
+    if(hull > 0.5){            // FERN-Stufe: kommend bei R2, nie abgehend
+      if(uCompPhase < 1.5)      w2 = (in2 > 0.5) ? 0.0 : 1.0;   // Basis: aus, wenn sie
+      else if(uCompPhase < 2.5){ w2 = (in2 > 0.5) ? 1.0 : 0.0;  //   einkommt
+                                 vCompW = lodBandIn(iLodR2, d); }
+      else                      w2 = 0.0;                       // Kopie-Puffer
+    } else if(bbq > 0.5){                           // Ganzbaum-Kachel: ein bei R2
       if(uCompPhase < 1.5) w2 = 0.0;
       else { w2 = 1.0; vCompW = lodBandIn(iLodR2, d); }
     } else {                                        // Karten: ein bei R1, aus bei R2
@@ -186,12 +196,24 @@ void main(){
   vSeed = aData.z;
   // Kachel nach Blickrichtung: aData.w = Kronen-Variante (0..3), azIdx = eine von
   // 16 Aufnahmerichtungen. Die Krone parallaxiert also, wenn man sie umlaeuft.
-  if(aData.w >= 4.0){
+  if(aData.w >= 4.0 && aData.w < 8.0){
     // Ganzbaum-Impostor: 64 Kacheln in 8x8 (Art x Form), aufgenommen aus einer
     // Richtung. Ferne Baume sind 20-30 px, eine Richtung reicht dort.
+    // ACHTUNG: die Obergrenze fehlt nicht — Huellen-Quadrate (8..11) landeten
+    // sonst hier, liefen ueber den Impostor-Atlas und fielen durch die
+    // Deckungs-Schwelle (gemessen: 0 Kronen-Fragmente fuer alle 121 Huellen-
+    // Quadrate eines Baums, auch mit 8-facher Groesse).
     float ci = aData.w - 4.0;
     vTile = vec2(mod(ci, 8.0), floor(ci * 0.125));
     vCrown = 1.0;
+  } else if(hull > 0.5){
+    // Huellen-Quadrat: die Kachel richtet sich nach der EIGENEN Orientierung
+    // des Quadrats (aData.y = Azimut um die Kronenachse), nicht nach der
+    // Blickrichtung. Sonst wuerde die ferne Krone beim Umkreisen mitschwenken.
+    float azIdx = floor(mod(aData.y * (16.0 / 6.283185) + 8.0, 16.0));
+    float t = (aData.w - 8.0) * 16.0 + azIdx;
+    vTile = vec2(mod(t, 8.0), floor(t / 8.0));
+    vCrown = 0.0;
   } else {
     float az = atan(aCenter.x - uCamPos.x, aCenter.z - uCamPos.z);
     float azIdx = floor(mod(az * (16.0 / 6.283185) + 8.0, 16.0));

@@ -13,6 +13,8 @@ float treeLodSmoothstep(float a, float b, float x){
 void treeLodInitPx(TreeLod *L, float leafM, float cardM, float focalPx, float buildR, float lodScale){
   L->pres = 0;   // ohne Angabe: keine Praesenz-Filterung
   L->H = 0.0f; L->bb = 1;
+  // L->fern setzt der AUFRUFER vor diesem Aufruf (die R2-Klemme haengt davon ab).
+  // 0 = keine FERN-Stufe im Puffer -> R2 wird auf >= 1,15 x Baukante geklemmt.
   /* R1 = wo ein Einzelblatt LOD_LEAF_PX Bildpunkte fuellt, R2 = wo ein Buschel
    * LOD_CARD_PX fuellt. px = groesse * focalPx / d  ->  d = groesse * focalPx / px.
    * focalPx <= 0 (kein Fenster bekannt) -> sinnvoller Ersatzwert, damit nichts
@@ -33,7 +35,14 @@ void treeLodInitPx(TreeLod *L, float leafM, float cardM, float focalPx, float bu
   else                               L->R2 = 3.0f * L->R1;
   if(buildR > 0.0f){
     if(L->R1 > 0.45f * buildR) L->R1 = 0.45f * buildR;   // Stufe 2 muss vorkommen
-    if(L->R2 < 1.15f * buildR) L->R2 = 1.15f * buildR;   // Karten halten bis zur Kante
+    if(L->fern){
+      // FERN-Stufe vorhanden: R2 muss INNERHALB der Baukante liegen, sonst
+      // erscheint sie nie. 0,90 laesst dahinter noch 10 % Kante, in der die
+      // Huelle allein steht und der Dunst uebernimmt.
+      if(L->R2 > 0.90f * buildR) L->R2 = 0.90f * buildR;
+    }else{
+      if(L->R2 < 1.15f * buildR) L->R2 = 1.15f * buildR; // Karten halten bis zur Kante
+    }
   }
   if(L->R1 < 8.0f)   L->R1 = 8.0f;
   if(L->R2 < 1.5f * L->R1) L->R2 = 1.5f * L->R1;
@@ -42,7 +51,7 @@ void treeLodInitPx(TreeLod *L, float leafM, float cardM, float focalPx, float bu
 
 void treeLodInit(TreeLod *L, float H, float lodScale){
   L->pres = 0;   // ohne Angabe: keine Praesenz-Filterung
-  L->H = H; L->bb = 1;
+  L->H = H; L->bb = 1; L->fern = 1;
   /* Schaltweiten: R1 = wo die Einzelblaetter aufhoeren zu decken, R2 = wo die
    * Ganzbaum-Darstellung uebernimmt. 5x/15x Wuchshoehe, absolut begrenzt —
    * gemessen an einem Baum (Laubpixel ueber der Entfernung): ein 6-cm-Blatt ist
