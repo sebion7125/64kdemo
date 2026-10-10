@@ -3753,3 +3753,28 @@ Karten- und Huellen-Kacheln (vom Nutzer gemeldet, offen).
 
 Selbsttest: alle Pruefungen OK. Hinweis: ein Lauf mitten in parallelen Messlaeufen
 brach mit "keine Caps-Zeile" (CPU-Streit), allein laeuft er wieder durch.
+
+## PLAN LAUB-STUFEN (Stand 2026-10-10, nach Nutzerkritik "wir reden aneinander vorbei")
+
+Drei Laub-Darstellungen, die sich NUR in der Anzeige unterscheiden, plus durchgehendes
+Holz. Das Ganzbaum-Bild (Impostor) ist durch die Huelle ERSETZT.
+
+GEBAUT pro Baum (Puffer-Inhalt, nur ueber Existenz-Raender entfernungsabhaengig):
+  1. Geruest (Stamm + Aeste) — immer; Aufloesung pro Ast ueber projizierte Astdicke
+     (0,6..1,6 Bildpunkte), keine Stufen
+  2. Einzelblaetter — bis 1,15 R1 + 20 m
+  3. Bueschel-Karten (2 gekreuzte Quadrate pro Buschel) — bis 1,10 R2 + 20 m
+  4. Huellen-Quadrate (Zylinder-Raster, Luecken bleiben) — ab 0,90 R2 - 20 m bis
+     1,15 x Bauradius + 20 m
+  5. Ganzbaum-Kachel — deaktiviert (Altlast, wird zurueckgebaut)
+
+ANGEZEIGT nach Abstand d zum Lotpunkt des Baums (Gewichte in lod.glsl):
+  Einzelblaetter 1 → 0 ueber 0,90..1,10 R1
+  Karten         0 → 1 bei R1, 1 → 0 ueber 0,90..1,10 R2
+  Huelle         0 → 1 ueber 0,90..1,10 R2, dann Rand-Aufloesung bis Baukante
+  Ueber die Uebergange laeuft pro Baum der Composite (Bildbox-Kopie, beide Stufen
+  getrennt gezeichnet, gemischt) — kein Alpha-Blend zweier Folien.
+
+TASTEN: 4/5/8/6/7 = ANZEIGE-Filter (nur Blaetter / nur Karten / nur Huelle / nur
+Ganzbaum-Bild / alle) · 0 = Zeichenweg Composite an/aus · 1 = deaktiviert (war BAU-
+Schalter fuer das Ganzbaum-Bild). Holz wird von den Anzeigefiltern nicht betroffen.
