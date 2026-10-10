@@ -513,7 +513,14 @@ static int grassOnly = 0;     // 1 = TEST: nur Gras zeichnen (V-Taste), kein Ter
 static int hudMode = 2;       // H-Taste: 2 = Vollstats (2 Zeilen), 1 = reduziert (1 Zeile), 0 = aus
 float grassDensityScale = 1.0f;  // 0.2 - 8.0 (Slider unten im Fenster, extern in scene.h)
 float grassHeightScale = 1.0f;   // 0.3 - 3.0 (Halmhoehe-Slider)
-float grassMaxDist = 170.0f;     // 40 - 240m (max. Gras-Sichtweite, Slider)
+// Slider unten: 40..400 m (2026-10-10 von 240 m hochgenommen; die Dichte-LUT in
+// grass_cpu.c muss die Reichweite abdecken). MIN und SPAN stehen BOTH fuer die
+// Umrechnung Maus->Wert UND Wert->Knopfposition — getrennte Konstanten waren der
+// Fehler: Setter mit 360, Anzeige mit /200 -> der Knopf lief 1,8x schneller als
+// die Maus (Nutzer: "der bewegt sich schneller als die Maus").
+#define GRASS_MD_MIN   40.0f
+#define GRASS_MD_SPAN 360.0f
+float grassMaxDist = 170.0f;     // 40 - 400 m (max. Gras-Sichtweite, Slider)
 float gWorldTime = 0.0f;         // aktuelle Weltzeit (fuer Birth-Time der Halme)
 static int sliderDragging = 0;          // 1 = Slider wird per Maus gezogen
 // Slider-Fade: Slider+Labels blenden ein, wenn die Maus sich ueber sie
@@ -1653,6 +1660,19 @@ static float  capAmt = 0.0f;
 static int    capRegion = -2147483647;
 static int    grassTexOn = 1;
 static float  grassTexFar0 = 70.0f, grassTexFar1 = 115.0f;
+// 2026-10-10: der Uebergabe-Abstand hing an festen 70..115 m. Der Gras-Slider
+// (grassMaxDist, bis 240 m) war damit wirkungslos: grass.vert rechnet
+// farEnd = min(uMaxDist, uFarFade + 12), die Halme gingen also bei 127 m aus —
+// Nutzer: "wenn ich den slider hoch stelle wird das gras trotzdem ab einer
+// gewissen entfernung unsichtbar". Der Abstand folgt jetzt dem Slider
+// (Verhaeltnis 70/170 und 115/170 wie vorher); DEMO_GRASSTEX und Taste Z setzen
+// ihn ausdruecklich, dann folgt nichts mehr.
+static int    grassTexUser = 0;         // 1 = Ausdrucklich gesetzt, nicht folgen
+static void grassTexSync(void){        // Uebergabe-Abstand an den Slider binden
+  if(grassTexUser) return;
+  grassTexFar0 = grassMaxDist * (70.0f / 170.0f);
+  grassTexFar1 = grassMaxDist * (115.0f / 170.0f);
+}
 static float  reedDens = 1.0f, reedWide = 1.0f;   // DEMO_REED="<dens> <wide>"
 static float  reedH = 1.0f;                        // DEMO_REEDH=<f>: Schilf-Hoehe 
 // Uniform-Orte des Gras-Programms (auch fuer den Einfang-Pass noetig)
@@ -1852,7 +1872,7 @@ static void set_slider(int which, float pos){
   if (pos < 0.0f) pos = 0.0f; if (pos > 1.0f) pos = 1.0f;
   if (which == 1) grassDensityScale = 0.2f + pos * 5.4f;   // max 5.6x (staubt bei MD=120 am 5M-CAP)
   else if (which == 2) grassHeightScale = 0.3f + pos * 2.7f;
-  else grassMaxDist = 40.0f + pos * 200.0f;
+  else grassMaxDist = GRASS_MD_MIN + pos * GRASS_MD_SPAN;   // Slider 3 = Sichtweite
 }
 
 // Slider-Rendering (3 Slider: Dichte/Hoehe/Sichtweite). VBO muss gebunden
@@ -2371,7 +2391,8 @@ int main(int argc, char **argv) {
               sscanf(er, "%f %f", &reedDens, &reedWide); } }
   { const char *et = getenv("DEMO_GRASSTEX");
     if (et) { if (!atoi(et)) grassTexOn = 0;
-              else { sscanf(et, "%f %f", &grassTexFar0, &grassTexFar1); } } }
+              else { sscanf(et, "%f %f", &grassTexFar0, &grassTexFar1);
+                     grassTexUser = 1; } } }
   { const char *em = getenv("DEMO_CROWNMASK"); if (em) envCrownMask = atoi(em); }
   { const char *es = getenv("DEMO_SHADOW"); if (es) shadowOn = atoi(es); }
   { const char *el = getenv("DEMO_SHADOWLEAF"); if (el) shadowLeafOn = atoi(el); }
@@ -2562,10 +2583,15 @@ int main(int argc, char **argv) {
             printf("DEBUG Dichte-Kante: %s (neuer Build noetig: G aus/ein oder 1m bewegen)\n",
                    dbgGrassEdge ? "AN (CUT 0.01)" : "AUS (CUT 0)"); }
           if (ks == XK_z) {
-            // Uebergabe-Abstand Gras-Geometrie -> Ferntextur
-            if (grassTexOn && grassTexFar0 > 20.0f) { grassTexFar0 = 15.0f; grassTexFar1 = 30.0f; }
-            else if (grassTexOn) { grassTexOn = 0; }
-            else { grassTexOn = 1; grassTexFar0 = 70.0f; grassTexFar1 = 115.0f; capRegion = -2147483647; }
+            // Uebergabe-Abstand Gras-Geometrie -> Ferntextur, drei Stufen:
+            // 0 = folgt dem Slider, 1 = fruehe Uebergabe 15..30 m, 2 = Textur aus
+            if(!grassTexUser && grassTexOn && grassTexFar0 > 20.0f){
+              grassTexUser = 1; grassTexFar0 = 15.0f; grassTexFar1 = 30.0f;
+            } else if(grassTexOn){
+              grassTexOn = 0; grassTexUser = 1;
+            } else {
+              grassTexOn = 1; grassTexUser = 0; capRegion = -2147483647;
+            }
             printf("Ferne Gras-Textur: %s (Uebergabe %.0f..%.0fm)\n",
                    grassTexOn ? "AN" : "AUS", grassTexFar0, grassTexFar1);
           }
@@ -3072,6 +3098,10 @@ int main(int argc, char **argv) {
         if (grassDensityScale != lastDensity || grassMaxDist != lastMaxDist) {
           lastDensity = grassDensityScale;
           lastMaxDist = grassMaxDist;
+          grassTexSync();
+          printf("Gras: Sichtweite %.0f m, Uebergabe Ferntextur %.0f..%.0f m "
+                 "-> Halme bis %.0f m\n", grassMaxDist, grassTexFar0, grassTexFar1,
+                 grassTexOn ? grassTexFar1 + 12.0f : grassMaxDist);
           lastSliderT = tNow;
           sliderDirty = 1;
         }
@@ -3531,6 +3561,7 @@ int main(int argc, char **argv) {
     p_glUniform1f(locGAlbOnly, 0.0f);
     // Halme duennen genau dort aus, wo die Textur uebernimmt (gleiches Band,
     // damit sich Uebergabe und Cull nicht gegenseitig wiedersprechen).
+    grassTexSync();
     p_glUniform1f(locGFarFade, (grassTexOn && capAmt > 0.0f) ? grassTexFar1 : grassMaxDist);
     // Transparenz des Grases: ZWEI sich ausschliessende Wege.
     //  A) Alpha-to-Coverage: Alpha wird in eine MSAA-Sample-Maske uebersetzt.
@@ -3814,21 +3845,40 @@ int main(int argc, char **argv) {
         // schlagartig da. Gemessen: bei R1 = 38,66 m sprang die Deckung am
         // fernen Bandrand (42,5 m) von 304 auf 422 helle Pixel (+118).
         // Bildbox: Achsenparalleles Fach um Stamm und Krone, acht Ecken durch die
-        // aktuelle MVP. Reicht die Box hinter die Kamera, ganzes Bild nehmen.
+        // aktuelle MVP.
+        // 2026-10-10: "hinter der Kamera -> ganzes Bild" war ein FPS-Fehler. Ein
+        // Baum HINTER der Kamera ist unsichtbar, bekam aber eine Vollbild-Box und
+        // wurde trotzdem kopiert, gezeichnet und gemischt. Gemessen im Wald
+        // (640x360, 71 Baeume in der Blende): Boxflaeche 3 586 487 px = 6226 % des
+        // Bildes; die Vollbild-Boxen hatten Kastenmasse von 8 x 7 m in 47..66 m
+        // Entfernung (COMPDBG VOLL-BOX) — also normale, kleine Baeume.
+        // Jetzt: Ecken hinter der Nah-Ebene werden verworfen; liegt der ganze Baum
+        // dahinter oder ausserhalb des Bildes, faellt er ganz aus der Liste.
         float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
-        int full = 0;
+        int full = 0, nvis = 0;
         for(int c = 0; c < 8; c++){
           float wx = (c & 1) ? sl->hx1 : sl->hx0;
           float wy = (c & 2) ? sl->hy1 : sl->hy0;
           float wz = (c & 4) ? sl->hz1 : sl->hz0;
           float cw = mvp[3]*wx + mvp[7]*wy + mvp[11]*wz + mvp[15];
-          if(cw <= 0.05f){ full = 1; break; }
+          if(cw <= 0.05f) continue;          // Ecke hinter der Nah-Ebene
           float sx = ((mvp[0]*wx + mvp[4]*wy + mvp[8]*wz  + mvp[12]) / cw * 0.5f + 0.5f) * fboW;
           float sy = ((mvp[1]*wx + mvp[5]*wy + mvp[9]*wz  + mvp[13]) / cw * 0.5f + 0.5f) * fboH;
           if(sx < x0) x0 = sx; if(sy < y0) y0 = sy;
           if(sx > x1) x1 = sx; if(sy > y1) y1 = sy;
+          nvis++;
         }
+        if(nvis == 0) continue;              // ganz hinter der Kamera
+        if(nvis < 8) full = 1;               // Box schneidet die Nah-Ebene (sehr nah)
+        if(!full && (x1 < 0.0f || x0 >= (float)fboW ||
+                     y1 < 0.0f || y0 >= (float)fboH)) continue;   // im Bild nichts zu sehen
         int bx = 0, by = 0, bw = fboW, bh = fboH;
+        if(full && getenv("DEMO_COMPDBG")){ static int cdf = 0;
+          if(cdf++ < 6)
+            printf("COMPDBG VOLL-BOX Baum %d d %.1f m  Kasten x %.2f..%.2f y %.2f..%.2f z %.2f..%.2f"
+                   "  blaetter %d karten %d huellen %d\n",
+                   i, d, sl->hx0, sl->hx1, sl->hy0, sl->hy1, sl->hz0, sl->hz1,
+                   sl->leafN, sl->cardN, sl->hullN); }
         if(!full){
           // 2 px Rand: die Huelle kommt aus Mittelpunkten plus halber Seite, und
           // abgerundete Eckpunkte der projizierten Quadrate wuerden sonst am
@@ -4267,7 +4317,8 @@ int main(int argc, char **argv) {
       }
       draw_sliders((grassDensityScale - 0.2f) / 5.4f,
                    (grassHeightScale - 0.3f) / 2.7f,
-                   (grassMaxDist - 40.0f) / 200.0f, winW, winH, locTint, sliderFade);
+                   (grassMaxDist - GRASS_MD_MIN) / GRASS_MD_SPAN,
+                   winW, winH, locTint, sliderFade);
     }
     p_glDisable(GL_BLEND);
 

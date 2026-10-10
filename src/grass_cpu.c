@@ -181,7 +181,11 @@ static float g_half(void){
 // Dichte-LUT: dens = f(dist) ist radial -> Tabelle statt powf (macht den
 // Zell-Kopier-Pfad deutlich schneller). 0.5m-Resolution, pro grassMaxDist
 // neu befuellt (Slider).
-#define DENS_LUT_N 480   // 0..240m
+// 2026-10-10: 480 Eintraege = 0..240 m reichten genau bis zum alten Slider-Max.
+// Oberhalb gab die LUT den Wert von 239,5 m zurueck (nicht 0), die Bisektion der
+// Build-Kante fand keinen Null-Durchgang, und das Dichte-Profil war fuer jede
+// Zelle jenseits 240 m falsch. 1200 Eintraege = 0..600 m (4,8 KB).
+#define DENS_LUT_N 1200   // 0..600m
 static float densLut[DENS_LUT_N];
 static float densLutMD = -1.0f;
 // Dichte-Profil. Einheit: 1.0 = heutige Volldichte (32 Halme/Zelle VOR den

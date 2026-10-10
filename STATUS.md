@@ -3839,3 +3839,42 @@ Ergebnis: alle Pruefungen OK, Wirtstests 140 652 und 55 Pruefungen, 0 Fehler.
 - Huellen-Normalen sind horizontal (von oben steht alles kantenstaendig) —
   Kugel-Raster statt Zylinder ist vorgesehen, nicht gebaut.
 - Huelle ist duenner als die Kartenschicht (Zellgroesse 1,4 Buscheldurchmesser).
+
+## RUNDE 2026-10-10 (4): 30 fps, temporär fehlende Baumkronen, Gras-Sichtweite
+
+**Gras: harte Kante trotz Slider.** `grass.vert` rechnet
+`farEnd = min(uMaxDist, uFarFade + 12)`, und `uFarFade` war fest
+`grassTexFar1 = 115 m`. Die Halme gingen also bei **127 m** aus, egal wie weit der
+Slider (bis 240 m) stand. Jetzt folgt die Uebergabe dem Slider
+(Verhaeltnis 70/170 und 115/170 wie vorher), `DEMO_GRASSTEX` und Taste Z setzen sie
+ausdruecklich. Gemessen (neu gedruckte Zeile):
+`Gras: Sichtweite 170 m, Uebergabe 70..115 m -> Halme bis 127 m` und
+`Gras: Sichtweite 240 m, Uebergabe 99..162 m -> Halme bis 174 m`.
+Slider-Max 240 -> **400 m**. Dabei ein zweiter Fehler gefunden: die Dichte-LUT
+(`DENS_LUT_N 480`) deckte nur 0..240 m ab; oberhalb kam der Wert von 239,5 m
+zurueck statt 0, die Bisektion der Build-Kante fand keinen Null-Durchgang. Auf
+1200 Eintraege (0..600 m, 4,8 KB) erhoeht. Halme: 170 m = 1 225 078,
+240 m = 1 399 249, 400 m = 1 370 617 (Cap 5 000 000).
+
+**Slider-Abbilderung (von mir kaputt gemacht).** Setter nutzte `40 + pos*360`,
+die Anzeige aber `(grassMaxDist - 40)/200` -> der Knopf lief 1,8x schneller als
+die Maus. Beide Richtungen benutzen jetzt `GRASS_MD_MIN`/`GRASS_MD_SPAN`.
+Nachgerechnet: pos 0,25 -> 130 m -> Knopf 0,250; pos 1,00 -> 400 m -> 1,000.
+
+**FPS: Vollbild-Boxen pro Blend-Baum.** Der Composite pro Baum nahm fuer Baeume
+hinter der Kamera ("Box reicht hinter die Kamera -> ganzes Bild") eine
+VOLLBILD-Box und kopierte/zeichnete/mischte sie trotzdem. Gemessen 640x360 im
+Wald: 71 Baeume in der Blende, Boxflaeche 3 586 487 px = **6226 % des Bildes**;
+die Vollbild-Boxen gehoerten zu normalen Baeumen mit 8 x 7 m Kasten in 47..66 m
+Entfernung (Diagnose `COMPDBG VOLL-BOX`). Jetzt: Ecken hinter der Nah-Ebene werden
+verworfen, liegt der ganze Baum dahinter oder ausserhalb des Bildes, faellt er aus
+der Liste. Gleiche Szene: **11 Baeume, 130 487 px = 226 % des Bildes**,
+doppelt gezeichnete Karten-Instanzen 73 492 -> 11 864.
+Das ist auch der wahrscheinlichste Kandidat fuer die nur temporaer fehlenden
+Baumkronen: eine Vollbild-Mischung ueberdeckt die Composite-Ergebnisse der
+zuvor bearbeiteten Baeume.
+
+**Offen:** 30 fps auf dem Host sind damit nicht erklaert — die Geometrie ist mit
+der Baukante 450 m etwa fuenfmal so gross wie vorher (3459 Baeume,
+2 719 056 Geruest-Vertices, 892 135 Kronen-Instanzen, 2 152 120 Blatt-Instanzen).
+Naechste Messung auf dem Host: Frame-Zeiten mit/ohne Composite (`DEMO_COMP=0`).

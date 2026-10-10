@@ -255,7 +255,7 @@ extern int   nGrass;
 extern float grassGrp[GRASS_NGRP * 2];
 extern float grassDensityScale;   // Dichte-Skala (0.2-8.0, Slider zur Laufzeit)
 extern float grassHeightScale;    // Halmhoehe-Skala (0.3-3.0, Slider zur Laufzeit)
-extern float grassMaxDist;        // max. Gras-Sichtweite (40-120m, Slider)
+extern float grassMaxDist;        // max. Gras-Sichtweite (40-400m, Slider)
 extern float gWorldTime;          // aktuelle Weltzeit (fuer Birth-Time der Halme)
 
 // Inkrementeller Rebuild (Werkzeuge; der Generator laeuft im Build-Thread):
