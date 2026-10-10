@@ -130,17 +130,6 @@ void trees_set_focal_px(float f);
 extern double treeBuildMs;         // letzte Build-Zeit des Worker-Threads in ms   // Brennweite in Pixeln fuer das Ast-Bildgroessen-LOD
 void trees_build_request(float tx, float tz, const float lodRef[3]);
 int  trees_build_busy(void);
-void trees_build_finished_snapshot(float **tv, float **cv, float **lv,
-                                   int *ntv, int *ncv, int *nli, int *ntrees);
-int  trees_thread_start(void);
-// Ein-Baum-Szene (DEMO_ONE): was der Build fuer DEN einen Baum entschieden hat
-extern int   treeDbgTier, treeDbgVerts, treeDbgCrown, treeDbgLeaf, treeDbgBuilds;
-extern float treeDbgR1, treeDbgR2, treeDbgDBuild, treeDbgH, treeDbgX, treeDbgZ, treeDbgY;
-extern int   treeDbgBucket; extern float treeDbgRepX, treeDbgRepZ;
-extern int   treeDbgLeafBuilt, treeDbgBranchBuilt, treeDbgMeshFine, treeDbgBB;
-extern int   treeDbgPres, treeDbgPresForce;
-extern int   treeBandCount;   // Baeume in einem Blendenband (Composite noetig?)   // Praesenz-Bits des letzten gebauten Baums
-extern float treeDbgCutLeaf, treeDbgCutBranch;
 /* Bereich eines Baums im Instanz-Puffer (fuer den Composite pro Baum).
  * Der Mischpass des Nutzers (2026-10-09) arbeitet BAUMWEISE: Box des Baums
  * kopieren, die kommende Stufe DIESES Baums darueber zeichnen, Box mit einem
@@ -163,6 +152,19 @@ typedef struct {
 } TreeSlot;
 extern TreeSlot *treeSlotsD;                 // Zeichenseite (nach trees_build_finish)
 extern int      treeSlotND;
+
+void trees_build_finished_snapshot(float **tv, float **cv, float **lv,
+                                   int *ntv, int *ncv, int *nli, int *ntrees,
+                                   const TreeSlot **slots, int *nslots);
+int  trees_thread_start(void);
+// Ein-Baum-Szene (DEMO_ONE): was der Build fuer DEN einen Baum entschieden hat
+extern int   treeDbgTier, treeDbgVerts, treeDbgCrown, treeDbgLeaf, treeDbgBuilds;
+extern float treeDbgR1, treeDbgR2, treeDbgDBuild, treeDbgH, treeDbgX, treeDbgZ, treeDbgY;
+extern int   treeDbgBucket; extern float treeDbgRepX, treeDbgRepZ;
+extern int   treeDbgLeafBuilt, treeDbgBranchBuilt, treeDbgMeshFine, treeDbgBB;
+extern int   treeDbgPres, treeDbgPresForce;
+extern int   treeBandCount;   // Baeume in einem Blendenband (Composite noetig?)   // Praesenz-Bits des letzten gebauten Baums
+extern float treeDbgCutLeaf, treeDbgCutBranch;
 
 extern int   treeBuildRange;   // Zellen-Radius, in dem Baeume gebaut werden
 extern int treeCardDiv0; extern float treeCardScale0;   // DEMO_CARDT0 (Sweep-Bank)

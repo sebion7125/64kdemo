@@ -3618,3 +3618,32 @@ waechst im Composite-Pfad kontinuierlich; der Sprung der Pixelzahl bei 40,8 m
 Kopie-Anteil ≈ 0,10 gerade die Schwelle „> 12". Ein Rest bleibt erklaerungsbeduerftig:
 bei 40,8 m steigt die Helligkeit im Composite-Pfad um 7029, im Vergleichspfad um
 5383. Der genutzte Schaltradius des Testbaums ist R1 = 38,66 m, Band 34,79..42,53 m.
+
+## 2026-10-09 (Runde 34): verschwindende Baumkronen waehrend der Kamerabewegung
+
+Nutzerbefund: „Waehrend die Kamera sich bewegt, verschwinden staendig die
+Baumkronen … fuer kurze Zeit und ploppen dann wieder auf."
+
+Ursache: die **Baum-Bereiche (`TreeSlot`) wechselten beim Build, der gezeichnete
+Satz aber erst nach dem letzten Upload-Slice.** Der Composite zeichnete mit
+`vaoCrown[drawSet]` (alter Satz) Bereiche des neuen Builds — die Instanzen
+gehoeren zu einem anderen Puffer, also fehlte die Krone, bis der Upload
+durch war. Genau das Fenster, in dem die Geometrie-Puffer bewusst doppelt
+gehalten werden (`upload_begin` bis zum letzten Slice).
+
+Fix: Bereiche werden am selben Punkt wie `drawSet` verriegelt.
+
+* `trees_build_finished_snapshot()` liefert zusaetzlich Zeiger + Anzahl der
+  Bereiche **desselben** Builds.
+* `upload_begin()` merkt sie als `treeSlotsPend`, der Satz-Wechsel kopiert sie in
+  `treeSlotsDraw` und stellt `treeSlotsCur` darauf um. Kopieren ist noetig, weil
+  der CPU-Puffer des gezeichneten Builds beim *naechsten* Build zur Schreibseite
+  getauscht wird (die Geometrie ueberlebt das nur, weil sie in der GPU liegt).
+* Sicherheitsnetz in `leaf.vert`: der Basispass wirft die Einzelblaetter eines
+  Band-Baums nur weg, wenn die Karten DIESES Baums wirklich im Puffer liegen
+  (`lodBit(iPres, 2.0)`), sonst bliebe die Krone ohne Laub stehen.
+
+Messbank `DEMO_COVLOG=1`: helle / gruen dominierte Pixel und Helligkeitssumme pro
+Frame (Wald, ohne Ein-Baum-Szene). In der VM nicht brauchbar — bei 160×90 laufen
+3 Frames in 200 s, der Composite kostet dort zu viel Fuellrate. Bewertung der
+Bewegung bleibt auf dem Host.

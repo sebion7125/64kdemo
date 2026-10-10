@@ -1808,11 +1808,18 @@ int trees_build_busy(void){
 
 // fertigen Build abholen (exakt einmalig); *tv == NULL wenn nichts fertig ist
 void trees_build_finished_snapshot(float **tv, float **cv, float **lv,
-                                   int *ntv, int *ncv, int *nli, int *ntrees){
+                                   int *ntv, int *ncv, int *nli, int *ntrees,
+                                   const TreeSlot **slots, int *nslots){
   pthread_mutex_lock(&treeMu);
   if(treeBuildDone){
     *tv = treeVertsD; *cv = crownVertsD; *lv = leafInstD;
     *ntv = nTreeVertsD; *ncv = nCrownVertsD; *nli = nLeafInstD; *ntrees = nTreesD;
+    // Die Baum-Bereiche hoeren zum SELBEN Build wie diese Zeiger — und der wird
+    // erst nach dem letzten Upload-Slice gezeichnet. Wer sie frueher benutzt,
+    // zeichnet Bereiche des neuen Builds in den alten Puffer (Nutzerbefund:
+    // "waehrend die Kamera sich bewegt, verschwinden staendig die Baumkronen,
+    // fuer kurze Zeit und ploppen dann wieder auf").
+    *slots = treeSlotsD; *nslots = treeSlotND;
     treeBuildDone = 0;
   } else *tv = NULL;
   pthread_mutex_unlock(&treeMu);

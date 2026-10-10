@@ -70,7 +70,9 @@ void main(){
   //             3 = nur die abgehende Stufe, volles Gewicht (Kopie-Puffer)
   //             2 = nie (die Blaetter sind die abgehende Stufe)
   if(uCompPhase > 0.5){
-    if(uCompPhase < 1.5){ if(lodInBand(iLodR, d) > 0.5) keep = 0.0; }
+    // Nur wenn die Karten DIESES Baums wirklich im Puffer liegen, uebernimmt
+    // sie der Composite-Baumwechsel. Sonst bliebe die Krone ohne Laub stehen.
+    if(uCompPhase < 1.5){ if(lodInBand(iLodR, d) > 0.5 && lodBit(iPres, 2.0) > 0.5) keep = 0.0; }
     else if(uCompPhase < 2.5) keep = 0.0;
     else keep = 1.0;
   }

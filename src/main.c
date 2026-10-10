@@ -1314,9 +1314,21 @@ int treeDbg = 0;              // DEMO_TREEDEBUG: Satz-Wechsel + Ueberblendung pr
 // duerfen nicht mitlaufen).
 static int nTreeVertsCur = 0, nCrownVertsCur = 0, nLeafInstCur = 0;
 static int nTreeVertsOld = 0, nCrownVertsOld = 0, nLeafInstOld = 0;
+// Baum-Bereiche (Composite pro Baum) hoeren NICHT an treeSlotsD haengen: das ist
+// schon der neue Build, wahrend der alte noch gezeichnet wird (Upload laeuft ueber
+// mehrere Frames). cur = der Satz, der wirklich auf dem Bildschirm liegt.
+static const TreeSlot *treeSlotsCur = 0; static int treeSlotNCur = 0;
+static const TreeSlot *treeSlotsPend = 0; static int treeSlotNPend = 0;
+// Eigentliche Kopie: der CPU-Puffer des gezeichneten Builds wird naechsten
+// Monat wieder beschrieben (Doppelbuffer in trees_cpu.c tauscht ihn beim NAechsten
+// Build zur Schreibseite). Die Geometrie ueberlebt das, weil sie in der GPU liegt;
+// die Bereiche werden hier einmal pro Satz-Wechsel kopiert (8192 * 68 B).
+static TreeSlot treeSlotsDraw[TREE_SLOT_MAX];
 
 static void upload_begin(const float *tv, const float *cv, const float *lv,
-                         int ntv, int ncv, int nli, int nextSet){
+                         int ntv, int ncv, int nli, int nextSet,
+                         const TreeSlot *slots, int nslots){
+  treeSlotsPend = slots; treeSlotNPend = nslots;
   upBuf[0].src = tv; upBuf[0].vbo = vboTree[nextSet];
   upBuf[0].bytes = (size_t)ntv * TREE_FLOATS * sizeof(float);
   upBuf[1].src = cv; upBuf[1].vbo = vboCrown[nextSet];
@@ -1375,6 +1387,10 @@ static int upload_step(double frameMs){
   nTreeVertsOld = nTreeVertsCur; nCrownVertsOld = nCrownVertsCur; nLeafInstOld = nLeafInstCur;
   drawSet = upNextSet;
   nTreeVertsCur = nTreeVertsD; nCrownVertsCur = nCrownVertsD; nLeafInstCur = nLeafInstD;
+  if(treeSlotNPend > TREE_SLOT_MAX) treeSlotNPend = TREE_SLOT_MAX;
+  memcpy(treeSlotsDraw, treeSlotsPend, (size_t)treeSlotNPend * sizeof(TreeSlot));
+  treeSlotsCur = treeSlotsDraw; treeSlotNCur = treeSlotNPend;   // Bereiche wechseln
+                                                            // MIT dem Satz
   treeSwapT = now_sec();
   impNext = 0;                 // Atlas-Kacheln hoeren sich mit dem neuen Satz
   if(treeDbg) printf("  Satz-Wechsel: alt=Satz %d (%d V / %d K / %d B), neu=Satz %d "
@@ -2861,7 +2877,8 @@ int main(int argc, char **argv) {
           trees_build(tCX, tCZ);
           double tB1 = now_sec();
           upload_begin(treeVertsD, crownVertsD, leafInstD,
-                       nTreeVertsD, nCrownVertsD, nLeafInstD, 1 - drawSet);
+                       nTreeVertsD, nCrownVertsD, nLeafInstD, 1 - drawSet,
+                       treeSlotsD, treeSlotND);
           while(upload_step(1e9)){ }
           double tB2 = now_sec();
           printf("  Baum-Erstbuild: Generieren %.0f ms + Upload %.0f ms = %.0f ms  (%.0f MB Puffer)\n",
@@ -2927,9 +2944,10 @@ int main(int argc, char **argv) {
       // sieht nie halbfertige Geometrie.
       if(!upActive){
         float *tv, *cv, *lv; int ntv, ncv, nli, ntr;
-        trees_build_finished_snapshot(&tv, &cv, &lv, &ntv, &ncv, &nli, &ntr);
+        const TreeSlot *sl; int nsl;
+        trees_build_finished_snapshot(&tv, &cv, &lv, &ntv, &ncv, &nli, &ntr, &sl, &nsl);
         if(tv){
-          upload_begin(tv, cv, lv, ntv, ncv, nli, 1 - drawSet);
+          upload_begin(tv, cv, lv, ntv, ncv, nli, 1 - drawSet, sl, nsl);
           printf("  Baum-Build (Thread) uebernommen: %d Baeume, %.0f MB — Upload in Scheiben (%u MB/Frame)\n",
                  ntr,
                  ((double)ntv * TREE_FLOATS + (double)ncv * CROWN_FLOATS
@@ -3739,14 +3757,14 @@ int main(int argc, char **argv) {
     // Ausserhalb der Silhouette sind Szene und Kopie identisch, das Mischen ist
     // dort wirkungslos — genau deshalb der Kopierpass statt der Frage, welche
     // Stufe einen Pixel deckt. Baeume einzeln, von fern nach nah.
-    if(envComp && treeSlotND > 0){
+    if(envComp && treeSlotNCur > 0){
       static int   csIdx[TREE_SLOT_MAX];
       static float csW[TREE_SLOT_MAX], csD[TREE_SLOT_MAX];
       static int   csX[TREE_SLOT_MAX], csY[TREE_SLOT_MAX], csB[TREE_SLOT_MAX], csH[TREE_SLOT_MAX];
       float focalPx = 1.7f * (float)fboH;
       int nCs = 0;
-      for(int i = 0; i < treeSlotND && nCs < TREE_SLOT_MAX; i++){
-        const TreeSlot *sl = &treeSlotsD[i];
+      for(int i = 0; i < treeSlotNCur && nCs < TREE_SLOT_MAX; i++){
+        const TreeSlot *sl = &treeSlotsCur[i];
         if(sl->cardN <= 0) continue;
         float dx = camPos[0] - sl->ax, dz = camPos[2] - sl->az;
         float d = sqrtf(dx*dx + dz*dz);
@@ -3816,8 +3834,8 @@ int main(int argc, char **argv) {
           }
         }
       if(getenv("DEMO_COMPDBG")){ static int cd6 = 0;
-        if(cd6++ < 4 && treeSlotND > 0){
-          const TreeSlot *sl = &treeSlotsD[0];
+        if(cd6++ < 4 && treeSlotNCur > 0){
+          const TreeSlot *sl = &treeSlotsCur[0];
           float dx = camPos[0]-sl->ax, dz = camPos[2]-sl->az;
           float d = sqrtf(dx*dx+dz*dz);
           TreeLod L; L.H=sl->h; L.R1=sl->R1; L.R2=sl->R2; L.bb=treeBillboard0;
@@ -3831,7 +3849,7 @@ int main(int argc, char **argv) {
                                        inst += treeSlotsD[csIdx[q]].cardN; }
           float rmin = 1e9f, rmax = 0; int nR1 = 0, nR2 = 0;
           for(int q = 0; q < nCs; q++){
-            const TreeSlot *sl2 = &treeSlotsD[csIdx[q]];
+            const TreeSlot *sl2 = &treeSlotsCur[csIdx[q]];
             if(sl2->R1 < rmin) rmin = sl2->R1; if(sl2->R1 > rmax) rmax = sl2->R1;
             if(csD[q] > sl2->R1 * 1.05f) nR2++;
           }
@@ -3841,7 +3859,7 @@ int main(int argc, char **argv) {
                  " %ld von %ld gesamt)\n",
                  nCs, nCs?(int)csD[nCs-1]:0, nCs?(int)csD[0]:0,
                  nCs?csW[nCs-1]:0.0f, nCs?csW[0]:0.0f,
-                 nCs?treeSlotsD[csIdx[0]].R1:0.0f, rmin, rmax, nR2, area,
+                 nCs?treeSlotsCur[csIdx[0]].R1:0.0f, rmin, rmax, nR2, area,
                  100.0*(double)area/((double)fboW*fboH), inst, inst,
                  (long)nCrownVertsCur); } }
       if(nCs > 0){
@@ -3866,7 +3884,7 @@ int main(int argc, char **argv) {
         p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
         p_glEnable(GL_SCISSOR_TEST);
         for(int q = 0; q < nCs; q++){
-          const TreeSlot *sl = &treeSlotsD[csIdx[q]];
+          const TreeSlot *sl = &treeSlotsCur[csIdx[q]];
           int bx = csX[q], by = csY[q], bw = csB[q], bh = csH[q];
           // Scissor VOR dem Blit setzen: der Blit wird vom Scissor des Draw-
           // Framebuffers beschnitten, und der war vom letzten Frame uebergeblieben
@@ -4014,6 +4032,28 @@ int main(int argc, char **argv) {
     // Saetze). Diese Zeile zaehlt Pixel — modellfrei. Pumpen aeussert sich als
     // Delle in der Deckung, und zwar an Entfernungen, an denen das Modell "glatt"
     // meldet.
+    // DEMO_COVLOG=1: Deckung des ganzen Bildes pro Frame (Wald, keine
+    // Ein-Baum-Szene). Verschwindende Baumkronen aeussern sich als Einbruch.
+    if(getenv("DEMO_COVLOG")){
+      static unsigned char *cvb = 0; static int cvW = -1, cvH = -1;
+      if(cvW != fboW || cvH != fboH){ free(cvb); cvW = fboW; cvH = fboH;
+        cvb = (unsigned char*)malloc((size_t)fboW * fboH * 4); }
+      if(cvb){
+        p_glFinish();
+        p_glReadPixels(0, 0, fboW, fboH, GL_RGBA, GL_UNSIGNED_BYTE, cvb);
+        long lit = 0, lum = 0, green = 0;
+        for(int i = 0; i < fboW * fboH; i++){
+          int r = cvb[4*i], g = cvb[4*i+1], b = cvb[4*i+2];
+          if(r > 12 || g > 12 || b > 12) lit++;
+          if(g > r + 6 && g > b + 6) green++;      // Laub: gruen dominiert
+          lum += r + g + b;
+        }
+        printf("COV frame %4d: %7d helle, %7d gruene Pixel, Helligkeit %9ld | Satz %d, Band %d\n",
+               gFrameCount, lit, green, lum, drawSet, treeBandCount);
+        fflush(stdout);
+      }
+    }
+
     if(lodTest && treeDbgTier >= 0){
       // Ganze Bildflaeche lesen und helle Pixel zaehlen. Bei ausgeschalteter
       // Landschaft ist das die sichtbare Baumdeckung — ohne Fenster, das bei
