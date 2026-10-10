@@ -45,8 +45,12 @@ check_no_glerror(){
   if grep -qiE "GL-Fehler|glGetError.*0x[1-9a-f]" "$OUT/$name.log"; then
     fail "$name: GL-Fehler im Log"
   fi
-  if grep -q "FAILED\|failed to compile\|Shader-Fehler" "$OUT/$name.log"; then
-    fail "$name: Shader-Kompilierungsfehler"
+  # "Shaderfehler (tmesh):" ist die Ausgabe von make_program in src/main.c —
+  # ohne diesen Treffer lief ein Lauf mit kaputtem Shader durch (2026-10-10:
+  # uFarCut in tree.vert benutzt, aber nicht deklariert; auf dem Host brach die
+  # Engine damit sofort ab, in der VM lief der alte Binary).
+  if grep -q "FAILED\|failed to compile\|Shader-Fehler\|Shaderfehler\|Shader-Binärfehler" "$OUT/$name.log"; then
+    fail "$name: Shader-Kompilierungs-/Linkfehler"
   fi
 }
 
@@ -109,16 +113,16 @@ done
 
 # 4) Kameraweg: Baut und uebergblendet dauerhaft, ohne dass Baeume fehlen
 run walk 25 "DEMO_CAM=5 16 -0.15 0.7" "DEMO_WALK=13 0" "DEMO_TREEDEBUG=1"
-check_tree_counts walk
+check_tree_counts walk; check_no_glerror walk
 sw=$(grep -c "Satz-Wechsel" "$OUT/walk.log")
 [ "$sw" -ge 1 ] || fail "walk: kein Satz-Wechsel (Build/Upload laeuft nicht)"
 log "OK   walk: $sw Satz-Wechsel, Upload-Slices: $(grep -c 'Baum-Upload' "$OUT/walk.log")"
 
 # 5) Kleinster Build-Radius (schneller Build) und grösster (alles in Stufe 3)
 run small 20 "DEMO_CAM=5 16 -0.15 0.7" "DEMO_TREEBUILDRANGE=5" "DEMO_SHOT=4"
-check_tree_counts small
+check_tree_counts small; check_no_glerror small
 run big 25 "DEMO_CAM=5 16 -0.15 0.7" "DEMO_LODRSCALE=2.0" "DEMO_SHOT=4"
-check_tree_counts big
+check_tree_counts big; check_no_glerror big
 
 # 6) Schilf-Pass: an einem Ufer muss der eigene Build Pflanzen liefern
 run reed 25 "DEMO_CAM=204 314 -0.10 0.5" "DEMO_ARTEN=2" "DEMO_SHOT=6"

@@ -2187,6 +2187,7 @@ int main(int argc, char **argv) {
   GLint locCompTexB = p_glGetUniformLocation(progComp, "uTexB");
   GLint locCompW    = p_glGetUniformLocation(progComp, "uW");
   GLint locTFocal  = p_glGetUniformLocation(progTMesh, "uFocalPx");
+  GLint locTFarCut = p_glGetUniformLocation(progTMesh, "uFarCut");
   GLint locCOld    = p_glGetUniformLocation(progCrown, "uTreeOld");
   GLint locCLFace  = p_glGetUniformLocation(progCrown, "uLightFace");
   struct ImpLoc impLoc;
@@ -3187,6 +3188,7 @@ int main(int argc, char **argv) {
       // Schattenwurf: Geruest immer voll (uBBPresent = 0 -> mf = 1), sonst
       // fehlten die fernen Aeste in der Schattenkarte.
       if(locTBB >= 0) p_glUniform1f(locTBB, 0.0f);
+      if(locTFarCut >= 0) p_glUniform1f(locTFarCut, gFarCut);
       if(locTFocal >= 0) p_glUniform1f(locTFocal, 1.7f * (float)fboH);
       applyShadow(&slTree, 0);
       if(locTFade >= 0) p_glUniform1f(locTFade, 1.0f);
@@ -3486,6 +3488,7 @@ int main(int argc, char **argv) {
       p_glUniform1f(locTMask, (float)dbgTreeMask);
       if(locTMeshF >= 0) p_glUniform1f(locTMeshF, 1.0f);
       if(locTBB >= 0) p_glUniform1f(locTBB, (float)treeBillboard0);
+      if(locTFarCut >= 0) p_glUniform1f(locTFarCut, gFarCut);
       // Brennweite in Pixeln: build_mvp nutzt fy = 3.4 NDC = 2*1,7, also ist die
       // vertikale Brennweite 1,7 * Bildhoehe. Dieselbe Zahl bekommt der Build.
       if(locTFocal >= 0) p_glUniform1f(locTFocal, 1.7f * (float)fboH);

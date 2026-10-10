@@ -9,6 +9,8 @@ layout(location=6) in vec2  aLod;     // rad (Ast-Radius m), diss (Aufloes-Schwe
 uniform float uMeshFade = 1.0;    // 0 = gar nicht ausblenden (Schattenwurf-Pass)
 uniform float uBBPresent = 1.0;   // liegen Ganzbaum-Kacheln im Puffer?
 uniform float uFocalPx = 0.0;     // Brennweite in Pixeln (1,7 * Bildhoehe)
+uniform float uFarCut = 0.0;      // Baukante: Holz haengt an derselben Kante wie
+                                  // die Krone (sonst nackter Stamm nach der Krone)
 out float vMeshFade;
 uniform mat4 uMVP;
 uniform vec3 uCamPos;
