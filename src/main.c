@@ -708,7 +708,7 @@ static int    envImpDump = 0;
 static int    impCards = 0;          // DEMO_IMPCARDS=1: Karten mit in die Aufnahme
 // Welche Laub-Schichten wirklich gezeichnet werden (Tasten 4/5/6/7) — zum
 // Identifizieren der Stufen im laufenden Bild.
-static int    layLeaf = 1, layCard = 1, layBB = 1;
+static int    layLeaf = 1, layCard = 1, layBB = 1, layHull = 1;
 static int    impNext = 0, impOn = 1;
 static void build_tile_mips(GLuint tex, int size, int tilepx, int cols);
 static void dump_tex_mip(GLuint tex, int level, int size, const char *path);
@@ -2061,6 +2061,7 @@ int main(int argc, char **argv) {
   }
   printf("FLY: Maus=Schauen WASD=Fliegen Space/X=Hoch/Runter Shift=Turbo O=Orbit R=Reset 1/2/3=Skala T=Wire P=Shot G=GrasFrost V=NurGras M=MSAA H=HUD Q/Esc=Ende\n");
   printf("DEBUG: C=Farbcodierung(gelb aus/cyan ein) J=DepthWrite K=DichteKante L=Fade-Dauer strecken\n");
+  printf("LOD: 4=nur Blaetter 5=nur Karten 8=nur Huelle 6=nur Ganzbaum-Bild 7=alle 1=Ganzbaum-Bild bauen 0=Composite aus/an\n");
 
   // ---------- GL-Setup ----------
   GLuint progScene = make_program(VS_SRC, FS_SRC, "scene");
@@ -2175,6 +2176,8 @@ int main(int argc, char **argv) {
   GLint locCImp    = p_glGetUniformLocation(progCrown, "uImpostor");
   GLint locCCards  = p_glGetUniformLocation(progCrown, "uCardsOn");
   GLint locCBB     = p_glGetUniformLocation(progCrown, "uBillboardOn");
+  GLint locCHull   = p_glGetUniformLocation(progCrown, "uHullOn");
+  GLint locCFarCut = p_glGetUniformLocation(progCrown, "uFarCut");
   GLint locCBP     = p_glGetUniformLocation(progCrown, "uBBPresent");
   GLint locTBB     = p_glGetUniformLocation(progTMesh, "uBBPresent");
   GLint locTPhase  = p_glGetUniformLocation(progTMesh, "uCompPhase");
@@ -2575,14 +2578,18 @@ int main(int argc, char **argv) {
           if (ks == XK_1){ treeBillboard0 = !treeBillboard0; treeForceRebuild = 1;
             printf("Ganzbaum-Billboard groebste Stufe: %s (Baum-Neubau angestossen)\n",
                    treeBillboard0 ? "AN" : "AUS"); }
-          if (ks == XK_4 || ks == XK_5 || ks == XK_6 || ks == XK_7){
+          if (ks == XK_4 || ks == XK_5 || ks == XK_6 || ks == XK_7 || ks == XK_8){
             const char *what;
-            if(ks == XK_4){ layLeaf = 1; layCard = 0; layBB = 0; what = "NUR EINZELBLAETTER"; }
-            else if(ks == XK_5){ layLeaf = 0; layCard = 1; layBB = 0; what = "NUR KARTEN"; }
-            else if(ks == XK_6){ layLeaf = 0; layCard = 0; layBB = 1; what = "NUR GANZBAUM-BILLBOARD"; }
-            else { layLeaf = 1; layCard = 1; layBB = 1; what = "alle Schichten"; }
-            printf("Laub-Schichten: %s (4=Blaetter 5=Karten 6=Billboard 7=alle)\n", what);
+            if(ks == XK_4){ layLeaf = 1; layCard = 0; layBB = 0; layHull = 0; what = "NUR EINZELBLAETTER (nah)"; }
+            else if(ks == XK_5){ layLeaf = 0; layCard = 1; layBB = 0; layHull = 0; what = "NUR BUESCHEL-KARTEN (mittel)"; }
+            else if(ks == XK_6){ layLeaf = 0; layCard = 0; layBB = 1; layHull = 0; what = "NUR GANZBAUM-BILLBOARD"; }
+            else if(ks == XK_8){ layLeaf = 0; layCard = 0; layBB = 0; layHull = 1; what = "NUR KRONENHUELLE (fern)"; }
+            else { layLeaf = 1; layCard = 1; layBB = 1; layHull = 1; what = "alle Schichten"; }
+            printf("Laub-Schichten: %s (4=Blaetter 5=Karten 6=Billboard 8=Huelle 7=alle)\n", what);
           }
+          if (ks == XK_0){ envComp = !envComp; treeForceRebuild = 1;
+            printf("Composite-Ueberblendung: %s (Baum-Neubau angestossen)\n",
+                   envComp ? "AN" : "AUS"); }
           if (ks == XK_2){ reedPassOn = !reedPassOn; reedCX = 1e30f;
             printf("Eigener Schilf-Pass: %s\n", reedPassOn ? "AN" : "AUS"); }
           if (ks == XK_y) { dbgAlpha2Cov = !dbgAlpha2Cov;
@@ -3704,7 +3711,9 @@ int main(int argc, char **argv) {
       if(locCFade >= 0) p_glUniform1f(locCFade, treeFadeNew);
       if(locCCards >= 0) p_glUniform1f(locCCards, (float)layCard);
       if(locCBB >= 0) p_glUniform1f(locCBB, (float)layBB);
-      if(locCBP >= 0) p_glUniform1f(locCBP, (float)(treeBillboard0 || treeHullOn));
+      if(locCHull >= 0) p_glUniform1f(locCHull, (float)layHull);
+      if(locCFarCut >= 0) p_glUniform1f(locCFarCut, gFarCut);
+      if(locCBP >= 0) p_glUniform1f(locCBP, (float)((treeBillboard0 || treeHullOn) ? 1 : 0));
       // Z-Buffer-Trick (Nutzer) waehrend einer Ueberblendung: gemischt wird ohne
       // Depth-Write (sonst verdeckt eine halb durchsichtige Karte den Hintergrund,
       // der erst danach kommt), und danach schreibt ein Farbmaske-aus-Pass die
@@ -3982,7 +3991,9 @@ int main(int argc, char **argv) {
             if(locCFade >= 0) p_glUniform1f(locCFade, 1.0f);
             if(locCCards >= 0) p_glUniform1f(locCCards, (float)layCard);
             if(locCBB >= 0) p_glUniform1f(locCBB, (float)layBB);
-            if(locCBP >= 0) p_glUniform1f(locCBP, (float)(treeBillboard0 || treeHullOn));
+            if(locCHull >= 0) p_glUniform1f(locCHull, (float)layHull);
+            if(locCFarCut >= 0) p_glUniform1f(locCFarCut, gFarCut);
+            if(locCBP >= 0) p_glUniform1f(locCBP, (float)((treeBillboard0 || treeHullOn) ? 1 : 0));
             p_glUniform1f(locCDepth, 0.0f);
             p_glDepthMask(GL_TRUE);
             p_glBindVertexArray(vaoCrown[drawSet]);

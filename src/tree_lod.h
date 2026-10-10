@@ -92,6 +92,7 @@ float treeLodWBillboard(const TreeLod *L, float d);   // Ganzbaum-Kachel
 float treeLodWMesh(const TreeLod *L, float d);        // Geruest (Stamm/Aeste)
 
 /* Existenz-Schnitte des Builds: bis hierhin muss die Geometrie im Puffer sein. */
+float treeLodFarFade(float cut, float d);  // Rand-Aufloesung an der Baukante (lod.glsl: lodFarFade)
 float treeLodLeafCut(const TreeLod *L);      // Einzelblatt-Instanzen
 /* Aeste / feines Netz. Regel: ein Schnitt darf NIE in einem Bereich liegen,
  * in dem die Schicht Gewicht hat — sonst verschwindet (oder erscheint)

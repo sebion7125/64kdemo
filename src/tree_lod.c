@@ -93,6 +93,15 @@ float treeLodWMesh(const TreeLod *L, float d){
   return 1.0f - treeLodSmoothstep(L->R2 * LOD_BAND_LO, L->R2 * LOD_BAND_HI, d);
 }
 
+// Rand der Baukante (Spiegel zu lodFarFade in src/shaders/lod.glsl): 1 bis
+// 0,90 Kante, dann Aufloesung bis 0 an der Kante.
+float treeLodFarFade(float cut, float d){
+  float t = (d - cut * 0.90f) / (cut * 0.10f);
+  if(t <= 0.0f) return 1.0f;
+  if(t >= 1.0f) return 0.0f;
+  return 1.0f - t * t * (3.0f - 2.0f * t);
+}
+
 float treeLodLeafCut(const TreeLod *L){
   return L->R1 * LOD_MARGIN + LOD_BUILD_LAG;
 }

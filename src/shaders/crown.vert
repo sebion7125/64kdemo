@@ -20,6 +20,9 @@ uniform float uTreeFade = 1.0; // Ueberblendung beim LOD-Wechsel (Runde 27):
 uniform float uTreeOld = 0.0;    // 1 = dieser Satz blendet AUS (der alte)
 uniform float uCardsOn = 1.0;      // Schicht-Schalter (Tasten 4/5/6/7)
 uniform float uBillboardOn = 1.0;
+uniform float uHullOn = 1.0;      // FERN-Stufe (Huelle) an/aus (Taste 8)
+uniform float uFarCut = 0.0;      // Baukante: ab 0,90 davon bis hier hoert die
+                                  // ferne Krone auf (Aufloesung, kein Ploppen)
 uniform float uBBPresent = 1.0;   // liegen Ganzbaum-Kacheln im Puffer?
 uniform vec3 uImpJit = vec3(0.0);   // Aufnahme: versetztes Wiederholen der Karten
 uniform float uFocalPx = 0.0;   // Brennweite in Pixeln (fizzle-Zellgroesse)
@@ -29,6 +32,7 @@ out vec2 vUV;
 out vec3 vPos;
 out float vSeed;
 out float vFade;
+out float vEdge;    // Rand-Aufloesung an der Baukante (1 = voll, 0 = weg)
 out float vCompW;   // Composite: Gewicht der einkommenden Stufe (Alpha)
 out float vFiz1, vFiz2, vFizInv1, vFizInv2, vFizScale;   // fizzle (lod.glsl)
 out vec2 vTile;      // Atlas-Kachel (Spalte, Zeile)
@@ -134,7 +138,7 @@ void main(){
   if(fern > 0.5){
     w1 = 1.0; inv1 = 0.0;                                        // bei R1 nicht beteiligt
     w2 = (uLightFace < 0.5) ? lodWBillboard(iLodR2, d, uBBPresent, iPres) : 1.0;
-    inv2 = 1.0; w2 *= uBillboardOn;                              // kommend bei R2
+    inv2 = 1.0; w2 *= (hull > 0.5) ? uHullOn : uBillboardOn;     // kommend bei R2
   } else {
     w1 = (uLightFace > 0.5) ? 1.0 : lodWCardIn(iLodR, d, iPres);
     inv1 = 1.0;                                                  // kommend bei R1
@@ -157,8 +161,15 @@ void main(){
   // Build-Rand: Baeume werden bis RANGE=20 Zellen a 9 m gebaut (180 m halbe
   // Kantenlaenge, Ecken ~255 m). Bis 2026-10-07 endete das Blattdach bei 185 m,
   // die Staemme gingen aber bis ~255 m -> kahle Stummel in der Ferne.
-  float far = 1.0 - smoothstep(190.0, 250.0, d3);
-  w1 *= far * uTreeFade;  w2 *= far * uTreeFade;
+  // Die Rand-Aufloesung darf NICHT ueber das Schichtgewicht laufen: das wird
+  // unten auf 0/1 quantisiert (harter Schichtwechsel statt Fizzle), damit
+  // verschwand die Krone bei der Mitte des Bands schlagartig — gemessen:
+  // ferne Baeume ploppen beim Kameramarsch. vEdge traegt den Rand stattdessen
+  // als Schwellen-Hebung in den Fragment-Shader (Aufloesung der Textur-Alpha,
+  // opak, reihenfolge-unabhaengig).
+  float far = (uFarCut > 1.0) ? lodFarFade(uFarCut, d3) : 1.0;
+  vEdge = far;
+  w1 *= uTreeFade;  w2 *= uTreeFade;
   // COMPOSITE (DEMO_COMP): Phase 1 = Basis (alles ausser der einkommenden
   // Stufe), Phase 2 = nur die einkommende Stufe, Alpha = Gewicht (vCompW).
   vCompW = 0.0;
@@ -190,7 +201,8 @@ void main(){
   // ihn unter 30 m hart wegucullen: das war genau bei nahen Baeumen ein Sprung
   // (dort ist der Uebergang am auffaelligsten). Doppeltes Zeichnen kostet nur
   // waehrend der 0,9 s Ueberblendung.
-  if(uLightFace < 0.5 && (w1 < 0.002 || w2 < 0.002)){ gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  if(uLightFace < 0.5 && (w1 < 0.002 || w2 < 0.002 || far < 0.01)){
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vUV = aOff * 2.0;
   vPos = p;
   vSeed = aData.z;

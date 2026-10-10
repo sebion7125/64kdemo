@@ -37,6 +37,11 @@ float lodBit(float pres, float b){ return mod(floor(pres / b), 2.0); }
 // liegt d im Blendenband um R? (dasselbe Band wie lodBandIn/lodBandOut)
 float lodInBand(float R, float d){ return (d > R * 0.90 && d < R * 1.10) ? 1.0 : 0.0; }
 float lodBandIn(float R, float d){ return smoothstep(R * 0.90, R * 1.10, d); }
+// Rand der Baukante: 1 bis 0,90 Kante, dann Aufloesung bis 0 an der Kante.
+// Laeuft NICHT ueber das Schichtgewicht (das wird bei hartem Schichtwechsel auf
+// 0/1 quantisiert -> Ploppen), sondern ueber die Alpha-Test-Schwelle im
+// Fragment-Shader: die Krone loest sich auf, opak, reihenfolge-unabhaengig.
+float lodFarFade(float cut, float d){ return 1.0 - smoothstep(cut * 0.90, cut, d); }
 // 1 bis zum Band -> 0 dahinter: die abgehende Schicht (Komplement zu lodBandIn).
 float lodBandOut(float R, float d){ return 1.0 - smoothstep(R * 0.90, R * 1.10, d); }
 

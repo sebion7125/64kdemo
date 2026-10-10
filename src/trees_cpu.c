@@ -327,6 +327,7 @@ int treeT2Stride = 3, treeT2Gnum = 3, treeT2Gden = 4;
 int treeDowngraded = 0;   // Baeume, die wegen Budget auf die groebste Stufe fielen
 int treeBB0Cards = 0;    // Zusatzkarten unter dem tier-0-Billboard (DEMO_BB0CARDS)
 int gHullStart = 0, gHullN = 0;   // Range der Huellen-Quadrate dieses Baums
+float gFarCut = 0.0f;             // Baukante der FERN-Stufe (1,15 x Bauradius)
 int gHullNaz = 0, gHullNhy = 0; float gHullCs = 0.0f;   // Rastermasse (TREETAB)
 static int treeSlotCard0, treeSlotCardN, treeSlotHull0, treeSlotHullN;
 int treeHullOn = 1; float treeHullSc = 1.05f;   // DEMO_HULLSC: Ueberlappung der
@@ -500,6 +501,13 @@ static void emit_sprig_quads(float seed, int want){
   // Absichtlich NACH den Karten emittiert: beide Range bleiben getrennt, der
   // Composite zeichnet pro Uebergang eine andere Range.
   if(!treeHullOn) return;
+  // Jenseits der Baukante gibt es keinen Baum mehr im Puffer. Die Huelle darf
+  // dort aber nicht mit Gewicht 1 stehen, sonst ploppen ferne Baeume beim
+  // naechsten Build (alle 12 m Kameraweg) schlagartig auf. Der Shader blendet
+  // sie bis gFarCut auf null aus, also emittieren wir sie darueber hinaus
+  // gar nicht. Gemessen (640 Baeume, 640x360): 302 Baeume standen mit
+  // Huellengewicht 1,0 zwischen 178 und 268 m.
+  if(gTreeDist > gFarCut + LOD_BUILD_LAG) return;
   gHullStart = nCrownVerts;
   {
     enum { HULL_AZMAX = 32, HULL_HYMAX = 24 };
@@ -1595,6 +1603,7 @@ int trees_build_step(int maxTrees){
     treeLodInitPx(&TL, ezLeafHint, ezCardHint, gFocalPx,
                   (float)treeBuildRange * TREE_G, treeLodScale);
     TL.bb = (treeBillboard0 || treeHullOn) ? 1 : 0;
+    gFarCut = 1.15f * (float)treeBuildRange * TREE_G;   // Schalter im crown.vert
     TL.focalPx = gFocalPx; gTL = TL;   // gTL braucht ez_grow fuer den Ast-Schnitt
     float R1 = TL.R1, R2 = TL.R2;
     int tier;

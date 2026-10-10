@@ -177,6 +177,7 @@ extern int treeTabDump;
 extern int treeCardDivN; extern float treeCardScaleN;   // DEMO_CARDT2 (Basisstufe)
 extern int treeBillboard0;   // tier 0 als Ganzbaum-Billboard (TODO 23)
 extern int treeHullOn; extern float treeHullSc;     // FERN-Stufe: Kronenhuelle als Zylinder-Raster (tier 1)
+extern float gFarCut;   // Baukante der FERN-Stufe (Huelle) = 1,15 x Bauradius
 extern float treeHullCell; extern int treeHullAz;  // DEMO_HULLCELL Zellgroesse, DEMO_HULLAZ Azimut-Zellen (0=automatisch)
 extern int treeBB0Cards;     // Zusatzkarten darunter (DEMO_BB0CARDS)
 extern int treeDowngraded;   // wegen Budget auf die groebste Stufe herabgestuft

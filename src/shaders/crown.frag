@@ -4,6 +4,7 @@ in vec2 vUV;
 in vec3 vPos;
 in float vSeed;
 in float vFade;
+in float vEdge;   // Rand-Aufloesung an der Baukante
 in float vCompW;   // Composite: Gewicht der einkommenden Stufe
 in float vFiz1, vFiz2, vFizInv1, vFizInv2, vFizScale;
 in vec2 vTile;      // Atlas-Kachel (Spalte, Zeile)
@@ -131,6 +132,12 @@ void main(){
     // bei grossen Karten hart (lod 0 -> 0,5) und die ferne Krone hoert nicht
     // auf zu existieren.
     float thr = 0.5 * exp2(-0.6 * lod);
+    // Rand der Baukante: statt Alpha-Mischen (zwei halbtransparente Folien,
+    // reihenfolge-abhaengig) wird die Schwelle angehoben. Bei vEdge -> 0
+    // ueberlebt nur noch der dichteste Texel, die Krone loest sich auf, und
+    // der Tiefenpuffer bleibt korrekt. vEdge = 1 (der Normalfall) aendert
+    // nichts an der Schwelle.
+    if(vEdge < 0.999) thr /= max(vEdge, 1e-3);
     if(a < thr) discard;
     if(uFizOn > 0.5){
       float n1 = lodFizN(vPos, vFizScale, 0.0);
