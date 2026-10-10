@@ -116,6 +116,8 @@ static GLenum (*p_glCheckFramebufferStatus)(GLenum target);
 static void (*p_glDeleteFramebuffers)(GLsizei n, const GLuint *framebuffers);
 static void (*p_glDeleteTextures)(GLsizei n, const GLuint *textures);
 static void (*p_glBlendFunc)(GLenum sfactor, GLenum dfactor);
+static void (*p_glBlendEquation)(GLenum mode);
+static void (*p_glBlendColor)(GLfloat r, GLfloat g, GLfloat b, GLfloat a);
 static void (*p_glEnable)(GLenum cap);
 static void (*p_glDisable)(GLenum cap);
 static void (*p_glUniform1f)(GLint location, GLfloat v0);
@@ -228,6 +230,8 @@ static void load_libs(void) {
   LOADGL2(glDeleteFramebuffers);
   LOADGL2(glDeleteTextures);
   LOADGL2(glBlendFunc);
+  LOADGL2(glBlendEquation);
+  LOADGL2(glBlendColor);
   LOADGL2(glEnable);
   LOADGL2(glDisable);
   LOADGL2(glUniform1f);
@@ -461,6 +465,7 @@ static int   dbgFizzle = 0, dbgFlutter = 0;   // DEMO_FIZ / DEMO_FLUT (Standard 
 // Pro Frame wird alles geloggt, was die Darstellung dieses Baums bestimmt, am
 // Ende eine Auswertung ueber die Invarianten.
 static int   lodTest = 0, ltFrame = 0, ltTierSeqN = 0, ltBuildsSeen = 0;
+static long  ltLum = 0;   // Helligkeitssumme des Bildes (Blend-Stetigkeit)
 static float ltD0 = 140.0f, ltD1 = 3.0f, ltStep = 0.5f;
 static float ltPrevW[4] = {0,0,0,0}, ltPrevD = 0.0f, ltSlope[4] = {0,0,0,0}, ltHole = 0.0f;
 static int   ltPrevTier = -999, ltPrevVerts = -1, ltPrevCrown = -1, ltPrevLeaf = -1;
@@ -3748,9 +3753,16 @@ int main(int argc, char **argv) {
         TreeLod L; L.H = sl->h; L.R1 = sl->R1; L.R2 = sl->R2;
         L.bb = treeBillboard0; L.pres = sl->pres; L.focalPx = focalPx;
         float w = 0.0f;
-        if(d > L.R1 * LOD_BAND_LO && d < L.R1 * LOD_BAND_HI) w = treeLodWCard(&L, d);
-        else if(L.bb && d > L.R2 * LOD_BAND_LO && d < L.R2 * LOD_BAND_HI)
-                                                    w = treeLodWBillboard(&L, d);
+        int inBand = 0;
+        if(d > L.R1 * LOD_BAND_LO && d < L.R1 * LOD_BAND_HI){ w = treeLodWCard(&L, d); inBand = 1; }
+        else if(L.bb && d > L.R2 * LOD_BAND_LO && d < L.R2 * LOD_BAND_HI){
+                                                    w = treeLodWBillboard(&L, d); inBand = 1; }
+        // Nur Baeume in einem Blendenband werden kopiert und gemischt. Diese
+        // Bedingung war in einer Zwischenrunde durch einen Kommentar ersetzt —
+        // Folge: ALLE 411 Baeume mit Karten landeten in der Liste, 16 299 765 px
+        // Boxflaeche pro Frame (28 300 % des Bildes bei 640x360) und 14 fps auf
+        // dem Host.
+        if(!inBand) continue;
         // Kein Ausschnitt bei w ~ 0 oder w ~ 1: der Basispass haelt die
         // abgehende Stufe im ganzen Band auf Gewicht 1 (leaf.vert/crown.vert
         // erzwingen keep = 1, sobald lodInBand true ist) und nimmt die
@@ -3817,13 +3829,19 @@ int main(int argc, char **argv) {
         if(cd5++ < 14){ long area = 0, inst = 0;
           for(int q = 0; q < nCs; q++){ area += (long)csB[q]*csH[q];
                                        inst += treeSlotsD[csIdx[q]].cardN; }
+          float rmin = 1e9f, rmax = 0; int nR1 = 0, nR2 = 0;
+          for(int q = 0; q < nCs; q++){
+            const TreeSlot *sl2 = &treeSlotsD[csIdx[q]];
+            if(sl2->R1 < rmin) rmin = sl2->R1; if(sl2->R1 > rmax) rmax = sl2->R1;
+            if(csD[q] > sl2->R1 * 1.05f) nR2++;
+          }
           printf("COMPROBAUM %d Baeume in der Blende (Sicht %d..%d m, w %.2f..%.2f,"
-                 " R1 %.1f) | Boxflaeche %ld px"
+                 " R1 %.1f, R1-Spanne %.1f..%.1f, d>1.05R1: %d) | Boxflaeche %ld px"
                  " (= %.1f %% des Bildes) | Karten-Instanzen %ld (doppelt gezeichnet:"
                  " %ld von %ld gesamt)\n",
                  nCs, nCs?(int)csD[nCs-1]:0, nCs?(int)csD[0]:0,
                  nCs?csW[nCs-1]:0.0f, nCs?csW[0]:0.0f,
-                 nCs?treeSlotsD[csIdx[0]].R1:0.0f, area,
+                 nCs?treeSlotsD[csIdx[0]].R1:0.0f, rmin, rmax, nR2, area,
                  100.0*(double)area/((double)fboW*fboH), inst, inst,
                  (long)nCrownVertsCur); } }
       if(nCs > 0){
@@ -3860,13 +3878,7 @@ int main(int argc, char **argv) {
           //    beide Stufen dieses Baums)
           p_glBlitNamedFramebuffer(fbo, fboB, bx, by, bx + bw, by + bh,
                                    bx, by, bx + bw, by + bh,
-                                   GL_COLOR_BUFFER_BIT, GL_NEAREST);
-          p_glBlitNamedFramebuffer(fbo, fboB, bx, by, bx + bw, by + bh,
-                                   bx, by, bx + bw, by + bh,
-                                   GL_DEPTH_BUFFER_BIT, GL_NEAREST);
-          if(getenv("DEMO_COMPDBG")){ static int cd8 = 0;
-            if(cd8++ < 40) printf("COMPROBAUM-BLIT: GL nach Farbe 0x%x, nach Tiefe 0x%x\n",
-                                 p_glGetError(), p_glGetError()); }
+                                   GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST);
           // 2) abgehende Stufe (Einzelblaetter) in die Kopie
           p_glBindFramebuffer(GL_FRAMEBUFFER, fboB);
           if(sl->leafN > 0){
@@ -3923,29 +3935,31 @@ int main(int argc, char **argv) {
           // 4) Box mischen: Szene (kommende Stufe) gegen Kopie (abgehende Stufe).
           //    Ziel fboC, weil texScene gelesen wird — direktes Schreiben in fbo
           //    waere eine Rueckkopplung (undefiniert).
-          p_glBindFramebuffer(GL_FRAMEBUFFER, fboC);
+          // 4) mischen: die Kopie mit dem Blend-Apparat darueber blenden.
+          //    Mischung = Szene*(1-s) + Kopie*s, s = Anteil der Kopie = 1 - w.
+          //    Kein dritter Puffer, kein Rueckblit (das waren vorher zwei volle
+          //    Pixel-Durchgaenge pro Baum mehr).
+          p_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
           if(compMixOn){
-          p_glUseProgram(progComp);
-          p_glActiveTexture(GL_TEXTURE0); p_glBindTexture(GL_TEXTURE_2D, texScene);
-          if(locCompTexA >= 0) p_glUniform1i(locCompTexA, 0);
-          p_glActiveTexture(GL_TEXTURE1); p_glBindTexture(GL_TEXTURE_2D, texB);
-          if(locCompTexB >= 0) p_glUniform1i(locCompTexB, 1);
-          // csW ist das Gewicht der KOMMENDEN Stufe; gemischt wird zur Kopie
-          // (Kopie = abgehende Stufe), der Anteil der Kopie ist 1 - csW.
-          if(locCompW >= 0) p_glUniform1f(locCompW, 1.0f - csW[q]);
-          p_glDisable(GL_DEPTH_TEST);
-          p_glDepthMask(GL_FALSE);
-          p_glDisable(GL_CULL_FACE);          // das Dreieck des Mischpasses darf
+            float sCopy = 1.0f - csW[q];
+            p_glUseProgram(progComp);
+            p_glActiveTexture(GL_TEXTURE0); p_glBindTexture(GL_TEXTURE_2D, texB);
+            if(locCompTexB >= 0) p_glUniform1i(locCompTexB, 0);
+            p_glEnable(GL_BLEND);
+            p_glBlendEquation(GL_FUNC_ADD);
+            p_glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA);
+            p_glBlendColor(0.0f, 0.0f, 0.0f, sCopy);
+            p_glDisable(GL_DEPTH_TEST);
+            p_glDepthMask(GL_FALSE);
+            p_glDisable(GL_CULL_FACE);        // das Dreieck des Mischpasses darf
                                               // nicht weggecullt werden
-          p_glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-          p_glBindVertexArray(vaoComp);
-          p_glDrawArrays(GL_TRIANGLES, 0, 3);
+            p_glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+            p_glBindVertexArray(vaoComp);
+            p_glDrawArrays(GL_TRIANGLES, 0, 3);
+            p_glDisable(GL_BLEND);
+            p_glEnable(GL_DEPTH_TEST);
+            p_glDepthMask(GL_TRUE);
           }
-          // Messbank DEMO_COMPMIX=0: die Kopie direkt zurueckkopieren. Damit
-          // trennt man "Mischpass zeichnet nichts" von "Rueckblit kaputt".
-          p_glBlitNamedFramebuffer((compMixOn >= 1) ? fboC : fboB, fbo, bx, by, bx + bw, by + bh,
-                                   bx, by, bx + bw, by + bh, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-          p_glEnable(GL_DEPTH_TEST);
           if(getenv("DEMO_COMPDBG")){ static int cd7 = 0;
             if(cd7++ < 40){
               unsigned char *bb = (unsigned char*)malloc((size_t)bw*bh*4);
@@ -3953,7 +3967,7 @@ int main(int argc, char **argv) {
               p_glFinish();   // Mesa-Threads: ohne Finish liefert glReadPixels hier
                               // unverlaessliche Werte (gemessen: gleiche Konfiguration
                               // bald 401 hell, bald 0)
-              p_glBindFramebuffer(GL_FRAMEBUFFER, fboC);
+              p_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
               p_glReadPixels(bx, by, bw, bh, GL_RGBA, GL_UNSIGNED_BYTE, bb);
               for(long k = 0; k < (long)bw*bh; k++)
                 if(bb[4*k] > 12 || bb[4*k+1] > 12 || bb[4*k+2] > 12) litC++;
@@ -4013,8 +4027,10 @@ int main(int argc, char **argv) {
       if(covbuf){
         p_glReadPixels(0, 0, fboW, fboH, GL_RGBA, GL_UNSIGNED_BYTE, covbuf);
         lit = 0;
-        for(int i = 0; i < fboW * fboH; i++)
+        for(int i = 0; i < fboW * fboH; i++){
           if(covbuf[i*4] > 12 || covbuf[i*4+1] > 12 || covbuf[i*4+2] > 12) lit++;
+          ltLum += (long)covbuf[i*4] + covbuf[i*4+1] + covbuf[i*4+2];   // ungeschwaetzte
+        }                                                              // Helligkeitssumme
       }
       float ddx = treeDbgX - camPos[0], ddz = treeDbgZ - camPos[2];
       float dCov = sqrtf(ddx * ddx + ddz * ddz);
@@ -4041,8 +4057,10 @@ int main(int argc, char **argv) {
           }
         }
       }
-      printf("LT-DECKUNG frame %4d d %6.2f m: %7d helle Pixel (fade %.2f, Satz %d, cmp %d, Band %d)\n",
-             ltFrame - 1, dCov, lit, treeFadeNew, drawSet, envComp ? 2 : 1, treeBandCount);
+      printf("LT-DECKUNG frame %4d d %6.2f m: %7d helle Pixel, Helligkeitssumme %8ld"
+             " (fade %.2f, Satz %d, cmp %d, Band %d)\n",
+             ltFrame - 1, dCov, lit, ltLum, treeFadeNew, drawSet, envComp ? 2 : 1, treeBandCount);
+      ltLum = 0;
       fflush(stdout);
     }
 

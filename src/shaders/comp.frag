@@ -1,31 +1,30 @@
 #version 300 es
 // Mischpass des Baum-Composites (Nutzerentwurf 2026-10-09).
 //
-// Ablauf pro Baum in main.c: Bildbox des Baums aus der Szene in fboB kopieren,
-// die kommende LOD-Stufe DIESES Baums opak darueber zeichnen (Alpha-Test,
-// Tiefentest, Tiefenwrite), dann ueber genau dieser Box mischen:
+// Ablauf pro Baum in main.c: Bildbox des Baums aus der Szene in fboB kopieren
+// (Farbe UND Tiefe), die abgehende LOD-Stufe DIESES Baums in die Kopie zeichnen,
+// die kommende Stufe in die Szene zeichnen, dann ueber genau dieser Box die
+// Kopie darueber blenden.
 //
-//     Bild = mischen(Szene, Kopie, w)      w = Gewicht der abgehenden Stufe
-//
-// Kein Alpha-Blend der Stufen uebereinander: zwei halbtransparente Folien
-// ergeben nicht die Mittelstufe (Deckung a - a^2 f (1-f), bis 25 % zu wenig bei
-// f = 0,5), und ein Blend haengt an der Zeichenreihenfolge.
+// Gemischt wird NICHT in einem dritten Puffer, sondern direkt mit dem
+// Blend-Apparat: Quelle = Kopie, Ziel = Szene,
+//   Mischung = Szene*(1-s) + Kopie*s      mit s = Anteil der Kopie
+// als Blendfunktion (CONSTANT_ALPHA, ONE_MINUS_CONSTANT_ALPHA) und
+// blendColor(a = s). Das spart gegenueber der frueheren Version den dritten
+// Farb-Puffer und das Rueckkopieren der Box — gemessen 4 volle Pixel-Durchgaenge
+// pro Baum und Frame statt 2 (bei 1280x720: 21 Baeume, 3 501 505 px Boxflaeche =
+// 1520 % des Bildes pro Durchgang).
 //
 // Warum keine Abdeckungs- oder Tiefen-Heuristik noetig ist: ausserhalb der
 // Silhouette sind Szene und Kopie derselbe Hintergrund, das Mischen ist dort
-// wirkungslos. Ueber Sichtbarkeit entscheidet allein der Tiefentest des opaken
-// Draws; dieser Pass fuehrt weder Tiefentest noch Tiefenwrite.
+// wirkungslos. Ueber Sichtbarkeit entscheidet der Tiefentest des opaken Draws;
+// dieser Pass fuehrt weder Tiefentest noch Tiefenwrite.
 precision highp float;
 
-uniform sampler2D uTexA;   // Szene, wie sie JETZT steht (inkl. kommender Stufe)
-uniform sampler2D uTexB;   // Kopie derselben Box VOR der kommenden Stufe
-uniform float uW;          // Gewicht der ABGEHENDEN Stufe (1 = nur Kopie)
+uniform sampler2D uTexB;   // Kopie der Box, ueber die abgehende Stufe gezeichnet wurde
 
 out vec4 O;
 
 void main(){
-  ivec2 q = ivec2(gl_FragCoord.xy);
-  vec4 A = texelFetch(uTexA, q, 0);
-  vec4 B = texelFetch(uTexB, q, 0);
-  O = vec4(mix(A.rgb, B.rgb, clamp(uW, 0.0, 1.0)), 1.0);
+  O = texelFetch(uTexB, ivec2(gl_FragCoord.xy), 0);
 }

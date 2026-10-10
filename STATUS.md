@@ -3571,3 +3571,50 @@ der selben Tiefe gewinnt.
 
 Aufwand (Wald, 640×360): 10 Baeume im Band, Boxflaeche 467 071 px = 811 % des
 Bildes, 10 594 Karten-Instanzen zusaetzlich gezeichnet (von 667 072 gesamt).
+
+## 2026-10-09 (Runde 33): FPS-Einbruch (Nutzer: 14 fps) — zwei eigene Fehler
+
+**1) Band-Test fehlte: alle Baeume wurden kopiert.** In der Zwischenrunde war die
+Bedingung `if(w <= 0.002f || w >= 0.998f) continue;` durch einen Kommentar
+ersetzt worden — ohne Ersatz. Damit landete *jeder* Baum mit Karten in der
+Composite-Liste, nicht nur die in einem Blendenband:
+
+| Auflösung | Baeume in der Liste (falsch) | Boxflaeche pro Frame |
+|---|---|---|
+| 640×360 | 411 von 648 | 16 299 765 px = 28 300 % des Bildes |
+| 1280×720 | 411 | 65 313 480 px = 28 300 % |
+
+Richtig (nur Baeume mit `0,90 R1 < d < 1,10 R1`):
+
+| Auflösung | Baeume im Band | Boxflaeche pro Frame |
+|---|---|---|
+| 640×360 | 11 | 526 920 px = 915 % des Bildes |
+| 1280×720 | 21 | 3 501 505 px = 1520 % |
+| 1600×900 | 24 | 5 357 404 px = 1717 % |
+
+**2) Vier volle Pixel-Durchgaenge pro Baum statt zwei.** Der Mischpass schrieb in
+einen dritten Puffer (`fboC`) und wurde zurueckgeblitt. Jetzt wird die Kopie mit
+dem Blend-Apparat direkt darueber geblendet:
+`Mischung = Szene·(1−s) + Kopie·s` als
+`BlendFunc(CONSTANT_ALPHA, ONE_MINUS_CONSTANT_ALPHA)` mit
+`BlendColor(a = s)`, s = 1 − Gewicht der kommenden Stufe. `fboC` und der
+Rueckblit entfallen; Farb- und Tiefen-Kopie sind ein Blit.
+
+Bei 1600×900 damit 2 × 5,36 Mio = 10,7 Mio px pro Frame statt 4 × 65 Mio.
+
+## Blend-Verlauf gemessen (Ein-Baum-Test 44→39,6 m, 0,4 m/Frame, 320×180)
+
+```
+d[m]      43.6  43.2  42.8  42.4  42.0  41.6  41.2  40.8  40.4  40.0  39.6
+COMP=1    290   302   305   317   311   315   340   475   486   500   501   helle Pixel
+COMP=0    290   302   305   317   311   315   310   331   328   338   343
+COMP=1  68113 71068 71658 75597 74662 76568 77269 84298 86557 91193 96487   Helligkeitssumme
+COMP=0  68113 71068 71658 74170 73052 74258 72953 78336 77464 79226 81432
+```
+
+Die Helligkeitssumme (neue Messgroesse `LT-DECKUNG`, nicht schwellewertbehaftet)
+waechst im Composite-Pfad kontinuierlich; der Sprung der Pixelzahl bei 40,8 m
+(+135) ist zum Teil Messeffekt — die Blattform-Pixel ueberschreiten bei
+Kopie-Anteil ≈ 0,10 gerade die Schwelle „> 12". Ein Rest bleibt erklaerungsbeduerftig:
+bei 40,8 m steigt die Helligkeit im Composite-Pfad um 7029, im Vergleichspfad um
+5383. Der genutzte Schaltradius des Testbaums ist R1 = 38,66 m, Band 34,79..42,53 m.
