@@ -2576,9 +2576,13 @@ int main(int argc, char **argv) {
             grassSetSortOrder(dbgSortOrder);
             printf("DEBUG Zeichenreihenfolge: %s (neuer Build noetig: G aus/ein oder 1m bewegen)\n",
                    dbgSortOrder ? "hinten->vorn sortiert" : "Diamond-Order"); }
-          if (ks == XK_1){ treeBillboard0 = !treeBillboard0; treeForceRebuild = 1;
-            printf("Ganzbaum-Billboard groebste Stufe: %s (Baum-Neubau angestossen)\n",
-                   treeBillboard0 ? "AN" : "AUS"); }
+          if (ks == XK_1){
+            // Der Ganzbaum-Impostor ist durch die Kronenhuelle ersetzt. Die
+            // Aufnahme malt sonst die Huellen-Quadrate in die Kachel und es
+            // entsteht der vom Nutzer gemeldete "bunte Salat". Der Pfad wird
+            // zurueckgebaut; Taste 1 schaltet ihn nicht mehr ein.
+            printf("Ganzbaum-Bild ist durch die Kronenhuelle ersetzt (Taste 8 = nur Huelle).\n");
+          }
           if (ks == XK_4 || ks == XK_5 || ks == XK_6 || ks == XK_7 || ks == XK_8){
             const char *what;
             if(ks == XK_4){ layLeaf = 1; layCard = 0; layBB = 0; layHull = 0; what = "NUR EINZELBLAETTER (nah)"; }

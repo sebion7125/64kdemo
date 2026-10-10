@@ -21,7 +21,8 @@ uniform float uTreeOld = 0.0;    // 1 = dieser Satz blendet AUS (der alte)
 uniform float uCardsOn = 1.0;      // Schicht-Schalter (Tasten 4/5/6/7)
 uniform float uBillboardOn = 1.0;
 uniform float uHullOn = 1.0;      // FERN-Stufe (Huelle) an/aus (Taste 8)
-uniform float uFarCut = 0.0;      // Baukante: ab 0,90 davon bis hier hoert die
+uniform float uFarCut = 0.0;
+float rc1(float x){ return fract(sin(x * 12.9898) * 43758.5453); }      // Baukante: ab 0,90 davon bis hier hoert die
                                   // ferne Krone auf (Aufloesung, kein Ploppen)
 uniform float uBBPresent = 1.0;   // liegen Ganzbaum-Kacheln im Puffer?
 uniform vec3 uImpJit = vec3(0.0);   // Aufnahme: versetztes Wiederholen der Karten
@@ -169,6 +170,18 @@ void main(){
   // opak, reihenfolge-unabhaengig).
   float far = (uFarCut > 1.0) ? lodFarFade(uFarCut, d3) : 1.0;
   vEdge = far;
+  // Rand-Aufloesung der Huelle: GANZE Zellen fallen weg, nicht Pixel. Die Zelle
+  // traegt ueber ihren Seed einen stabilen Wert rc in [0,1); sie bleibt bis
+  // rc > far. So loest sich die ferne Krone in wachsenden Luecken auf (opak,
+  // reihenfolge-unabhaengig, Tiefenpuffer korrekt).
+  // Die fruehere Variante "Schwelle durch vEdge teilen" war zu hart: bei einer
+  // minifizierten Buschel-Kachel liegt das Atlas-Alpha überall bei ~0,27, die
+  // Grundschwelle bei ~0,19 — schon vEdge = 0,7 hebt die Schwelle ueber 0,27
+  // und die Krone ist weg. Gemessen: 12 helle Px bei 178 m, nur noch 4 Px bei
+  // 202 m (Kronenpixel insgesamt), Nackt-Staemme bis zum Bau-Rand.
+  if(hull > 0.5 && rc1(vSeed * 7.31 + aCenter.y * 0.77f) > far){
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return;
+  }
   w1 *= uTreeFade;  w2 *= uTreeFade;
   // COMPOSITE (DEMO_COMP): Phase 1 = Basis (alles ausser der einkommenden
   // Stufe), Phase 2 = nur die einkommende Stufe, Alpha = Gewicht (vCompW).

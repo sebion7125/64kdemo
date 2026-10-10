@@ -330,10 +330,10 @@ int gHullStart = 0, gHullN = 0;   // Range der Huellen-Quadrate dieses Baums
 float gFarCut = 0.0f;             // Baukante der FERN-Stufe (1,15 x Bauradius)
 int gHullNaz = 0, gHullNhy = 0; float gHullCs = 0.0f;   // Rastermasse (TREETAB)
 static int treeSlotCard0, treeSlotCardN, treeSlotHull0, treeSlotHullN;
-int treeHullOn = 1; float treeHullSc = 1.05f;   // DEMO_HULLSC: Ueberlappung der
+int treeHullOn = 1; float treeHullSc = 1.20f;   // DEMO_HULLSC: Ueberlappung der
                              // Huellenzellen (1,0 = exakt kachelnd, 1,05 schliesst
                              // die Ecken der quadratischen Zellen)
-float treeHullCell = 1.4f;  // DEMO_HULLCELL: Zellgroesse in Buscheldurchmessern
+float treeHullCell = 2.0f;  // DEMO_HULLCELL: Zellgroesse in Buscheldurchmessern
                              // (gemessen an einem 3,9-m-Baum, 139 m: Karten 484 Instanzen ->
                              // 21 helle Px; Huelle 1,0 -> 64/15 Px, 1,4 -> 43/25 Px, 2,5 -> 17/29 Px)
 int   treeHullAz = 0;       // DEMO_HULLAZ: Azimut-Zellen (0 = automatisch aus der
@@ -488,24 +488,20 @@ static void emit_sprig_quads(float seed, int want){
       nCrownVerts++;
     }
   }
-  // ---- FERN-Stufe (tier 1): Kronenhuelle als Zylinder-Raster -----------------
-  // Die Buschel werden in Zellen eines Rasters um die Kronenachse geworfen
-  // (Azimut x Hoehe). Pro besetzter Zelle steht EIN Quadrat tangential an der
-  // Huelle, Mitte auf dem mittleren Radius der Zelle. Leere Zellen bleiben weg:
-  // die ferne Krone ist an denselben Stellen durchsichtig wie die echte.
-  // Die Azimut-Zahl wird aus der Kronenweite gewaehlt, damit Zellbreite
-  // (Bogenlaenge) und Zellhoehe gleich sind und die Quadrate die Huelle exakt
-  // kacheln. Die Form kommt aus den echten Buschelpositionen — eine Tanne wird
-  // dadurch automatisch zum Kegel, eine lichte Krone bekommt Luecken.
-  // Opak mit Alpha-Test: Verdeckung und Selbstschnitt loest der Tiefenpuffer.
-  // Absichtlich NACH den Karten emittiert: beide Range bleiben getrennt, der
-  // Composite zeichnet pro Uebergang eine andere Range.
-  // Range VOR jedem fruehen Return setzen: ohne das behalten gHullStart/gHullN
-  // die Werte des vorherigen Baums, und der Per-Baum-Slot (TreeSlot.hull0/hullN)
-  // sowie der Aufnahme-Slice zeigen dann auf fremde Instanzen. Gemessen: 19 von
-  // 640 Baeumen liegen jenseits der Baukante und waeren betroffen gewesen.
+}
+
+
+
+// Die FERN-Stufe fuer EINEN Baum. Eigener Aufruf (nicht in emit_sprig_quads),
+// weil die Karten jenseits 1,10 R2 entfallen, die Huelle dort aber erst
+// gebraucht wird.
+static void emit_hull_quads(float seed){
+  int variant = (int)(fabsf(seed) * 7.31f) % 4;
   gHullStart = nCrownVerts; gHullN = 0;
   if(!treeHullOn) return;
+  // Existenz = Sichtbarkeit: unterhalb 0,90 R2 - Build-Nachlauf ist das
+  // Huellengewicht 0, dort werden keine Zellen gebaut.
+  if(gTreeDist < gLodR2 * 0.90f - LOD_BUILD_LAG) return;
   // Jenseits der Baukante gibt es keinen Baum mehr im Puffer. Die Huelle darf
   // dort aber nicht mit Gewicht 1 stehen, sonst ploppen ferne Baeume beim
   // naechsten Build (alle 12 m Kameraweg) schlagartig auf. Der Shader blendet
@@ -1387,7 +1383,14 @@ static void gen_tree_ez(float bx, float by, float bz, float s, float seed, int t
     // groebsten Stufe (0 = nur Billboard). Mit div 8 bekommt die ferne Krone
     // wieder etwas Parallax-Struktur, fuer 364 Baeume ~1/3 der alten Kartenzahl.
   }
-  if(wantCards > 0) emit_sprig_quads(seed, wantCards);
+  // Existenz = Sichtbarkeit: Karten werden NICHT gebaut, wo ihr Schichtgewicht
+  // ohnehin 0 ist (jenseits 1,10 R2 + Build-Nachlauf). Ohne diesen Schnitt sind
+  // die Karten das Budget-Handicap bei grosser Baukante: bei 450 m Kante
+  // ueberschritten sie den Puffer von 1,2 Mio und 2651 von 3761 Baeumen wurden
+  // uebersprungen. Mit Schnitt: 1110 Baeume bei 297 m Kante, 0 uebersprungen.
+  if(wantCards > 0 && gTreeDist <= gLodR2 * 1.10f + LOD_BUILD_LAG)
+    emit_sprig_quads(seed, wantCards);
+  emit_hull_quads(seed);   // eigener Existenz-Schnitt (ab 0,90 R2 - Nachlauf)
 }
 
 // ---------- Platzierung (identisch zum alten SDF-System) ----------
