@@ -67,12 +67,12 @@ log "== 64kDemo Selbsttest  (bin=$BIN, ${W}x$H, Software-GL in der VM) =="
 # nicht bei einer festen Frame-Nummer. Mit der Baukante von 450 m braucht der
 # Upload in der VM mehrere Frames (2026-10-10: DEMO_SHOTFRAME=8 erwischte den
 # halbhohen Upload -> 194 364 unterschiedliche Pixel zwischen zwei Laeufen).
-run standard 60 "DEMO_CAM=5 16 -0.15 0.7" "DEMO_EXIT=1"
+run standard 150 "DEMO_CAM=5 16 -0.15 0.7" "DEMO_EXIT=1" "DEMO_EXITFRAME=12"
 check_tree_counts standard; check_no_glerror standard
 
 # 2) Zweiter Lauf derselben Konfiguration: Bild muss bitgleich sein
 #    (Laufzeit-abhaengige Effekte sind mit DEMO_FREEZE=1 abgeschaltet)
-run repeat 60 "DEMO_CAM=5 16 -0.15 0.7" "DEMO_EXIT=1"
+run repeat 150 "DEMO_CAM=5 16 -0.15 0.7" "DEMO_EXIT=1" "DEMO_EXITFRAME=12"
 if [ -f "$OUT/standard.ppm" ] && [ -f "$OUT/repeat.ppm" ]; then
   # Der HUD-Text (FPS-Zeile oben) zeigt die Laufzeit, ist also per Definition
   # nicht deterministisch. Gemessen: die einzigen Unterschiede beider Laeufe

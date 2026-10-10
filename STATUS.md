@@ -3878,3 +3878,58 @@ zuvor bearbeiteten Baeume.
 der Baukante 450 m etwa fuenfmal so gross wie vorher (3459 Baeume,
 2 719 056 Geruest-Vertices, 892 135 Kronen-Instanzen, 2 152 120 Blatt-Instanzen).
 Naechste Messung auf dem Host: Frame-Zeiten mit/ohne Composite (`DEMO_COMP=0`).
+
+---
+
+## Runde 2026-10-10: Composite-Kosten (Nutzer: "DEMO_COMP wirkt kaum, aber in
+## Bodennahe 30 statt 40 fps")
+
+**Was der Nutzer sieht.** In Bodennahe werden die Bildboxen der Blend-Baeume
+gross; dort kostet der Composite 10 fps (30 gegen 40). In der Ferne kaum messbar.
+
+**Sparen hinter der Kamera** war schon im ausgelieferten Build drin (Commit aus
+T124): Ecken hinter der Nah-Ebene werden verworfen, ein ganz dahinter oder
+ausserhalb liegender Baum faellt aus der Liste. Gemessen 640x360: 71 Baeume /
+3 586 487 px (6226 %) -> 11 Baeume / 130 487 px (226 %).
+
+**Neu: Flaechen-Budget als Knopf (Standard AUS).** `DEMO_COMPAREA=<Bildflaechen>`
+begrenzt die Summe aller Boxflaechen; ueberschrittene Baeume fallen raus und
+schalten hart um (kleinste Boxen zuerst). Test mit 1,2: von 11 Baeumen bleibt
+**einer** uebrig — seine Box allein ist schon das ganze Bild (57 600 px bei
+320x180). Deshalb Standard 0 = unbegrenzt; der Knopf bleibt als Ventil und als
+Messbank, um auf dem Host zu unterscheiden, ob die Kosten an der FLAECHE oder an
+der ZAHL der Baeume haengen (A/B: `DEMO_COMPAREA=0.5` gegen `DEMO_COMPPAD=0`).
+
+**Neu: Uniforms aus der Baum-Schleife herausgezogen.** Die Werte haengen nicht am
+Baum, nur die Instanz-Reichweite und `uCompPhase` wechseln pro Durchgang. Vorher
+standen ~25 `glUniform`-Aufrufe pro Baum und Durchgang, bei 11 Baeumen also
+~550 pro Frame. Dabei ein eigener Fehler gefunden und gemessen: `texB` wurde auf
+Einheit 0 gebunden und ueberschrieb damit `folTex` des naechsten Baums — die
+Deckung brach im Ein-Baum-Test ab Frame 3 von 363 auf 48 helle Pixel ein. `texB`
+sitzt jetzt auf Einheit 3. Nach dem Fix ist die LT-DECKUNG-Serie des Ein-Baum-
+Tests (44 -> 39,6 m, 0,4 m/Frame, 320x180) in den Frames 0..4 **Pixel fuer Pixel
+und Helligkeitssumme fuer Helligkeitssumme identisch** zum Stand vorher
+(347/81046, 341/79773, 369/85722, 363/86668, 362/86895).
+
+**Einordnung der Kosten.** Der Composite laeuft NACH dem MSAA-Resolve, also auf
+Single-Sample-Puffern — kein MSAA-Faktor. Pro Blend-Baum: 1 Blit (Farbe+Tiefe),
+2 Zeichen-Durchgaenge (abgehend in die Kopie, kommend in die Szene, beide auf die
+Box scissort), 1 Misch-Durchgang. Die Flaeche erklaert 10 fps nicht (226 % eines
+320x180-Bildes sind fuer eine GTX 1650 nichts). Naechster Verdacht: jeder
+`glBlitNamedFramebuffer` kostet eine Pipeline-Synchronisation, und 11 Baeume x
+2 Blits pro Frame haufenweise.
+
+**Vorgeschlagener naechster Schritt (noch nicht gebaut).** Boxen zu GRUPPEN
+zusammenfassen, die sich ueberlappen: pro Gruppe 1 Kopie-Blit und 1 Misch-Blit
+ueber die Vereinigungsbox statt 2 pro Baum. Der gewichts-abhaengige Mischanteil
+kommt pro Pixel in den Alpha-Kanal der Kopie: nach dem Blit Alpha auf 0 klaeren
+(Farbschreibmaske nur Alpha), die abgehenden Fragmente schreiben `a = 1 - w`
+dazu, gemischt wird mit `BlendFunc(GL_ALPHA, ONE_MINUS_ALPHA)` — kein dritter
+Puffer, keine Rueckkopplung. Ueberlappende Kronen mehrerer Baeume hoeren damit
+auf, dieselbe Flaeche mehrfach zu kopieren.
+
+**Selbsttest-Determinismus repariert.** Das Paar standard/repeat endete nach 5
+bzw. 4 Frames (der fruehe Ausstieg haengt an der Uhr: Upload-Slices und
+Kachel-Aufnahme pro Frame) — deshalb 249 unterschiedliche Pixel. Neu
+`DEMO_EXITFRAME=<n>`: beendet fruehestens nach n Frames; das Paar laeuft jetzt
+mit 12.

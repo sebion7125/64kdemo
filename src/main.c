@@ -406,6 +406,11 @@ static GLuint fboS = 0, texDepthS = 0;                // Composite: Szenen-Tiefe
 static int    envComp = 1;
 static int    compMixOn = 1;   // DEMO_COMPMIX=0: Mischpass ueberspringen (Messbank)
 static float  csPad = 2.0f;    // DEMO_COMPPAD: Boxrand in px (Messbank)
+// DEMO_COMPAREA: Budget fuer die Summe aller Composite-Boxen in Bildflaechen.
+// 0 = unbegrenzt. Begruendung bei der Markierung im Composite-Block.
+static float  envCompArea = 0.0f;   // 0 = unbegrenzt (Knopf DEMO_COMPAREA)
+static int    compSkipped = 0;      // Diagnose: durchs Flaechen-Budget gefallen
+static long   compAreaComp = 0;     // ... und die tatsaechlich gemischte Flaeche
 static GLint  locCImpDbg = -1; // Messbank DEMO_COMPMIX=3: uImpostor aus                            // DEMO_COMP=0 schaltet den Composite aus
 static int    dbgCompDepth = 1;                     // DEMO_COMPDEPTH=0: Composite ohne Tiefen-Write
                    // DEMO_MIXTOL: Mischen nur bis so viel m Tiefenabstand
@@ -431,6 +436,7 @@ static int dbgTreeMask = 0;    // DEBUG (; bzw. DEMO_TREEMASK): Baum-Mesh als Ma
 static int envTreeJump = 0;
 static float envShotAt = -1.0f;
 static int   envExitWhenDone = 0;
+static unsigned envExitFrame = 0;  // DEMO_EXITFRAME: fruehestens nach n Frames beenden
 // Diagnose der Transparenz-/Zeichenreihenfolge-Fehler (Nutzervermutung:
 // "Transparenz und Zeichenreihenfolge ... Z-Buffer problem").
 //   DEMO_TDW=0     Kronen+Blaetter schreiben NIE Tiefe. Ausserhalb der Satz-
@@ -2261,6 +2267,7 @@ int main(int argc, char **argv) {
   if (getenv("DEMO_TREEMASK")) dbgTreeMask = 1;
   { const char *es = getenv("DEMO_SHOT"); if (es) envShotAt = (float)atof(es); }
   envExitWhenDone = getenv("DEMO_EXIT") ? 1 : 0;
+  { const char *ef = getenv("DEMO_EXITFRAME"); if(ef) envExitFrame = (unsigned)atoi(ef); }
   { const char *e = getenv("DEMO_TDW");     if(e) dbgTreeDepthWrite = atoi(e) ? 1 : 0; }
   { const char *e = getenv("DEMO_TDPASS");  if(e) dbgTreeDepthPass  = atoi(e) ? 1 : 0; }
   { const char *e = getenv("DEMO_TABC");    if(e) dbgTreeA2C        = atoi(e) ? 1 : 0; }
@@ -2283,6 +2290,7 @@ int main(int argc, char **argv) {
   { const char *cm = getenv("DEMO_COMPMIX"); if (cm) compMixOn = atoi(cm); }
   { const char *mm = getenv("DEMO_MSAA"); if (mm) useMSAA = atoi(mm); }
   { const char *cp = getenv("DEMO_COMPPAD"); if (cp) csPad = (float)atof(cp); }
+  { const char *ca = getenv("DEMO_COMPAREA"); if (ca) envCompArea = (float)atof(ca); }
   { const char *ecd = getenv("DEMO_COMPDEPTH"); if (ecd) dbgCompDepth = atoi(ecd); }
   // DEMO_TREEFADE=<sek>: Ueberblendzeit beim LOD-Satzwechsel (0 = hart schneiden)
   { const char *tf = getenv("DEMO_TREEFADE"); if (tf) treeFadeDur = (double)atof(tf); }
@@ -3810,7 +3818,7 @@ int main(int argc, char **argv) {
       static float csW[TREE_SLOT_MAX], csD[TREE_SLOT_MAX];
       // csR2[q] = 1: dieser Baum haengt im R2-Band (Karten -> FERN-Stufe).
       // Dann ist die ABGEHENDE Stufe der Karten und die KOMMENDE die Huelle.
-      static unsigned char csR2[TREE_SLOT_MAX];
+      static unsigned char csR2[TREE_SLOT_MAX], csSkip[TREE_SLOT_MAX];
       static int   csX[TREE_SLOT_MAX], csY[TREE_SLOT_MAX], csB[TREE_SLOT_MAX], csH[TREE_SLOT_MAX];
       float focalPx = 1.7f * (float)fboH;
       int nCs = 0;
@@ -3910,6 +3918,31 @@ int main(int argc, char **argv) {
           }
           { unsigned char tb = csR2[b]; csR2[b] = csR2[b-1]; csR2[b-1] = tb; }
         }
+      // FLAECHEN-BUDGET (Nutzer 2026-10-10: in Bodennahe 30 fps mit Composite,
+      // 40 fps ohne). Der Composite pro Baum kostet Blit (Farbe+Tiefe) + zwei
+      // Zeichen-Durchgaenge + Mischblit, alles ueber seine Bildbox. In Bodennahe
+      // werden die Boxen gross und die Zahl der Blend-Baeume steigt.
+      // Ueberschreitet die Summe der Boxflaechen das Budget, fallen die
+      // KLEINSTEN Boxen zuerst raus: deren Uebergang laeuft auf wenigen Pixeln,
+      // der Baum steht im Basispass mit der abgehenden Stufe und schaltet am
+      // Bandende hart um — bei einer Box unter ~10 px Kantenlaenge ist das nicht
+      // sichtbar (gemessen: Boxen der fernsten Blend-Baeume 20..40 px).
+      // Die Reihenfolge fern->nah bleibt erhalten, es fallen nur Eintraege weg.
+      { long tot = 0;
+        for(int q = 0; q < nCs; q++){ csSkip[q] = 0; tot += (long)csB[q]*csH[q]; }
+        long budget = (long)(envCompArea * (double)fboW * (double)fboH);
+        if(envCompArea > 0.0f && tot > budget){
+          for(int guard = 0; guard < nCs && tot > budget; guard++){
+            int best = -1; long ba = -1;
+            for(int q = 0; q < nCs; q++){
+              if(csSkip[q]) continue;
+              long a = (long)csB[q]*csH[q];
+              if(ba < 0 || a < ba){ ba = a; best = q; }
+            }
+            if(best < 0) break;
+            csSkip[best] = 1; tot -= ba;
+          }
+        } }
       if(getenv("DEMO_COMPDBG")){ static int cd6 = 0;
         if(cd6++ < 4 && treeSlotNCur > 0){
           const TreeSlot *sl = &treeSlotsCur[0];
@@ -3922,8 +3955,11 @@ int main(int argc, char **argv) {
         } }
       if(getenv("DEMO_COMPDBG")){ static int cd5 = 0;
         if(cd5++ < 14){ long area = 0, inst = 0;
+          long areaComp = 0; int nComp = 0;
           for(int q = 0; q < nCs; q++){ area += (long)csB[q]*csH[q];
-                                       inst += treeSlotsD[csIdx[q]].cardN; }
+                                       inst += treeSlotsD[csIdx[q]].cardN;
+                                       if(!csSkip[q]){ nComp++; areaComp += (long)csB[q]*csH[q]; } }
+          compSkipped = nCs - nComp; compAreaComp = areaComp;
           float rmin = 1e9f, rmax = 0;
           for(int q = 0; q < nCs; q++){
             const TreeSlot *sl2 = &treeSlotsCur[csIdx[q]];
@@ -3931,13 +3967,16 @@ int main(int argc, char **argv) {
           }
           printf("COMPROBAUM %d Baeume in der Blende (Sicht %d..%d m, w %.2f..%.2f,"
                  " R1 %.1f, R1-Spanne %.1f..%.1f) | Boxflaeche %ld px"
-                 " (= %.1f %% des Bildes) | Karten-Instanzen %ld (doppelt gezeichnet:"
+                 " (= %.1f %% des Bildes) | gemischt %d Baeume / %ld px (%.1f %%)"
+                 " | Budget verworfen %d | Karten-Instanzen %ld (doppelt gezeichnet:"
                  " %ld von %ld gesamt)\n",
                  nCs, nCs?(int)csD[nCs-1]:0, nCs?(int)csD[0]:0,
                  nCs?csW[nCs-1]:0.0f, nCs?csW[0]:0.0f,
                  nCs?treeSlotsCur[csIdx[0]].R1:0.0f, rmin, rmax, area,
-                 100.0*(double)area/((double)fboW*fboH), inst, inst,
-                 (long)nCrownVertsCur); } }
+                 100.0*(double)area/((double)fboW*fboH),
+                 nCs - compSkipped, compAreaComp,
+                 100.0*(double)compAreaComp/((double)fboW*(double)fboH),
+                 compSkipped, inst, inst, (long)nCrownVertsCur); } }
       if(nCs > 0){
         // Rollen (uCompPhase in leaf.vert / crown.vert):
         //   Basisdurchgang (Phase 1): Baeume in der Blende fehlen mit ihrem Laub
@@ -3959,7 +3998,61 @@ int main(int argc, char **argv) {
         p_glDisable(GL_BLEND);
         p_glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
         p_glEnable(GL_SCISSOR_TEST);
+        // UNIFORMS EINMAL VOR DER SCHLEIFE. Die Werte haengen nicht am Baum —
+        // nur die Instanz-Reichweite (Draw-Argument) und uCompPhase wechseln pro
+        // Durchgang. Vorher standen in dieser Schleife ~25 glUniform-Aufrufe pro
+        // Baum und Durchgang; bei 11 Blend-Baeumen sind das ~550 Aufrufe pro
+        // Frame. Verandert wird hier nichts an den Werten, nur der Ort.
+        p_glUseProgram(progLeaf);
+        p_glUniform1f(locLDepth, 0.0f);
+        if(locLPhase >= 0) p_glUniform1f(locLPhase, 3.0f);
+        if(locLFocal >= 0) p_glUniform1f(locLFocal, focalPx);
+        if(locLFiz >= 0) p_glUniform1f(locLFiz, 0.0f);
+        if(locLFlut >= 0) p_glUniform1f(locLFlut, dbgFlutter ? 1.0f : 0.0f);
+        p_glUniformMatrix4fv(locLMVP, 1, GL_FALSE, mvp);
+        p_glUniform3f(locLCam, camPos[0], camPos[1], camPos[2]);
+        if(locLLod >= 0) p_glUniform3f(locLLod, camPos[0], camPos[1], camPos[2]);
+        p_glUniform1f(locLTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
+        p_glUniform1f(locLMask, (float)envLeafMask);
+        if(locLAlb >= 0) p_glUniform1f(locLAlb, 0.0f);
+        if(locLFade >= 0) p_glUniform1f(locLFade, 1.0f);
+        p_glUseProgram(progCrown);
+        if(locCPhase >= 0) p_glUniform1f(locCPhase, 2.0f);
+        if(locCFocal >= 0) p_glUniform1f(locCFocal, focalPx);
+        if(locCFiz >= 0) p_glUniform1f(locCFiz, 0.0f);
+        if(locCFlut >= 0) p_glUniform1f(locCFlut, dbgFlutter ? 1.0f : 0.0f);
+        p_glUniformMatrix4fv(locCMVP, 1, GL_FALSE, mvp);
+        p_glUniform3f(locCCam, camPos[0], camPos[1], camPos[2]);
+        p_glUniform3f(locCTgt, camTgt[0], camTgt[1], camTgt[2]);
+        p_glActiveTexture(GL_TEXTURE0); p_glBindTexture(GL_TEXTURE_2D, folTex);
+        p_glUniform1i(locCFol, 0);
+        p_glActiveTexture(GL_TEXTURE1); p_glBindTexture(GL_TEXTURE_2D, crnTex);
+        if(locCFol2 >= 0) p_glUniform1i(locCFol2, 1);
+        p_glActiveTexture(GL_TEXTURE0);
+        p_glUniform1f(locCMask, (float)envCrownMask);
+        if(locCLFace >= 0) p_glUniform1f(locCLFace, 0.0f);
+        p_glUniform1f(locCTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
+        if(locCFade >= 0) p_glUniform1f(locCFade, 1.0f);
+        if(locCCards >= 0) p_glUniform1f(locCCards, (float)layCard);
+        if(locCBB >= 0) p_glUniform1f(locCBB, (float)layBB);
+        if(locCHull >= 0) p_glUniform1f(locCHull, (float)layHull);
+        if(locCBP >= 0) p_glUniform1f(locCBP, (float)((treeBillboard0 || treeHullOn) ? 1 : 0));
+        p_glUniform1f(locCDepth, 0.0f);
+        if(compMixOn){
+          // texB auf EINHEIT 3: die Blatt- und Kronen-Durchgaenge der Schleife
+          // binden Einheit 0 (folTex) und 1 (crnTex). Werde texB auf Einheit 0
+          // gebunden, zeichnet der NAechste Baum mit der Kopie als Blatttextur —
+          // gemessen: Deckung bricht ab Frame 3 von 363 auf 48 helle Pixel ein.
+          p_glUseProgram(progComp);
+          p_glActiveTexture(GL_TEXTURE3); p_glBindTexture(GL_TEXTURE_2D, texB);
+          if(locCompTexB >= 0) p_glUniform1i(locCompTexB, 3);
+          p_glActiveTexture(GL_TEXTURE0);
+          p_glBlendEquation(GL_FUNC_ADD);
+          p_glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA);
+          p_glBindVertexArray(vaoComp);
+        }
         for(int q = 0; q < nCs; q++){
+          if(csSkip[q]) continue;          // Flaechen-Budget siehe oben
           const TreeSlot *sl = &treeSlotsCur[csIdx[q]];
           int bx = csX[q], by = csY[q], bw = csB[q], bh = csH[q];
           // Scissor VOR dem Blit setzen: der Blit wird vom Scissor des Draw-
@@ -3977,45 +4070,19 @@ int main(int argc, char **argv) {
           //    im R2-Band die Karten DIESES Baums
           p_glBindFramebuffer(GL_FRAMEBUFFER, fboB);
           if(csR2[q] && sl->cardN > 0){
+            // abgehende Karten: andere Schicht-Filter als die kommende Stufe,
+            // darum hier (und nur im R2-Band) vier Uniforms nachziehen
             p_glUseProgram(progCrown);
             if(locCPhase >= 0) p_glUniform1f(locCPhase, 3.0f);
-            if(locCFocal >= 0) p_glUniform1f(locCFocal, focalPx);
-            if(locCFiz >= 0) p_glUniform1f(locCFiz, 0.0f);
-            if(locCFlut >= 0) p_glUniform1f(locCFlut, dbgFlutter ? 1.0f : 0.0f);
-            p_glUniformMatrix4fv(locCMVP, 1, GL_FALSE, mvp);
-            p_glUniform3f(locCCam, camPos[0], camPos[1], camPos[2]);
-            p_glUniform3f(locCTgt, camTgt[0], camTgt[1], camTgt[2]);
-            p_glActiveTexture(GL_TEXTURE0); p_glBindTexture(GL_TEXTURE_2D, folTex);
-            p_glUniform1i(locCFol, 0);
-            p_glActiveTexture(GL_TEXTURE1); p_glBindTexture(GL_TEXTURE_2D, crnTex);
-            if(locCFol2 >= 0) p_glUniform1i(locCFol2, 1);
-            p_glActiveTexture(GL_TEXTURE0);
-            p_glUniform1f(locCMask, (float)envCrownMask);
-            if(locCLFace >= 0) p_glUniform1f(locCLFace, 0.0f);
-            p_glUniform1f(locCTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
-            if(locCFade >= 0) p_glUniform1f(locCFade, 1.0f);
             if(locCCards >= 0) p_glUniform1f(locCCards, 1.0f);
             if(locCBB >= 0) p_glUniform1f(locCBB, 0.0f);
             if(locCBP >= 0) p_glUniform1f(locCBP, 1.0f);
-            p_glUniform1f(locCDepth, 0.0f);
             p_glDepthMask(GL_TRUE);
             p_glBindVertexArray(vaoCrown[drawSet]);
             p_glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 6, (GLsizei)sl->cardN,
                                                 (GLuint)sl->card0);
           } else if(sl->leafN > 0){
-            p_glUseProgram(progLeaf);
-            p_glUniform1f(locLDepth, 0.0f);
-            if(locLPhase >= 0) p_glUniform1f(locLPhase, 3.0f);
-            if(locLFocal >= 0) p_glUniform1f(locLFocal, focalPx);
-            if(locLFiz >= 0) p_glUniform1f(locLFiz, 0.0f);
-            if(locLFlut >= 0) p_glUniform1f(locLFlut, dbgFlutter ? 1.0f : 0.0f);
-            p_glUniformMatrix4fv(locLMVP, 1, GL_FALSE, mvp);
-            p_glUniform3f(locLCam, camPos[0], camPos[1], camPos[2]);
-            if(locLLod >= 0) p_glUniform3f(locLLod, camPos[0], camPos[1], camPos[2]);
-            p_glUniform1f(locLTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
-            p_glUniform1f(locLMask, (float)envLeafMask);
-            if(locLAlb >= 0) p_glUniform1f(locLAlb, 0.0f);
-            if(locLFade >= 0) p_glUniform1f(locLFade, 1.0f);
+            p_glUseProgram(progLeaf);   // Uniforms stehen (vor der Schleife)
             p_glDepthMask(GL_TRUE);
             p_glBindVertexArray(vaoLeaf[drawSet]);
             p_glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 6, (GLsizei)sl->leafN,
@@ -4026,28 +4093,8 @@ int main(int argc, char **argv) {
           p_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
           int cN = csR2[q] ? sl->hullN : sl->cardN, c0 = csR2[q] ? sl->hull0 : sl->card0;
           if(cN > 0){
-            p_glUseProgram(progCrown);
+            p_glUseProgram(progCrown);  // Uniforms stehen (vor der Schleife)
             if(locCPhase >= 0) p_glUniform1f(locCPhase, 2.0f);
-            if(locCFocal >= 0) p_glUniform1f(locCFocal, focalPx);
-            if(locCFiz >= 0) p_glUniform1f(locCFiz, 0.0f);
-            if(locCFlut >= 0) p_glUniform1f(locCFlut, dbgFlutter ? 1.0f : 0.0f);
-            p_glUniformMatrix4fv(locCMVP, 1, GL_FALSE, mvp);
-            p_glUniform3f(locCCam, camPos[0], camPos[1], camPos[2]);
-            p_glUniform3f(locCTgt, camTgt[0], camTgt[1], camTgt[2]);
-            p_glActiveTexture(GL_TEXTURE0); p_glBindTexture(GL_TEXTURE_2D, folTex);
-            p_glUniform1i(locCFol, 0);
-            p_glActiveTexture(GL_TEXTURE1); p_glBindTexture(GL_TEXTURE_2D, crnTex);
-            if(locCFol2 >= 0) p_glUniform1i(locCFol2, 1);
-            p_glActiveTexture(GL_TEXTURE0);
-            p_glUniform1f(locCMask, (float)envCrownMask);
-            if(locCLFace >= 0) p_glUniform1f(locCLFace, 0.0f);
-            p_glUniform1f(locCTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
-            if(locCFade >= 0) p_glUniform1f(locCFade, 1.0f);
-            if(locCCards >= 0) p_glUniform1f(locCCards, (float)layCard);
-            if(locCBB >= 0) p_glUniform1f(locCBB, (float)layBB);
-            if(locCHull >= 0) p_glUniform1f(locCHull, (float)layHull);
-            if(locCBP >= 0) p_glUniform1f(locCBP, (float)((treeBillboard0 || treeHullOn) ? 1 : 0));
-            p_glUniform1f(locCDepth, 0.0f);
             p_glDepthMask(GL_TRUE);
             p_glBindVertexArray(vaoCrown[drawSet]);
             if(compMixOn == 2)   // MESSBANK: alle Karten statt nur des Baums
@@ -4067,12 +4114,8 @@ int main(int argc, char **argv) {
           if(compMixOn){
             float sCopy = 1.0f - csW[q];
             p_glUseProgram(progComp);
-            p_glActiveTexture(GL_TEXTURE0); p_glBindTexture(GL_TEXTURE_2D, texB);
-            if(locCompTexB >= 0) p_glUniform1i(locCompTexB, 0);
             p_glEnable(GL_BLEND);
-            p_glBlendEquation(GL_FUNC_ADD);
-            p_glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA);
-            p_glBlendColor(0.0f, 0.0f, 0.0f, sCopy);
+            p_glBlendColor(0.0f, 0.0f, 0.0f, sCopy);   // pro Baum verschieden
             p_glDisable(GL_DEPTH_TEST);
             p_glDepthMask(GL_FALSE);
             p_glDisable(GL_CULL_FACE);        // das Dreieck des Mischpasses darf
@@ -4351,8 +4394,13 @@ int main(int argc, char **argv) {
     // DEMO_EXIT=1 (Messlaeufe): die Engine arbeitet genau das ab, was der Lauf
     // braucht — Baum-Build, Upload-Slices, Impostor-Kacheln — und beendet sich,
     // sobald alles fertig ist, statt bis zum Timeout durchzurennen.
+    // DEMO_EXITFRAME: der fruehe Ausstieg haengt an der Uhr (Upload-Slices und
+    // Kachel-Aufnahme pro Frame), darum endeten zwei gleiche Laeufe bisher nach
+    // 5 bzw. 4 Frames — das Bild war dadurch nicht vergleichbar (gemessen 249
+    // unterschiedliche Pixel im Selbsttest-Determinismuspaar). Mit fester
+    // Mindest-Framenummer steigen beide bei derselben Frame aus.
     if(envExitWhenDone && !upActive && !trees_build_busy() &&
-       impNext >= IMP_TILES && frameNo >= 3u){
+       impNext >= IMP_TILES && frameNo >= (envExitFrame ? envExitFrame : 3u)){
       save_screenshot_ppm("/tmp/64kdemo_shot.ppm", winW, winH);
       printf("DEBUG Early-Exit: %u Frames, %.1f s (Build+Upload+Kacheln fertig)\n",
              frameNo, now_sec() - loopT0);
