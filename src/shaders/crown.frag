@@ -4,7 +4,6 @@ in vec2 vUV;
 in vec3 vPos;
 in float vSeed;
 in float vFade;
-in float vEdge;   // Rand-Aufloesung an der Baukante
 in float vCompW;   // Composite: Gewicht der einkommenden Stufe
 in float vFiz1, vFiz2, vFizInv1, vFizInv2, vFizScale;
 in vec2 vTile;      // Atlas-Kachel (Spalte, Zeile)

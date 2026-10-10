@@ -9,8 +9,6 @@ layout(location=6) in vec2  aLod;     // rad (Ast-Radius m), diss (Aufloes-Schwe
 uniform float uMeshFade = 1.0;    // 0 = gar nicht ausblenden (Schattenwurf-Pass)
 uniform float uBBPresent = 1.0;   // liegen Ganzbaum-Kacheln im Puffer?
 uniform float uFocalPx = 0.0;     // Brennweite in Pixeln (1,7 * Bildhoehe)
-uniform float uFarCut = 0.0;      // Baukante: Holz haengt an derselben Kante wie
-                                  // die Krone (sonst nackter Stamm nach der Krone)
 out float vMeshFade;
 uniform mat4 uMVP;
 uniform vec3 uCamPos;
@@ -82,14 +80,12 @@ void main(){
     if(aLod.y > lodBranchW(aLod.x, md, uFocalPx)){
       gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return;
     }
-    // BAUKANTE: das Holz haengt an derselben Kante wie die Krone. Sonst steht ab
-    // der Kronenkante ein nackter Stamm (dicker Stamm bleibt bis ~400 m sichtbar,
-    // die Krone hoert bei 207 m auf — Nutzerbefund "nackte baeme in der entfernung").
-    // Aufgeloest wird pro ASTABSCHNITT mit demselben stabilen Schwellwert aLod.y:
-    // der Ast ist ganz da oder gar nicht, kein Alpha, keine Sortierung.
-    if(uFarCut > 1.0 && aLod.y > lodFarFade(uFarCut, md)){
-      gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return;
-    }
+    // BAUKANTE: hier gab es 2026-10-10 zusaetzlich eine Rand-Aufloesung pro
+    // ASTABSCHNITT (aLod.y > lodFarFade). Die hat den Baum zerlegt: dicke
+    // Abschnitte nahe am Stamm fielen weg, ihre duennen Spitzen blieben stehen
+    // (Nutzer: "segmentweise ausgeblendet, ueberreste von aesten in der luft").
+    // Der Rand sitzt jetzt beim Bauen und gilt fuer den GANZEN BAUM
+    // (trees_cpu.c: trees_build_begin), das Holz endet mit der Krone.
   }
   // Uebergabe ans Billboard im selben Band, in dem das Billboard einblendet
   // (0,90..1,10 R2): die Gewichte sind komplementaer, Summe immer 1.

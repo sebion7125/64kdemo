@@ -109,7 +109,11 @@ static void tree_bufs_init(void){
   treeVertsD = tvB; crownVertsD = cvB; leafInstD = lvB;
 }
 float wireVerts[WIRE_CAP * WIRE_FLOATS];
-int treeBuildRange = 20;   // DEMO_TREEBUILDRANGE: Zellen-Radius des Wald-Baus
+int treeBuildRange = 50;   // DEMO_TREEBUILDRANGE: Zellen-Radius des Wald-Baus
+                          // 50 x 9 m = 450 m Kante. Begruendung 2026-10-10:
+                          // Baeume muessen da enden, wo das Terrain endet. Gemessener
+                          // Dunst: 15,9 % bei 180 m (alte Kante -> harte Kante sichtbar),
+                          // 49,9 % bei 300 m, 83,9 % bei 450 m, 90,2 % bei 500 m.
 int nTreeVerts = 0, nCrownVerts = 0, nWireVerts = 0, nTrees = 0, nLeafInst = 0;   // Schreibseite
 static TreeSlot treeSlotBufA[TREE_SLOT_MAX], treeSlotBufB[TREE_SLOT_MAX];
 TreeSlot *treeSlots = treeSlotBufA, *treeSlotsD = treeSlotBufB;   // Doppelbuffer wie die Geometrie
@@ -330,6 +334,7 @@ int gHullStart = 0, gHullN = 0;   // Range der Huellen-Quadrate dieses Baums
 int treeDbgSprig = 0;         // gefundene Buschel dieses Baums (Wirtstest)
 int treeDbgSprigHash = 0;     // Pruefsumme der Buschel-Positionen
 float gFarCut = 0.0f;             // Baukante der FERN-Stufe (1,15 x Bauradius)
+float treeBuildFocalMax = TREE_BUILD_FOCAL_MAX;   // DEMO_BUILDFOCAL
 int gHullNaz = 0, gHullNhy = 0; float gHullCs = 0.0f;   // Rastermasse (TREETAB)
 static int treeSlotCard0, treeSlotCardN, treeSlotHull0, treeSlotHullN;
 int treeHullOn = 1; float treeHullSc = 1.20f;   // DEMO_HULLSC: Ueberlappung der
@@ -508,11 +513,9 @@ static void emit_hull_quads(float seed){
   if(gTreeDist < gLodR2 * 0.90f - LOD_BUILD_LAG) return;
   // Kein Karten-/Huellen-Schnitt nach oben an der Baukante: der Wirtstest
   // (tools/test_tree_build.c) hat gemessen, dass ein solcher Schnitt einen
-  // NACKTEN STAEMM erzeugt — der Baum war bei 236 und 248 m im Puffer, ohne
-  // Blatt, ohne Karte, ohne Huelle, waehrend sein Stamm wegen der Dicken-
-  // aufloesung bis ~400 m sichtbar bleibt. Kante jetzt fuer Holz UND Krone an
-  // einer Stelle (uFarCut), Aufloesung im Shader; die Geometrie existiert bis
-  // dahin ueberall.
+  // NACKTEN STAEMM erzeugt. Die Baukante ist jetzt ein Schnitt fuer den GANZEN
+  // BAUM in trees_build_begin (d > gFarCut -> der Baum landet gar nicht im
+  // Puffer), damit koennen Holz und Krone gar nicht auseinanderlaufen.
   {
     enum { HULL_AZMAX = 32, HULL_HYMAX = 24 };
     static int   cellN[HULL_AZMAX * HULL_HYMAX];
@@ -1553,6 +1556,18 @@ void trees_build_begin(float tx, float tz){
   int ix1 = (int)floorf((tx + RANGE * TREE_G) / TREE_G);
   int iz0 = (int)floorf((tz - RANGE * TREE_G) / TREE_G);
   int iz1 = (int)floorf((tz + RANGE * TREE_G) / TREE_G);
+  // BAUKANTE = EIN Schnitt fuer den GANZEN BAUM (Holz, Karten, Huelle, Blaetter).
+  // Vorher endete die Krone beim Bauen und das Holz lief weiter bis in die
+  // Quadratecken (~1,41 x Kante) -> nackte Staemme; der Gegenversuch, den Rand im
+  // Shader pro Astabschnitt/Huellenzelle aufzuloesen, hat den Baum zerlegt
+  // (Nutzer: "ueberreste von aesten in der luft"). Jetzt: ein Baum existiert nur,
+  // wenn sein Lotpunkt innerhalb dieses Kreises liegt — Existenz = Sichtbarkeit,
+  // im Shader gibt es keinen Entfernungs-Schnitt mehr fuer die Baukante.
+  // Der Zuschlag LOD_BUILD_LAG deckt den Nachlauf des Builds ab (bis 12 m
+  // Kameraweg wird nicht neu gebaut); ein Baum darf dabei maximal so weit
+  // ueber die Kante hinaus gezeichnet werden, wie der Dunst schon sitzt.
+  gFarCut = 1.15f * (float)RANGE * TREE_G;
+  const float edge2 = gFarCut * gFarCut;
   for(int iz = iz0; iz <= iz1; iz++)
   for(int ix = ix0; ix <= ix1; ix++){
     float tp[3], s, hf;
@@ -1564,6 +1579,7 @@ void trees_build_begin(float tx, float tz){
       cand[nc].H = s * 1.5f * hf * 1.15f;
       float ddx = tp[0] - rx, ddz = tp[2] - rz;
       cand[nc].d2 = ddx * ddx + ddz * ddz;
+      if(cand[nc].d2 > edge2) continue;   // ausserhalb der Baukante: gar nichts bauen
       nc++;
     }
   }
@@ -1634,8 +1650,16 @@ int trees_build_step(int maxTrees){
     treeLodInitPx(&TL, ezLeafHint, ezCardHint, gFocalPx,
                   (float)treeBuildRange * TREE_G, treeLodScale);
     TL.bb = (treeBillboard0 || treeHullOn) ? 1 : 0;
-    gFarCut = 1.15f * (float)treeBuildRange * TREE_G;   // Schalter im crown.vert
-    TL.focalPx = gFocalPx; gTL = TL;   // gTL braucht ez_grow fuer den Ast-Schnitt
+    // gFarCut (Baukante) steht schon in trees_build_begin — von dort haengt ab,
+    // ob dieser Baum ueberhaupt im Puffer landet.
+    // focalPx zweigeteilt: R1/R2 oben rechnen mit der ECHTEN Brennweite (und
+    // werden durch LOD_R1_MAX/LOD_R2_MAX am Puffer gehalten), der AST-Schnitt
+    // beim Bauen mit der gedeckelten Bau-Brennweite. Ohne Deckelung blaeht die
+    // Aufloesung des Fensters das Geruest auf und die fernen Baeume fallen dem
+    // Budget zum Opfer (Zahlen bei TREE_BUILD_FOCAL_MAX in tree_lod.h).
+    TL.focalPx = (treeBuildFocalMax > 0.0f && gFocalPx > treeBuildFocalMax)
+                   ? treeBuildFocalMax : gFocalPx;
+    gTL = TL;   // gTL braucht ez_grow fuer den Ast-Schnitt
     float R1 = TL.R1, R2 = TL.R2;
     int tier;
     if(treeForceTier >= 0) tier = treeForceTier;

@@ -2177,7 +2177,6 @@ int main(int argc, char **argv) {
   GLint locCCards  = p_glGetUniformLocation(progCrown, "uCardsOn");
   GLint locCBB     = p_glGetUniformLocation(progCrown, "uBillboardOn");
   GLint locCHull   = p_glGetUniformLocation(progCrown, "uHullOn");
-  GLint locCFarCut = p_glGetUniformLocation(progCrown, "uFarCut");
   GLint locCBP     = p_glGetUniformLocation(progCrown, "uBBPresent");
   GLint locTBB     = p_glGetUniformLocation(progTMesh, "uBBPresent");
   GLint locTPhase  = p_glGetUniformLocation(progTMesh, "uCompPhase");
@@ -2187,7 +2186,6 @@ int main(int argc, char **argv) {
   GLint locCompTexB = p_glGetUniformLocation(progComp, "uTexB");
   GLint locCompW    = p_glGetUniformLocation(progComp, "uW");
   GLint locTFocal  = p_glGetUniformLocation(progTMesh, "uFocalPx");
-  GLint locTFarCut = p_glGetUniformLocation(progTMesh, "uFarCut");
   GLint locCOld    = p_glGetUniformLocation(progCrown, "uTreeOld");
   GLint locCLFace  = p_glGetUniformLocation(progCrown, "uLightFace");
   struct ImpLoc impLoc;
@@ -2272,6 +2270,7 @@ int main(int argc, char **argv) {
   // DEMO_TREEBUILDRANGE: Zellen-Radius des Wald-Baus (9 m pro Zelle) — kleiner
   // Wald = schneller Build, damit die Ueberblendung messbar wird.
   { const char *br = getenv("DEMO_TREEBUILDRANGE"); if (br) treeBuildRange = atoi(br); }
+  { const char *bf = getenv("DEMO_BUILDFOCAL"); if (bf) treeBuildFocalMax = (float)atof(bf); }
   { const char *td = getenv("DEMO_TREEDEBUG"); if (td) treeDbg = atoi(td); }
   // DEMO_NOBB0=1 -> tier 0 wieder mit Einzelkarten. (Verdreht gefunden:
   // treeBillboard0 = atoi(nb) liess den Billboard AN, gemessen an identischen
@@ -3188,7 +3187,6 @@ int main(int argc, char **argv) {
       // Schattenwurf: Geruest immer voll (uBBPresent = 0 -> mf = 1), sonst
       // fehlten die fernen Aeste in der Schattenkarte.
       if(locTBB >= 0) p_glUniform1f(locTBB, 0.0f);
-      if(locTFarCut >= 0) p_glUniform1f(locTFarCut, gFarCut);
       if(locTFocal >= 0) p_glUniform1f(locTFocal, 1.7f * (float)fboH);
       applyShadow(&slTree, 0);
       if(locTFade >= 0) p_glUniform1f(locTFade, 1.0f);
@@ -3488,7 +3486,6 @@ int main(int argc, char **argv) {
       p_glUniform1f(locTMask, (float)dbgTreeMask);
       if(locTMeshF >= 0) p_glUniform1f(locTMeshF, 1.0f);
       if(locTBB >= 0) p_glUniform1f(locTBB, (float)treeBillboard0);
-      if(locTFarCut >= 0) p_glUniform1f(locTFarCut, gFarCut);
       // Brennweite in Pixeln: build_mvp nutzt fy = 3.4 NDC = 2*1,7, also ist die
       // vertikale Brennweite 1,7 * Bildhoehe. Dieselbe Zahl bekommt der Build.
       if(locTFocal >= 0) p_glUniform1f(locTFocal, 1.7f * (float)fboH);
@@ -3720,7 +3717,6 @@ int main(int argc, char **argv) {
       if(locCCards >= 0) p_glUniform1f(locCCards, (float)layCard);
       if(locCBB >= 0) p_glUniform1f(locCBB, (float)layBB);
       if(locCHull >= 0) p_glUniform1f(locCHull, (float)layHull);
-      if(locCFarCut >= 0) p_glUniform1f(locCFarCut, gFarCut);
       if(locCBP >= 0) p_glUniform1f(locCBP, (float)((treeBillboard0 || treeHullOn) ? 1 : 0));
       // Z-Buffer-Trick (Nutzer) waehrend einer Ueberblendung: gemischt wird ohne
       // Depth-Write (sonst verdeckt eine halb durchsichtige Karte den Hintergrund,
@@ -4000,7 +3996,6 @@ int main(int argc, char **argv) {
             if(locCCards >= 0) p_glUniform1f(locCCards, (float)layCard);
             if(locCBB >= 0) p_glUniform1f(locCBB, (float)layBB);
             if(locCHull >= 0) p_glUniform1f(locCHull, (float)layHull);
-            if(locCFarCut >= 0) p_glUniform1f(locCFarCut, gFarCut);
             if(locCBP >= 0) p_glUniform1f(locCBP, (float)((treeBillboard0 || treeHullOn) ? 1 : 0));
             p_glUniform1f(locCDepth, 0.0f);
             p_glDepthMask(GL_TRUE);

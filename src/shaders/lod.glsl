@@ -41,7 +41,9 @@ float lodBandIn(float R, float d){ return smoothstep(R * 0.90, R * 1.10, d); }
 // Laeuft NICHT ueber das Schichtgewicht (das wird bei hartem Schichtwechsel auf
 // 0/1 quantisiert -> Ploppen), sondern ueber die Alpha-Test-Schwelle im
 // Fragment-Shader: die Krone loest sich auf, opak, reihenfolge-unabhaengig.
-float lodFarFade(float cut, float d){ return 1.0 - smoothstep(cut * 0.90, cut, d); }
+// lodFarFade (Rand-Aufloesung an der Baukante) ist 2026-10-10 entfernt worden:
+// sie fiel pro Einzelprimitiv (Astabschnitt, Huellenzelle) per Hash weg und
+// zerlegte den Baum. Der Rand ist jetzt ein Bau-Schnitt pro Baum.
 // 1 bis zum Band -> 0 dahinter: die abgehende Schicht (Komplement zu lodBandIn).
 float lodBandOut(float R, float d){ return 1.0 - smoothstep(R * 0.90, R * 1.10, d); }
 

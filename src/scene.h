@@ -54,7 +54,8 @@ float c_terrainH(float px, float py);
 // iLodR = Radius, ab dem die Karten dieses Baumes die Blaetter uebernehmen
 // (keep = 1 - smoothstep(0,9*lodR, 1,1*lodR, d)) — Komplement zu lodR oben.
 #define LEAF_FLOATS  14   // plus anchorX anchorZ pres
-#define LEAF_CAP     2400000  // Budget erhoeht statt Geometrie zu ueberspringen (Nutzerregel):
+#define LEAF_CAP     3000000  // 2026-10-10 erhoehht: bei 1080 Zeilen und R1-Obergrenze 90 m gemessen 2 152 120 (90 % von 2,4 Mio) -> zu wenig Spiel
+                              //// Budget erhoeht statt Geometrie zu ueberspringen (Nutzerregel):
                             // Stress-Szenario DEMO_LODRSCALE=2 brauchte 1,60 Mio, 90 Baeume
                             // fielen raus. 2,4 Mio x 40 B x 2 Saetze = 192 MB
 // Referenz-Krone fuer den Blatthorizont-Atlas (ferne Baeume sampeln diese
@@ -182,6 +183,7 @@ extern int treeCardDivN; extern float treeCardScaleN;   // DEMO_CARDT2 (Basisstu
 extern int treeBillboard0;   // tier 0 als Ganzbaum-Billboard (TODO 23)
 extern int treeHullOn; extern float treeHullSc;     // FERN-Stufe: Kronenhuelle als Zylinder-Raster (tier 1)
 extern float gFarCut;   // Baukante der FERN-Stufe (Huelle) = 1,15 x Bauradius
+extern float treeBuildFocalMax;   // Brennweiten-Deckelung fuer den Ast-Schnitt beim Bauen
 extern float treeHullCell; extern int treeHullAz;  // DEMO_HULLCELL Zellgroesse, DEMO_HULLAZ Azimut-Zellen (0=automatisch)
 extern int treeBB0Cards;     // Zusatzkarten darunter (DEMO_BB0CARDS)
 extern int treeDowngraded;   // wegen Budget auf die groebste Stufe herabgestuft

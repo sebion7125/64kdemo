@@ -251,20 +251,10 @@ int main(void){
      "leaf.vert benutzt die praesenz-abhaengige Blattgewichts-Funktion nicht");
   ok(has("src/shaders/crown.vert", "lodWCardIn(iLodR, d, iPres)"),
      "crown.vert benutzt die praesenz-abhaengige Kartengewichts-Funktion nicht");
-  ok(has("src/shaders/lod.glsl", "smoothstep(cut * 0.90, cut, d)"),
-     "lod.glsl hat keine Rand-Aufloesung lodFarFade");
-  ok(has("src/shaders/crown.vert", "lodFarFade(uFarCut, d3)"),
-     "crown.vert nutzt die Rand-Aufloesung lodFarFade nicht");
-  {   /* C-Spiegel und GLSL muessen dieselbe Kurve liefern */
-    int bad = 0;
-    for(float cut = 50.0f; cut <= 400.0f; cut *= 1.25f)
-      for(float d = 0.0f; d <= cut * 1.3f; d += 0.5f){
-        float t = (d - cut * 0.90f) / (cut * 0.10f);
-        float g = t <= 0.0f ? 1.0f : (t >= 1.0f ? 0.0f : 1.0f - t*t*(3.0f-2.0f*t));
-        if(fabsf(g - treeLodFarFade(cut, d)) > 1e-5f) bad++;
-      }
-    ok(bad == 0, "treeLodFarFade weicht von lodFarFade ab (%d Werte)", bad);
-  }
+  ok(!has("src/shaders/lod.glsl", "float lodFarFade"),
+     "lod.glsl enthaelt noch die Rand-Aufloesung lodFarFade");
+  ok(!has("src/shaders/crown.vert", "lodFarFade"),
+     "crown.vert nutzt noch die Rand-Aufloesung");
   ok(has("src/shaders/lod.glsl", lo),  "lod.glsl enthaelt nicht %s", lo);
   ok(has("src/shaders/lod.glsl", hi2), "lod.glsl enthaelt nicht %s", hi2);
   const char *shaders[] = { "src/shaders/leaf.vert", "src/shaders/crown.vert",
@@ -293,6 +283,7 @@ int main(void){
       if(C[ci].focal <= 0.0f) w1 = 30.0f;
       if(w1 > 0.45f * 180.0f) w1 = 0.45f * 180.0f;   // Stufe 2 muss vor der Baukante liegen
       if(w1 < 8.0f) w1 = 8.0f;
+      if(w1 > LOD_R1_MAX) w1 = LOD_R1_MAX;   // Puffer-Obergrenze (tree_lod.h)
       ok(fabsf(L.R1 - w1) < 1e-3f, "R1 = %.2f, erwartet %.2f (Blatt %.3f m, focal %.0f px)",
          L.R1, w1, C[ci].leafM, C[ci].focal);
       ok(L.R2 >= 1.5f * L.R1 - 1e-3f, "R2 = %.2f liegt unter dem 1,5-fachen von R1 = %.2f", L.R2, L.R1);

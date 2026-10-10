@@ -92,7 +92,7 @@ float treeLodWBillboard(const TreeLod *L, float d);   // Ganzbaum-Kachel
 float treeLodWMesh(const TreeLod *L, float d);        // Geruest (Stamm/Aeste)
 
 /* Existenz-Schnitte des Builds: bis hierhin muss die Geometrie im Puffer sein. */
-float treeLodFarFade(float cut, float d);  // Rand-Aufloesung an der Baukante (lod.glsl: lodFarFade)
+
 float treeLodLeafCut(const TreeLod *L);      // Einzelblatt-Instanzen
 /* Aeste / feines Netz. Regel: ein Schnitt darf NIE in einem Bereich liegen,
  * in dem die Schicht Gewicht hat — sonst verschwindet (oder erscheint)
@@ -123,6 +123,32 @@ float treeLodRadCut(const TreeLod *L, float rad);
  * in Pixeln, also aufloesungs- und fenstergerecht. */
 #define LOD_LEAF_PX 2.0f
 #define LOD_CARD_PX 1.5f
+
+/* Puffer-Obergrenzen fuer die Schaltweiten. Das Bildgroessen-Kriterium wächst mit
+ * der Bildhoehe (focalPx = 1,7 x Zeilen), bei 1080 Zeilen also dreimal so stark wie
+ * bei 360. Die Instanz-Puffer wachsen aber mit der FLAECHE (~R^2), weil alle Baeume
+ * innerhalb der Schaltweite ihre Einzelblaetter/Karten tragen:
+ *   R1 =  81 m -> 1 701 080 Blatt-Instanzen   (gemessen, Baukante 180 m)
+ *   R1 = 202 m -> ~11,7 Mio                   (ueber LEAF_CAP 2,4 Mio)
+ *   R2 = 150 m -> ~630 000 Kronen-Instanzen   (gemessen 863 787 bei Baukante 450 m)
+ * Die beiden Werte sind die Obergrenze, die LEAF_CAP/CROWN_CAP bei der geplanten
+ * Baukante von 450 m gerade noch zulaesst. DEMO_LODRSCALE (treeLodScale) skaliert
+ * darueber hinaus. */
+#define LOD_R1_MAX  90.0f
+#define LOD_R2_MAX 150.0f
+
+/* Brennweite, mit der die HOLZ-Geometrie gebaut wird. Der Ast-Schnitt beim Bauen
+ * (treeLodRadCut: ein Ast der Dicke 2r existiert bis px = LOD_PX_LO) waechst mit
+ * der Bildhoehe, weil mit der Aufloesung auch die duennsten Zweige erhalten
+ * bleiben — der Puffer waechst damit schneller als linear.
+ * Gemessen bei 450 m Baukante, Fenster 1920x1080 (echte focalPx 918):
+ *   Deckel 306 -> 3459 Baeume, 2 719 056 Geruest-Vertices, 0 uebersprungen
+ *   Deckel 612 -> 2843 Baeume, Cap 4 000 000 erreicht,  616 uebersprungen
+ *   Deckel aus -> 996 Baeume von 3459,                 2463 uebersprungen
+ * Mit Deckel zeigt eine groessere Aufloesung dieselben Aeste, nur schaerfer; die
+ * Bildgroessen-Aufloesung im Shader laeuft weiter mit der echten Brennweite.
+ * DEMO_BUILDFOCAL verschiebt den Deckel (Look gegen Puffer und Fuellrate). */
+#define TREE_BUILD_FOCAL_MAX 306.0f
 void treeLodInitPx(TreeLod *L, float leafM, float cardM, float focalPx, float buildR, float lodScale);
 float treeLodBranchCut(const TreeLod *L);
 float treeLodMeshCut(const TreeLod *L);

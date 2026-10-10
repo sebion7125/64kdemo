@@ -63,12 +63,16 @@ log "== 64kDemo Selbsttest  (bin=$BIN, ${W}x$H, Software-GL in der VM) =="
 # standard mit 0,22 fps -> Schuss bei Frame 1, repeat mit 60 fps -> Frame 380;
 # 225 055 unterschiedliche Pixel, gruen 16 979 vs 7 778). Der Vergleich selbst
 # bleibt unveraendert streng.
-run standard 35 "DEMO_CAM=5 16 -0.15 0.7" "DEMO_SHOTFRAME=8"
+# DEMO_EXIT=1: der Schuss faellt, wenn Build + Upload + Kacheln fertig sind,
+# nicht bei einer festen Frame-Nummer. Mit der Baukante von 450 m braucht der
+# Upload in der VM mehrere Frames (2026-10-10: DEMO_SHOTFRAME=8 erwischte den
+# halbhohen Upload -> 194 364 unterschiedliche Pixel zwischen zwei Laeufen).
+run standard 60 "DEMO_CAM=5 16 -0.15 0.7" "DEMO_EXIT=1"
 check_tree_counts standard; check_no_glerror standard
 
 # 2) Zweiter Lauf derselben Konfiguration: Bild muss bitgleich sein
 #    (Laufzeit-abhaengige Effekte sind mit DEMO_FREEZE=1 abgeschaltet)
-run repeat 20 "DEMO_CAM=5 16 -0.15 0.7" "DEMO_SHOTFRAME=8"
+run repeat 60 "DEMO_CAM=5 16 -0.15 0.7" "DEMO_EXIT=1"
 if [ -f "$OUT/standard.ppm" ] && [ -f "$OUT/repeat.ppm" ]; then
   # Der HUD-Text (FPS-Zeile oben) zeigt die Laufzeit, ist also per Definition
   # nicht deterministisch. Gemessen: die einzigen Unterschiede beider Laeufe

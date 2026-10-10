@@ -33,6 +33,12 @@ void treeLodInitPx(TreeLod *L, float leafM, float cardM, float focalPx, float bu
   else                               L->R1 = 30.0f;
   if(focalPx > 0.0f && cardM > 0.0f) L->R2 = cardM * focalPx / LOD_CARD_PX;
   else                               L->R2 = 3.0f * L->R1;
+  // DEMO_LODRSCALE (lodScale) SKALIEREN, BEVOR die Klemmen greifen: sonst hebt
+  // der Knopf die Puffer-Obergrenze wieder auf und der Blatt-Puffer laeuft ueber
+  // (gemessen: DEMO_LODRSCALE=2.0 bei 450 m Baukante -> 2046 Baeume wegen Budget
+  // uebersprungen). Der Knopf verschiebt die Schaltweiten also nur, solange sie
+  // unter den Obergrenzen bleiben.
+  if(lodScale > 0.0f){ L->R1 *= lodScale; L->R2 *= lodScale; }
   if(buildR > 0.0f){
     if(L->R1 > 0.45f * buildR) L->R1 = 0.45f * buildR;   // Stufe 2 muss vorkommen
     if(L->fern){
@@ -44,9 +50,16 @@ void treeLodInitPx(TreeLod *L, float leafM, float cardM, float focalPx, float bu
       if(L->R2 < 1.15f * buildR) L->R2 = 1.15f * buildR; // Karten halten bis zur Kante
     }
   }
+  // Puffer-Obergrenze (Begruendung bei LOD_R1_MAX/LOD_R2_MAX in tree_lod.h).
+  // Noetig seit die Baukante auf Nebel-Entfernung liegt: die Klemme oben
+  // (0,45/0,90 x buildR) skaliert mit der Baukante und liesse bei 450 m
+  // R1 = 202 m zu, das waere das 5-fache des Blatt-Puffers.
+  if(L->R1 > LOD_R1_MAX) L->R1 = LOD_R1_MAX;
+  // R2-Obergrenze nur MIT FERN-Stufe: ohne Huelle sind die Karten die einzige
+  // ferne Darstellung und muessen bis zur Baukante durchhalten (Klemme oben).
+  if(L->fern && L->R2 > LOD_R2_MAX) L->R2 = LOD_R2_MAX;
   if(L->R1 < 8.0f)   L->R1 = 8.0f;
   if(L->R2 < 1.5f * L->R1) L->R2 = 1.5f * L->R1;
-  if(lodScale > 0.0f){ L->R1 *= lodScale; L->R2 *= lodScale; }
 }
 
 void treeLodInit(TreeLod *L, float H, float lodScale){
@@ -93,14 +106,13 @@ float treeLodWMesh(const TreeLod *L, float d){
   return 1.0f - treeLodSmoothstep(L->R2 * LOD_BAND_LO, L->R2 * LOD_BAND_HI, d);
 }
 
-// Rand der Baukante (Spiegel zu lodFarFade in src/shaders/lod.glsl): 1 bis
-// 0,90 Kante, dann Aufloesung bis 0 an der Kante.
-float treeLodFarFade(float cut, float d){
-  float t = (d - cut * 0.90f) / (cut * 0.10f);
-  if(t <= 0.0f) return 1.0f;
-  if(t >= 1.0f) return 0.0f;
-  return 1.0f - t * t * (3.0f - 2.0f * t);
-}
+// Rand der Baukante: es gibt KEINE Rand-Aufloesung mehr. 2026-10-10 entfernt:
+// sie lief pro EINZELPRIMITIV (Astabschnitt / Huellenzelle) ueber einen Hash,
+// deshalb fielen dicke Astabschnitte nahe am Stamm weg, waehrend ihre duennen
+// Spitzen stehen blieben (Nutzer: "segmentweise ausgeblendet, ueberreste von
+// aesten in der luft"), und die Huelle loeste sich in Loecher auf. Jetzt gilt
+// Existenz = Sichtbarkeit fuer den GANZEN BAUM (trees_build_begin schneidet
+// Baeume jenseits gFarCut komplett weg) — ein Baum ist ganz da oder gar nicht.
 
 float treeLodLeafCut(const TreeLod *L){
   return L->R1 * LOD_MARGIN + LOD_BUILD_LAG;

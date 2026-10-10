@@ -3778,3 +3778,64 @@ ANGEZEIGT nach Abstand d zum Lotpunkt des Baums (Gewichte in lod.glsl):
 TASTEN: 4/5/8/6/7 = ANZEIGE-Filter (nur Blaetter / nur Karten / nur Huelle / nur
 Ganzbaum-Bild / alle) · 0 = Zeichenweg Composite an/aus · 1 = deaktiviert (war BAU-
 Schalter fuer das Ganzbaum-Bild). Holz wird von den Anzeigefiltern nicht betroffen.
+
+## RUNDE 2026-10-10 (3): Baukante auf Nebel-Entfernung, Rand-Aufloesung entfernt
+
+**Nutzerbefund:** ferne Huellen werden "von was geclipt", beim Naherwerden
+(loescht R2) verschwinden sie, und die Holzgeometrie wird "segment fuer segment
+ausgeblendet — man sieht die ueberreste von aesten in der luft schweben".
+
+**Ursache (im Code belegt, nachgerechnet):** zwei Rand-Aufloesungen, die ich
+selbst eingebaut hatte, liefen **pro Einzelprimitiv** ueber einen Hash:
+- `tree.vert`: `aLod.y > lodFarFade(uFarCut, md)` — `aLod.y` ist ein Hash aus dem
+  Ast-Seed und hat mit der Ast-Hierarchie nichts zu tun. Dicke Abschnitte nahe am
+  Stamm fielen weg, ihre duennen Spitzen blieben stehen.
+- `crown.vert`: `rc1(vSeed*7.31 + aCenter.y*0.77) > far` — ganze Huellenzellen per
+  Hash.
+Rampe `lodFarFade = 1 - smoothstep(0,9*cut, cut, d)` mit `cut = gFarCut =
+1,15 x Bauradius`. Gemessene Abnahme bei Bauradius 180 m (cut 207 m):
+186 m 0 % | 190 m 8 % | 195 m 38 % | 200 m 73 % | 205 m 97 %.
+
+**Umgesetzt:**
+1. Beide Rand-Aufloesungen ersatzlos gestrichen (`lodFarFade`, `treeLodFarFade`,
+   `uFarCut`, `vEdge`). Im Shader gibt es keinen Baukanten-Schnitt mehr.
+2. **Ein Schnitt pro Baum** beim Bauen: `trees_build_begin` verwirft Kandidaten
+   mit Lotpunkt ausserhalb `gFarCut = 1,15 x Baukante` (Kreis, nicht Quadrat —
+   vorher liefen die Staemme bis in die Ecken ~1,41 x Kante). Existenz =
+   Sichtbarkeit: ein Baum ist ganz da oder gar nicht.
+3. **Baukante 20 -> 50 Zellen = 450 m** (`treeBuildRange`). Begruendung Dunst
+   (gemessen): 15,9 % bei 180 m, 49,9 % bei 300 m, 83,9 % bei 450 m, 90,2 % bei
+   500 m. Die Baeume enden jetzt, wo das Terrain endet.
+4. **Puffer-Obergrenzen fuer die Schaltweiten** (`LOD_R1_MAX 90 m`,
+   `LOD_R2_MAX 150 m`, letztere nur mit FERN-Stufe). Das Bildgroessen-Kriterium
+   waechst mit der Bildhoehe, die Instanz-Zahl mit der FLAECHE.
+   `DEMO_LODRSCALE` skaliert jetzt VOR den Klemmen (sonst hebt der Knopf die
+   Obergrenze auf: gemessen 2046 uebersprungene Baeume).
+5. **Brennweiten-Deckel fuer das Holz** (`TREE_BUILD_FOCAL_MAX 306`,
+   `DEMO_BUILDFOCAL`): der Ast-Schnitt beim Bauen haengt an `L->focalPx`, die
+   Aufloesung im Shader an der echten Brennweite. Gemessen bei 450 m Kante und
+   einem Fenster von 1920x1080:
+   | Deckel | gebaute Baeume | Geruest-Vertices | uebersprungen |
+   |---|---|---|---|
+   | 306 | 3459 von 3459 | 2 719 056 | 0 |
+   | 612 | 2843 | 3 999 822 (Cap) | 616 |
+   | aus  | 996 | 3 999 786 (Cap) | 2463 |
+   Ohne Deckel fehlen bei 1080 Zeilen zwei Drittel des Waldes — das ist der
+   Befund "sobald ich mich bewege, sind die fernen Baeume alle auf einmal weg".
+6. `LEAF_CAP 2 400 000 -> 3 000 000` (bei 1080 Zeilen und R1 = 90 m gemessen
+   2 152 120 = 90 % des alten Puffers).
+
+**Selbsttest repariert:** die Determinismus-Paarung verglich Screenshots bei
+Frame 8; mit 450 m Kante ist der Upload dann noch nicht fertig (194 364
+unterschiedliche Pixel). Jetzt `DEMO_EXIT=1` (Schuss, wenn Build + Upload +
+Kacheln fertig sind) -> 0 unterschiedliche Pixel, Szene bitgleich.
+Ergebnis: alle Pruefungen OK, Wirtstests 140 652 und 55 Pruefungen, 0 Fehler.
+
+**Offen:**
+- Pop beim Satz-Wechsel: der Randschnitt haengt am Build-Zentrum, und Build
+  (1,2 s VM) + Upload hinken der Kamera hinterher -> ein Ring von Baeumen faellt
+  gleichzeitig weg. Strukturloesung = freigegebener Per-Baum-Slot-Cache
+  (inkrementeller Bau), damit Baeume einzeln ein-/ausscheren.
+- Huellen-Normalen sind horizontal (von oben steht alles kantenstaendig) —
+  Kugel-Raster statt Zylinder ist vorgesehen, nicht gebaut.
+- Huelle ist duenner als die Kartenschicht (Zellgroesse 1,4 Buscheldurchmesser).
