@@ -53,12 +53,18 @@ check_no_glerror(){
 log "== 64kDemo Selbsttest  (bin=$BIN, ${W}x$H, Software-GL in der VM) =="
 
 # 1) Standardszene, feste Kamera
-run standard 35 "DEMO_CAM=5 16 -0.15 0.7" "DEMO_SHOT=4"
+# DEMO_SHOTFRAME statt DEMO_SHOT: die Determinismus-Paarung vergleicht zwei
+# Laeufe Pixel fuer Pixel. DEMO_SHOT=<s> fuehrt den Screenshot nach REALZEIT,
+# bei unterschiediger Rechnerlast also bei unterschiedlicher FRAME-NUMMER (gemessen:
+# standard mit 0,22 fps -> Schuss bei Frame 1, repeat mit 60 fps -> Frame 380;
+# 225 055 unterschiedliche Pixel, gruen 16 979 vs 7 778). Der Vergleich selbst
+# bleibt unveraendert streng.
+run standard 35 "DEMO_CAM=5 16 -0.15 0.7" "DEMO_SHOTFRAME=8"
 check_tree_counts standard; check_no_glerror standard
 
 # 2) Zweiter Lauf derselben Konfiguration: Bild muss bitgleich sein
 #    (Laufzeit-abhaengige Effekte sind mit DEMO_FREEZE=1 abgeschaltet)
-run repeat 20 "DEMO_CAM=5 16 -0.15 0.7" "DEMO_SHOT=4"
+run repeat 20 "DEMO_CAM=5 16 -0.15 0.7" "DEMO_SHOTFRAME=8"
 if [ -f "$OUT/standard.ppm" ] && [ -f "$OUT/repeat.ppm" ]; then
   # Der HUD-Text (FPS-Zeile oben) zeigt die Laufzeit, ist also per Definition
   # nicht deterministisch. Gemessen: die einzigen Unterschiede beider Laeufe

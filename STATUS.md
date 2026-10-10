@@ -3700,3 +3700,13 @@ groesste Deckungs-Delle -9,64 % bei 105,0 m, 0 Pump-Frames,
   Groessenordnung 10 Blaettern, weil die Blattstile komplett fehlen.
 - Ueberblendung sieht nach dem Composite-Fix zum ersten Mal „sehr gut und
   unauffaellig" aus (Nutzer).
+
+### Selbsttest: Determinismus-Paarung auf FRAME-festen Schuss umgestellt
+
+Der Selbsttest schlug mit 225 055 unterschiedlichen Pixeln fehl (gruen 16 979 vs
+7 778). Ursache war nicht die Engine: `DEMO_SHOT=<sekunden>` loest den Screenshot
+nach REALZEIT aus. Der Standard-Lauf lief mit 0,22 fps (der Build direkt davor
+belastet die VM) -> Schuss bei Frame 1, der Vergleichslauf bei Frame ~380.
+Zwei Laeufe mit identischer Konfiguration und `DEMO_SHOTFRAME=8` sind bitgleich
+(0 Pixel Unterschied, gruen 7 778 in beiden). Der Vergleich selbst ist
+unveraendert streng; nur der Ausloesezeitpunkt ist jetzt reproduzierbar.
