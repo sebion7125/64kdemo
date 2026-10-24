@@ -11,9 +11,9 @@ BIN     = bin/64kdemo
 SHARE   = /media/sf_Quarantine/64kDemo
 
 all: $(BIN)
-	@mkdir -p $(SHARE)
-	@cp $(BIN) $(SHARE)/64kdemo
-	@echo "Kopiert nach $(SHARE)/64kdemo"
+	@mkdir -p $(SHARE) 2>/dev/null && cp $(BIN) $(SHARE)/64kdemo \
+	  && echo "Kopiert nach $(SHARE)/64kdemo" \
+	  || echo "Hinweis: $(SHARE) nicht beschreibbar - nur bin/64kdemo gebaut"
 
 $(BIN): $(SRC) $(HDRS)
 	@mkdir -p bin
