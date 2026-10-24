@@ -15,11 +15,17 @@ weiter an Sichtweiten, Übergängen und Performance gearbeitet.
 ![Waldrand: Bäume mit Blättern, Gras und Schilf am Teich](docs/bilder/waldrand.jpg)
 
 Aufnahme aus Augenhöhe, 2026-10-24. Vorne die Bäume mit einzeln gezeichneten
-Blättern, in der Bildmitte und dahinter dieselbe Gegend dann in
-Büschel-Quadraten und Kronenhüllen — umgeschaltet wird nach der Größe, die ein Blatt auf dem Bildschirm
-hätte, nicht nach festen Metern. HUD: 3400 Bäume, 869 573 Kronen-Quadrate,
-2 603 439 Grashalme, Fenster 3840x2030 bei halber interner Auflösung, 4x MSAA,
-31 fps auf dem Wirtsrechner.
+Blättern, in der Bildmitte und dahinter dieselbe Gegend in Büschel-Quadraten und
+Kronenhüllen — umgeschaltet wird nach der Größe, die ein Blatt auf dem
+Bildschirm hätte, nicht nach festen Metern. HUD: 3400 Bäume, 869 573
+Kronen-Quadrate, 2 603 439 Grashalme, Fenster 3840x2030 bei halber interner
+Auflösung, 4x MSAA, 31 fps auf dem Wirtsrechner.
+
+![Kamerafahrt vom Teich in die Wiese zwischen den Bäumen](docs/bilder/fahrt.gif)
+
+Kamerafahrt über dieselbe Welt: vom Wasser zwischen die Bäume. 80 Bilder in
+8 Sekunden, aufgenommen aus einem 1280x720-Fenster; die Bildrate im HUD bleibt
+dabei zwischen 50 und 61 fps.
 
 ![Fernsicht: Gewässer, Schilf und Wald bis in den Dunst](docs/bilder/fernsicht.jpg)
 

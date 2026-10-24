@@ -21,6 +21,12 @@ screen, not to fixed distances in metres. HUD: 3400 trees, 869,573 canopy quads,
 2,603,439 grass blades, 3840x2030 window at half internal resolution, 4x MSAA,
 31 fps on the host machine.
 
+![Camera move from the pond into the meadow between the trees](docs/bilder/fahrt.gif)
+
+A camera move over the same world: from the water in between the trees.
+80 frames in 8 seconds, captured from a 1280x720 window; the HUD frame rate
+stays between 50 and 61 fps throughout.
+
 ![Long view: water, reeds and forest fading into fog](docs/bilder/fernsicht.jpg)
 
 The same world from above: shallow water with reed belts, forest out to the fog
