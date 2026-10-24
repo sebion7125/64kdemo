@@ -6,7 +6,7 @@ It started as a model test. I wanted to see how far a local model running on my 
 
 Surely this could be done better. The result is [pi-protokoll](https://github.com/sebion7125/pi-protokoll): the model writes a short protocol at the end of every turn, while it still has the whole turn in front of it. At compaction time, code assembles a tiered summary from these protocols instead of having the model summarise the entire history again, and every earlier turn stays retrievable through tools.
 
-**Phase 2, from the evening of 7 October: a single session.** At the same time the port of [EZ-Tree](https://github.com/dgreenheck/ez-tree) began, i.e. the whole tree system with foliage tiers, transitions and wind. This session ran with the extension all the way to the publication of the repo: 179 messages, 23 compactions, each in about 30 seconds instead of minutes. A new session was never needed again.
+**Phase 2, from the evening of 7 October: a single session.** At the same time the port of [EZ-Tree](https://github.com/dgreenheck/ez-tree) began, i.e. the whole tree system with foliage tiers, transitions and wind. This session is still running with the extension today: 181 user messages, 23 compactions, each in about 30 seconds instead of minutes — as of 24 October, 17 days after the start. A new session was never needed again.
 
 The `protocol*.txt` files are exports of these protocols from phase 2.
 

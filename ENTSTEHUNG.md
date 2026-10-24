@@ -6,7 +6,7 @@ Angefangen hat es als Modelltest. Ich wollte sehen, wie weit ein lokales Modell 
 
 Das müsste doch besser gehen. Daraus wurde [pi-protokoll](https://github.com/sebion7125/pi-protokoll): Das Modell schreibt am Ende jedes Zugs ein kurzes Protokoll, solange es den Zug noch vollständig vor sich hat. Beim Compacting setzt Code daraus eine gestufte Zusammenfassung zusammen, statt das Modell den ganzen Verlauf neu zusammenfassen zu lassen, und jeder frühere Zug bleibt über Werkzeuge nachschlagbar.
 
-**Phase 2, ab dem 7. Oktober abends: eine einzige Sitzung.** Zur selben Zeit begann der Port von [EZ-Tree](https://github.com/dgreenheck/ez-tree), also das ganze Baumsystem mit Laub-Stufen, Übergängen und Wind. Diese Sitzung lief mit der Erweiterung bis zur Veröffentlichung des Repos durch: 179 Nachrichten, 23 Compactings, jedes in rund 30 Sekunden statt Minuten. Eine neue Sitzung war nicht mehr nötig.
+**Phase 2, ab dem 7. Oktober abends: eine einzige Sitzung.** Zur selben Zeit begann der Port von [EZ-Tree](https://github.com/dgreenheck/ez-tree), also das ganze Baumsystem mit Laub-Stufen, Übergängen und Wind. Diese Sitzung läuft mit der Erweiterung bis heute: 181 Nutzernachrichten, 23 Compactings, jedes in rund 30 Sekunden statt Minuten — Stand 24. Oktober, 17 Tage nach dem Start. Eine neue Sitzung war nicht mehr nötig.
 
 Die Dateien `protocol*.txt` sind Exporte dieser Protokolle aus Phase 2.
 
