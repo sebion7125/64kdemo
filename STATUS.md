@@ -3933,3 +3933,39 @@ bzw. 4 Frames (der fruehe Ausstieg haengt an der Uhr: Upload-Slices und
 Kachel-Aufnahme pro Frame) — deshalb 249 unterschiedliche Pixel. Neu
 `DEMO_EXITFRAME=<n>`: beendet fruehestens nach n Frames; das Paar laeuft jetzt
 mit 12.
+
+---
+
+## Runde 2026-10-10b: Wind-Animation laeuft in einer anderen Bildrate (Nutzer)
+
+**Ursache (gerechnet, nicht geraten).** Alle Zeit-Uniforms der Shader sind
+`float` (float32). Gefuettet wurde `tNow = clock_gettime(CLOCK_MONOTONIC)`, also
+die **Rechnerlaufzeit** — im Host-Log vom 2026-10-10: t = 242 420 s (2,8 Tage).
+Nachgerechnet (Skript):
+
+| Uhr | float32-Abstand von `uTime` | Phase `uTime*1.8`: ulp gegen noetigen Schritt 0,0300 rad | Phasen-Schritt = 0 in |
+|---|---|---|---|
+| absolut, t = 242 420 s | 15,6 ms | 0,03125 rad | 4 von 59 Frames |
+| Laufzeit (Fix), t = 0 | 1e-5 ms | 0,00000 rad | 0 von 59 |
+| Laufzeit 30 min | 0,12 ms | 0,00024 rad | 0 von 59 |
+| Laufzeit 10 h | 3,9 ms | 0,00391 rad | 0 von 59 |
+
+Dazu das Boenfeld: `gp = pos*0,10 - vec2(0,35,0,20)*uTime`. Bei t = 242 420 s
+steht dieser Term bei 84 847, der darstellbare Abstand dort ist 0,0078, noetig
+waeren 0,0058 pro Frame -> das Boenfeld bewegt sich in nur **41 von 59 Frames**,
+in 19 Frames steht es still. Genau das ist die gemeldete "andere fps-Rate":
+Wind und Boen springen statt zu fliessen, und es wird mit der Laufzeit des
+Rechners schlimmer.
+
+**Fix.** `animT0 =` Programmstart; alle Shader-Zeit-Uniforms und `gWorldTime`
+bekommen `tNow - animT0` (bei `DEMO_FREEZE` unveraendert der vorgegebene Wert).
+Getroffen: 9 Uniform-Stellen (tree/crown/leaf/grass/reed/terrain/
+Schatten/Atlas/Composite) und `gWorldTime` (Gras-Fade-Alter).
+
+**Waechter.** Startprotokoll: `Anim-Zeit: absolute Uhr ... -> float32-Schritt
+X ms; Laufzeit-Nullpunkt -> Y ms`. `DEMO_ANIMDBG=1` protokolliert alle 30 Frames
+die genutzte Schrittweite; uebersteigt sie 0,5 ms, kommt genau einmal
+`WARNUNG Animationszeit: ...` — der Selbsttest faellt dann.
+VM-Nachweis: absolute Uhr 1203 s -> 0,122 ms, genutzte Zeit -> 0,000000 ms.
+Faustzahl: bei 10 h Laufzeit waere die Schrittweite wieder 3,9 ms — der Waechter
+meldet es, bevor man es sieht.

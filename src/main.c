@@ -395,6 +395,18 @@ static double now_sec(void) {
   return ts.tv_sec + ts.tv_nsec * 1e-9;
 }
 
+// Nullpunkt der Animations-Zeit (Wind, Boeen, Gras-Fades). Saemtliche
+// Zeit-Uniforms der Shader sind float32. Die absolute Monotonic-Uhr ist die
+// Rechnerlaufzeit — im Host-Log vom 2026-10-10 t = 242 420 s. Bei diesem Wert
+// betraegt der Abstand zum naechsten darstellbaren float32 15,6 ms, und die
+// Wind-Phase sin(uTime*1.8) haengt bei 4,4e5 mit 0,031 rad Abstand. Die
+// Bewegung laeuft dann in Spruengen von 15,6 bzw. 31,3 ms statt gleichmaessig
+// mit den 16,7 ms der Frames — das ist die vom Nutzer gemeldete "andere
+// fps-Rate" der Wind-Animation. Mit Startzeitpunkt als Nullpunkt bleibt der
+// Wert klein (Schrittweite 1e-5 ms).
+static double animT0 = 0.0;
+static float f32_step(float v){ union{ float f; unsigned u; } c; c.f = v; c.u++; return c.f - v; }
+
 // ================= FBO (Resolutionsskalierung + Mesh-Depth) =================
 // Farbtextur RGBA16F (HDR, Mesh + Raymarch), Depth-Texture DEPTH_COMPONENT24
 // (Mesh-Pass schreibt Tiefe, Raymarch-Pass compositet dagegen).
@@ -437,6 +449,7 @@ static int envTreeJump = 0;
 static float envShotAt = -1.0f;
 static int   envExitWhenDone = 0;
 static unsigned envExitFrame = 0;  // DEMO_EXITFRAME: fruehestens nach n Frames beenden
+static int   envAnimDbg = 0;     // DEMO_ANIMDBG: Schrittweite der Shader-Zeit protokollieren
 // Diagnose der Transparenz-/Zeichenreihenfolge-Fehler (Nutzervermutung:
 // "Transparenz und Zeichenreihenfolge ... Z-Buffer problem").
 //   DEMO_TDW=0     Kronen+Blaetter schreiben NIE Tiefe. Ausserhalb der Satz-
@@ -2268,6 +2281,7 @@ int main(int argc, char **argv) {
   { const char *es = getenv("DEMO_SHOT"); if (es) envShotAt = (float)atof(es); }
   envExitWhenDone = getenv("DEMO_EXIT") ? 1 : 0;
   { const char *ef = getenv("DEMO_EXITFRAME"); if(ef) envExitFrame = (unsigned)atoi(ef); }
+  envAnimDbg = getenv("DEMO_ANIMDBG") ? 1 : 0;
   { const char *e = getenv("DEMO_TDW");     if(e) dbgTreeDepthWrite = atoi(e) ? 1 : 0; }
   { const char *e = getenv("DEMO_TDPASS");  if(e) dbgTreeDepthPass  = atoi(e) ? 1 : 0; }
   { const char *e = getenv("DEMO_TABC");    if(e) dbgTreeA2C        = atoi(e) ? 1 : 0; }
@@ -2443,6 +2457,16 @@ int main(int argc, char **argv) {
   // ---------- Hauptloop ----------
   double tPrev = now_sec();
   double loopT0 = tPrev;
+  animT0 = tPrev;
+  // Diagnose: Schrittweite der float32-Zeit bei absoluter Uhr und am
+  // Laufzeit-Nullpunkt. Die zweite Zahl ist die, die die Shader wirklich sehen.
+  {
+    double tab = tPrev;
+    printf("Anim-Zeit: absolute Uhr %.1f s -> float32-Schritt %.3f ms;"
+           " Laufzeit-Nullpunkt -> %.6f ms\n",
+           tab, (double)f32_step((float)tab) * 1000.0,
+           (double)f32_step(0.0f) * 1000.0);
+  }
   double fpsEMA = 60.0;
   int running = 1;
   int shotDone = 0;
@@ -2450,11 +2474,24 @@ int main(int argc, char **argv) {
 
   while (running) {
     double tNow = now_sec();
+    // Animations-Zeit aller Shader-Uniforms (Begruendung bei animT0).
+    float animT = envFreeze >= 0.0f ? envFreeze : (float)(tNow - animT0);
+    if(envAnimDbg && (frameNo % 30u) == 0u)
+      printf("ANIM genutzte Zeit t %.1f s -> float32-Schritt %.6f ms\n",
+             (double)animT, (double)f32_step(animT) * 1000.0);
+    if((double)f32_step(animT) * 1000.0 > 0.5){   // Waechter, genau einmal
+      static int aw = 0;
+      if(!aw++){ aw = 1;
+        printf("WARNUNG Animationszeit: float32-Schrittweite %.2f ms bei t=%.0f s"
+               " -> Wind-Animation quantisiert\n",
+               (double)f32_step(animT) * 1000.0, (double)animT);
+      }
+    }
     // Mit DEMO_FREEZE liegt die Birth-Zeit sonst in der echten Laufzeit, uTime
     // ist aber eingefroren -> vFade bleibt 0 und das Gras verschwindet in jedem
     // Freeze-Test. Ein Freeze soll die Fade-Animation abschalten, deshalb hier
     // eine Birth-Zeit weit in der Vergangenheit (Fade-in fertig, Fade-out fertig).
-    gWorldTime = envFreeze >= 0.0f ? -1e6f : (float)tNow;
+    gWorldTime = envFreeze >= 0.0f ? -1e6f : animT;
     double rawDt = tNow - tPrev;
     tPrev = tNow;
     // Erster Frame: rawDt ist nicht echt (tPrev wurde vor der Loop gesetzt).
@@ -3213,7 +3250,7 @@ int main(int argc, char **argv) {
       p_glDepthMask(GL_TRUE);
       p_glDisable(GL_BLEND);
       p_glEnable(GL_POLYGON_OFFSET_FILL); p_glPolygonOffset(1.5f, 2.0f);
-      float tSh = envFreeze >= 0.0f ? envFreeze : (float)tNow;
+      float tSh = animT;
       p_glUseProgram(progTMesh);
       p_glUniformMatrix4fv(locTMVP, 1, GL_FALSE, lightMVP);
       p_glUniform3f(locTCam, eye[0], eye[1], eye[2]);
@@ -3317,7 +3354,7 @@ int main(int argc, char **argv) {
       p_glUseProgram(progScene);
       p_glBindVertexArray(vaoTri);
       p_glUniform2f(locRes, (float)fboW, (float)fboH);
-      p_glUniform1f(locTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
+      p_glUniform1f(locTime, animT);
       p_glUniform3f(locCamPos, camPos[0], camPos[1], camPos[2]);
       p_glUniform3f(locCamTgt, camTgt[0], camTgt[1], camTgt[2]);
       p_glActiveTexture(GL_TEXTURE0);
@@ -3520,7 +3557,7 @@ int main(int argc, char **argv) {
       if(locTPhase >= 0) p_glUniform1f(locTPhase, envComp ? 1.0f : 0.0f);
       p_glUniformMatrix4fv(locTMVP, 1, GL_FALSE, mvp);
       p_glUniform3f(locTCam, camPos[0], camPos[1], camPos[2]);
-      p_glUniform1f(locTTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
+      p_glUniform1f(locTTime, animT);
       p_glUniform1f(locTMask, (float)dbgTreeMask);
       if(locTMeshF >= 0) p_glUniform1f(locTMeshF, 1.0f);
       if(locTBB >= 0) p_glUniform1f(locTBB, (float)treeBillboard0);
@@ -3551,7 +3588,7 @@ int main(int argc, char **argv) {
     p_glUseProgram(progGrass);
     p_glUniformMatrix4fv(locGMVP, 1, GL_FALSE, mvp);
     p_glUniform3f(locGCam, camPos[0], camPos[1], camPos[2]);
-    p_glUniform1f(locGTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
+    p_glUniform1f(locGTime, animT);
     p_glUniform1f(locGHeight, grassHeightScale);
     p_glUniform1f(locGMaxDist, grassMaxDist);
     p_glUniform1f(locGFade, grassFadeDur);
@@ -3619,7 +3656,7 @@ int main(int argc, char **argv) {
       p_glUseProgram(progReed);
       p_glUniformMatrix4fv(locRMVP, 1, GL_FALSE, mvp);
       p_glUniform3f(locRCam, camPos[0], camPos[1], camPos[2]);
-      p_glUniform1f(locRTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
+      p_glUniform1f(locRTime, animT);
       p_glUniform1f(locRReedH, reedH);
       p_glUniform1f(locRReedD, reedDens);
       p_glUniform1f(locRReedW, reedWide);
@@ -3678,7 +3715,7 @@ int main(int argc, char **argv) {
       p_glUniformMatrix4fv(locLMVP, 1, GL_FALSE, mvp);
       p_glUniform3f(locLCam, camPos[0], camPos[1], camPos[2]);
       if(locLLod >= 0) p_glUniform3f(locLLod, camPos[0], camPos[1], camPos[2]);
-      p_glUniform1f(locLTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
+      p_glUniform1f(locLTime, animT);
       p_glUniform1f(locLMask, (float)envLeafMask);
       if(locLAlb >= 0) p_glUniform1f(locLAlb, 0.0f);
       if(locLFade >= 0) p_glUniform1f(locLFade, treeFadeNew);
@@ -3751,7 +3788,7 @@ int main(int argc, char **argv) {
       p_glActiveTexture(GL_TEXTURE0);
       p_glUniform1f(locCMask, (float)envCrownMask);
       if(locCLFace >= 0) p_glUniform1f(locCLFace, 0.0f);
-      p_glUniform1f(locCTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
+      p_glUniform1f(locCTime, animT);
       if(locCFade >= 0) p_glUniform1f(locCFade, treeFadeNew);
       if(locCCards >= 0) p_glUniform1f(locCCards, (float)layCard);
       if(locCBB >= 0) p_glUniform1f(locCBB, (float)layBB);
@@ -4012,7 +4049,7 @@ int main(int argc, char **argv) {
         p_glUniformMatrix4fv(locLMVP, 1, GL_FALSE, mvp);
         p_glUniform3f(locLCam, camPos[0], camPos[1], camPos[2]);
         if(locLLod >= 0) p_glUniform3f(locLLod, camPos[0], camPos[1], camPos[2]);
-        p_glUniform1f(locLTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
+        p_glUniform1f(locLTime, animT);
         p_glUniform1f(locLMask, (float)envLeafMask);
         if(locLAlb >= 0) p_glUniform1f(locLAlb, 0.0f);
         if(locLFade >= 0) p_glUniform1f(locLFade, 1.0f);
@@ -4031,7 +4068,7 @@ int main(int argc, char **argv) {
         p_glActiveTexture(GL_TEXTURE0);
         p_glUniform1f(locCMask, (float)envCrownMask);
         if(locCLFace >= 0) p_glUniform1f(locCLFace, 0.0f);
-        p_glUniform1f(locCTime, envFreeze >= 0.0f ? envFreeze : (float)tNow);
+        p_glUniform1f(locCTime, animT);
         if(locCFade >= 0) p_glUniform1f(locCFade, 1.0f);
         if(locCCards >= 0) p_glUniform1f(locCCards, (float)layCard);
         if(locCBB >= 0) p_glUniform1f(locCBB, (float)layBB);

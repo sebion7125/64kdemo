@@ -52,6 +52,27 @@ check_no_glerror(){
   if grep -q "FAILED\|failed to compile\|Shader-Fehler\|Shaderfehler\|Shader-Binärfehler" "$OUT/$name.log"; then
     fail "$name: Shader-Kompilierungs-/Linkfehler"
   fi
+  if grep -q "WARNUNG Animationszeit" "$OUT/$name.log"; then
+    fail "$name: Animations-Zeit quantisiert (float32-Schrittweite > 0.5 ms)"
+  fi
+}
+
+check_anim_time(){   # die Zeit, die die Shader sehen, muss fein abstufbar sein
+  name=$1
+  line=$(grep -h "Anim-Zeit:" "$OUT/$name.log" | tail -1)
+  [ -n "$line" ] || { fail "$name: keine Anim-Zeit-Zeile (Nullpunkt fehlt?)"; return; }
+  # gemessene Werte der laufenden Frames (ANIM) — nicht nur der Startwert
+  worst=$(grep -h "ANIM genutzte Zeit" "$OUT/$name.log" |
+          sed 's/.*float32-Schritt //; s/ ms.*//' | sort -g | tail -1)
+  if [ -n "$worst" ] && awk -v v="$worst" 'BEGIN{ exit !(v > 0.001) }'; then
+    fail "$name: genutzte Animationszeit hat float32-Schrittweite ${worst} ms (Soll < 0.001)"
+  fi
+  [ -n "$worst" ] || fail "$name: keine ANIM-Zeilen (DEMO_ANIMDBG fehlt?)"
+  rel=$(printf '%s' "$line" | sed 's/.*Laufzeit-Nullpunkt -> //; s/[^0-9.].*//')
+  [ -n "$rel" ] || { fail "$name: Anim-Zeit-Zeile unlesbar: $line"; return; }
+  if awk -v v="$rel" 'BEGIN{ exit !(v > 0.001) }'; then
+    fail "$name: float32-Schrittweite der Animationszeit ${rel} ms (Soll < 0.001)"
+  fi
 }
 
 log "== 64kDemo Selbsttest  (bin=$BIN, ${W}x$H, Software-GL in der VM) =="
@@ -67,8 +88,8 @@ log "== 64kDemo Selbsttest  (bin=$BIN, ${W}x$H, Software-GL in der VM) =="
 # nicht bei einer festen Frame-Nummer. Mit der Baukante von 450 m braucht der
 # Upload in der VM mehrere Frames (2026-10-10: DEMO_SHOTFRAME=8 erwischte den
 # halbhohen Upload -> 194 364 unterschiedliche Pixel zwischen zwei Laeufen).
-run standard 150 "DEMO_CAM=5 16 -0.15 0.7" "DEMO_EXIT=1" "DEMO_EXITFRAME=12"
-check_tree_counts standard; check_no_glerror standard
+run standard 150 "DEMO_CAM=5 16 -0.15 0.7" "DEMO_EXIT=1" "DEMO_EXITFRAME=12" "DEMO_ANIMDBG=1"
+check_tree_counts standard; check_no_glerror standard; check_anim_time standard
 
 # 2) Zweiter Lauf derselben Konfiguration: Bild muss bitgleich sein
 #    (Laufzeit-abhaengige Effekte sind mit DEMO_FREEZE=1 abgeschaltet)
