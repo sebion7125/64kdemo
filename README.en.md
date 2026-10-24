@@ -10,6 +10,23 @@ goal — the interesting part is the procedural generation.
 The current state is a **work in progress**, not a release: view distances,
 LOD transitions and performance are still being worked on.
 
+## Pictures
+
+![Wood edge: trees with leaves, grass and reeds by a pond](docs/bilder/waldrand.jpg)
+
+Shot at eye height, 2026-10-24. In the foreground the trees are drawn with
+individual leaves; from the middle of the frame onward the same woods use cluster
+quads and crown hulls — the switch is keyed to how large a leaf would appear on
+screen, not to fixed distances in metres. HUD: 3400 trees, 869,573 canopy quads,
+2,603,439 grass blades, 3840x2030 window at half internal resolution, 4x MSAA,
+31 fps on the host machine.
+
+![Long view: water, reeds and forest fading into fog](docs/bilder/fernsicht.jpg)
+
+The same world from above: shallow water with reed belts, forest out to the fog
+limit — beyond that nothing is generated at all. HUD: 3400 trees,
+869,983 canopy quads, 36 fps.
+
 ## What is in here
 
 * **Terrain**: procedural height field, raymarched in the colour pass

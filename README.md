@@ -10,6 +10,23 @@ mehr, interessant ist die prozedurale Erzeugung.
 Der Stand ist **Arbeitsstand, keine Veröffentlichung im engeren Sinn**: Es wird
 weiter an Sichtweiten, Übergängen und Performance gearbeitet.
 
+## Bilder
+
+![Waldrand: Bäume mit Blättern, Gras und Schilf am Teich](docs/bilder/waldrand.jpg)
+
+Aufnahme aus Augenhöhe, 2026-10-24. Vorne die Bäume mit einzeln gezeichneten
+Blättern, in der Bildmitte und dahinter dieselbe Gegend dann in
+Büschel-Quadraten und Kronenhüllen — umgeschaltet wird nach der Größe, die ein Blatt auf dem Bildschirm
+hätte, nicht nach festen Metern. HUD: 3400 Bäume, 869 573 Kronen-Quadrate,
+2 603 439 Grashalme, Fenster 3840x2030 bei halber interner Auflösung, 4x MSAA,
+31 fps auf dem Wirtsrechner.
+
+![Fernsicht: Gewässer, Schilf und Wald bis in den Dunst](docs/bilder/fernsicht.jpg)
+
+Aus der Höhe über dieselbe Welt: flaches Gewässer mit Schilfzonen, Wald bis an
+die Dunstgrenze — jenseits davon wird nichts mehr gebaut. HUD: 3400 Bäume,
+869 983 Kronen-Quadrate, 36 fps.
+
 ## Was drin ist
 
 * **Terrain**: Höhenfeld prozedural, im Farbpass geraymarcht (Höhensprünge statt
