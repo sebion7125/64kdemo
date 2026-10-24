@@ -59,3 +59,19 @@ Der gesamte Stand ist mit einem lokalen Sprachmodell über den Coding-Agenten
 Entstehung des Codes dokumentierbar. `STATUS.md` ist das dazugehörige
 Arbeitsprotokoll des Projekts, `AGENTS.md` sind die Regeln, nach denen der Agent
 hier arbeitet.
+
+## Lizenz: warum MIT passt
+
+* **EZ-Tree** ist MIT. Eine MIT-Lizenz ist mit MIT beliebig kombinierbar, wenn
+  der Urhebervermerk mitgegeben wird — das tut `LICENSE` (upstream-Copyright +
+  Verweis auf diese Datei).
+* **`third_party/include/`** (Khronos: `SPDX-License-Identifier: MIT`; X11:
+  MIT-artige X-Lizenz) verlangt ebenfalls nur, dass die Vermerke in den Dateien
+  bleiben. Die Header sind unverändert, also erfüllt.
+* **Copyleft ist nicht im Spiel:** es wird kein Code unter GPL oder ähnlichem
+  benutzt. Wichtig falls sich das mal ändert: **Blender „Sapling Tree Gen“ steht
+  unter GPL** — daraus ist bisher nichts übernommen (nur recherchiert). Würden
+  wir Code daraus übersetzen, wäre eine reine MIT-Lizenzierung des Ganzen nicht
+  mehr haltbar.
+* **Zitierte Passagen** (GPU Gems, Vorträge) bleiben das Copyright ihrer
+  Autoren; sie sind hier nur bezeichnet, nicht abgedruckt.
