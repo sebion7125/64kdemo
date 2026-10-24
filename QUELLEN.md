@@ -52,7 +52,10 @@ Entscheidungen, nicht Zeilen.
 ## Werkzeug und Entstehung
 
 Der gesamte Stand ist mit einem lokalen Sprachmodell über den Coding-Agenten
-**pi** (<https://github.com/earendil-works/pi>) entstanden. Die Dateien
+**pi** (<https://github.com/earendil-works/pi>, <https://pi.dev>) entstanden; die
+Hintergrundgeschichte mit den Modellen und Sitzungen steht in `ENTSTEHUNG.md`.
+Die verwendete Erweiterung ist selbst ein Projekt:
+**pi-protokoll** (<https://github.com/sebion7125/pi-protokoll>). Die Dateien
 `protocol*.txt` und `protocoll.txt` sind Exporte der pi-Erweiterung `protokoll`
 (`~/.pi/agent/extensions/protokoll`): Sie schreibt zu jedem Zug ein Protokoll
 (Ergebnis, Entscheidungen, Dateien, offene Punkte) und hält damit die

@@ -10,6 +10,11 @@ goal — the interesting part is the procedural generation.
 The current state is a **work in progress**, not a release: view distances,
 LOD transitions and performance are still being worked on.
 
+The code was written together with a local language model. Which model, in two
+phases across how many sessions, and why the `protocol*.txt` files are part of
+this repository: [ENTSTEHUNG.en.md](ENTSTEHUNG.en.md) (German:
+[ENTSTEHUNG.md](ENTSTEHUNG.md)).
+
 ## Pictures
 
 ![Wood edge: trees with leaves, grass and reeds by a pond](docs/bilder/waldrand.jpg)
@@ -121,6 +126,7 @@ src/reed_cpu.c    reeds (shore zones)
 src/terrain_cpu.c height field, fog
 tools/            shader generation, GL-free host tests, selftest.sh
 STATUS.md         work log: every round with its measurements and mistakes (German)
+ENTSTEHUNG.en.md  background: which models, two phases, ten sessions and then one
 protocol*.txt     agent session protocols (how this came to be, see QUELLEN.md)
 ```
 

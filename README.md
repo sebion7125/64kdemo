@@ -10,6 +10,10 @@ mehr, interessant ist die prozedurale Erzeugung.
 Der Stand ist **Arbeitsstand, keine Veröffentlichung im engeren Sinn**: Es wird
 weiter an Sichtweiten, Übergängen und Performance gearbeitet.
 
+Der Code ist mit einem lokalen Sprachmodell geschrieben. Welches Modell, in
+zwei Phasen über wie viele Sitzungen, und warum die `protocol*.txt` im Repo
+liegen: [ENTSTEHUNG.md](ENTSTEHUNG.md) (englisch: [ENTSTEHUNG.en.md](ENTSTEHUNG.en.md)).
+
 ## Bilder
 
 ![Waldrand: Bäume mit Blättern, Gras und Schilf am Teich](docs/bilder/waldrand.jpg)
@@ -119,6 +123,7 @@ src/reed_cpu.c    Schilf (Uferzonen)
 src/terrain_cpu.c Höhenfeld, Dunst
 tools/            Shader-Erzeugung, GL-freie Wirtstests, selftest.sh
 STATUS.md         Arbeitsprotokoll: jede Runde mit Messung und Fehlern
+ENTSTEHUNG.md     Hintergrund: welche Modelle, zwei Phasen, zehn Sitzungen und eine
 protocol*.txt     Protokolle der Agent-Sitzungen (Entstehung, siehe QUELLEN.md)
 ```
 
